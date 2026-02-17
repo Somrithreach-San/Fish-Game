@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <style>
+      * {
+        padding: 0;
+        margin: 0;
+      }
+      body {
+        background-color: #000000; /* Black background to prevent white flash */
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      #unity-container {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        left: 0;
+        top: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #unity-canvas {
+        width: 100%;
+        height: 100%;
+        background: #000000;
+      }
+      #loading-cover {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #000000; /* Ensure loading screen background is black */
+        z-index: 99;
+      }
+      #unity-loading-bar {
+        width: 150px;
+        height: 10px;
+        background-color: #333;
+        border-radius: 5px;
+        overflow: hidden;
+        position: relative;
+      }
+      #unity-progress-bar-full {
+        width: 0%;
+        height: 100%;
+        background-color: #ffffff; /* White loading bar for contrast */
+        transition: width 0.1s;
+      }
+      .spinner {
+        border: 4px solid rgba(255, 255, 255, 0.1);
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border-left-color: #ffffff;
+        animation: spin 1s ease infinite;
+        margin-bottom: 20px;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      #loading-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      #rotate-warning {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #000000;
+        z-index: 9999;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      #rotate-warning img {
+        width: 100px;
+      }
+
+      @media screen and (orientation: portrait) {
+        #rotate-warning {
+          display: flex;
+        }
+        #unity-container {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="rotate-warning">
+      <img src="rotate_phone.gif" alt="Rotate Phone">
+    </div>
+    <div id="unity-container">
+      <canvas id="unity-canvas" tabindex="-1"></canvas>
+      <div id="loading-cover">
+        <div id="loading-content">
+            <div class="spinner"></div>
+            <div id="unity-loading-bar">
+                <div id="unity-progress-bar-full"></div>
+            </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingCover = document.querySelector("#loading-cover");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+
+      var buildUrl = "Build";
+      var loaderUrl = "Build/{{{ LOADER_FILENAME }}}";
+      var config = {
+        dataUrl: "Build/{{{ DATA_FILENAME }}}",
+        frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
+        codeUrl: "Build/{{{ CODE_FILENAME }}}",
+#if MEMORY_FILENAME
+        memoryUrl: "Build/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: "Build/{{{ SYMBOLS_FILENAME }}}",
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "{{{ COMPANY_NAME }}}",
+        productName: "{{{ PRODUCT_NAME }}}",
+        productVersion: "{{{ PRODUCT_VERSION }}}",
+      };
+
+      // Mobile device style: fill the whole browser client area with the game canvas:
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+      
+      // Fix for mobile responsiveness
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        // Mobile device style: fill the whole browser client area with the game canvas:
+        container.className = "unity-mobile";
+      }
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+          loadingCover.style.display = "none";
+          window.gameInstance = unityInstance; // Expose for global access
+        }).catch((message) => {
+          alert(message);
+        });
+      };
+      
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>
