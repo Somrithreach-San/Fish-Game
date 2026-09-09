@@ -34,7 +34,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -10, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 120, y: 120}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &7244902403929463858
@@ -238,14 +238,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.15}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -1508448800962385536, guid: fa9c6822d8c703d4f877114187cd0a0c,
+  m_Sprite: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
     type: 3}
   m_Type: 0
   m_PreserveAspect: 0
@@ -268,6 +268,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b26997170d0f6f4a99e074bd072d896, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MobileBoostButton
+  buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe, type: 3}
 --- !u!1 &8876976642533524754
 GameObject:
   m_ObjectHideFlags: 0
@@ -328,14 +329,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.15}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -1508448800962385536, guid: fa9c6822d8c703d4f877114187cd0a0c,
+  m_Sprite: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
     type: 3}
   m_Type: 0
   m_PreserveAspect: 0
@@ -362,6 +363,7 @@ MonoBehaviour:
   hideOnDesktop: 1
   background: {fileID: 3157200328709839517}
   handle: {fileID: 9139689761123665219}
+  buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe, type: 3}
 --- !u!1 &9095276176399262293
 GameObject:
   m_ObjectHideFlags: 0
@@ -427,7 +429,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -1508448800962385536, guid: fa9c6822d8c703d4f877114187cd0a0c,
+  m_Sprite: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
     type: 3}
   m_Type: 0
   m_PreserveAspect: 0

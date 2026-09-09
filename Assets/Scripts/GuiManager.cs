@@ -298,7 +298,47 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
     
     [Header("Custom Assets (Performance Boost)")]
     [SerializeField] public Font customFont; // For lmns1
-    [SerializeField] public Sprite buttonShape; // For the circle background
+    [SerializeField] public Sprite buttonShape; // For the bubble background
+
+    private Sprite GetBubbleSprite()
+    {
+        if (buttonShape != null) return buttonShape;
+        Sprite[] sprites = Resources.LoadAll<Sprite>("Bubble_Button");
+        if (sprites != null && sprites.Length > 0) return sprites[0];
+        Sprite single = Resources.Load<Sprite>("Bubble_Button");
+        if (single != null) return single;
+        Sprite[] allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
+        foreach (Sprite s in allSprites)
+        {
+            if (s.name.Contains("Bubble_Button")) return s;
+        }
+        return Resources.Load<Sprite>("Knob");
+    }
+
+    private Sprite GetPauseIconSprite()
+    {
+        if (pauseSprite != null) return pauseSprite;
+        if (_cachedPauseIcon != null) return _cachedPauseIcon;
+        _cachedPauseIcon = Resources.Load<Sprite>("pause_icon");
+        if (_cachedPauseIcon == null)
+        {
+            Sprite[] sprites = Resources.LoadAll<Sprite>("pause_icon");
+            if (sprites != null && sprites.Length > 0) _cachedPauseIcon = sprites[0];
+        }
+        if (_cachedPauseIcon == null)
+        {
+            Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
+            foreach (Sprite s in all)
+            {
+                if (s != null && s.name.ToLower().Contains("pause") && !s.name.ToLower().Contains("button"))
+                {
+                    _cachedPauseIcon = s;
+                    break;
+                }
+            }
+        }
+        return _cachedPauseIcon;
+    }
 
     private void SetupTopRightControls()
     {
@@ -310,52 +350,118 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         if (mainCanvas == null) return; 
 
         // 2. Handle Pause Button
-        Sprite existingPauseSprite = null;
         if (pauseBtn != null)
         {
-            Image img = pauseBtn.GetComponent<Image>();
-            if (img != null) existingPauseSprite = img.sprite;
-            
-            // Destroy existing button to replace with our clean programmatic one
             Destroy(pauseBtn);
+            pauseBtn = null;
         }
         
-        // Use field if assigned (Fastest), otherwise fallback to Resources (Slower)
-        Sprite finalPauseSprite = pauseSprite;
-        if (finalPauseSprite == null)
-        {
-            if (_cachedPauseIcon == null) _cachedPauseIcon = Resources.Load<Sprite>("pause_icon");
-            finalPauseSprite = _cachedPauseIcon;
-        }
-        if (finalPauseSprite == null) finalPauseSprite = existingPauseSprite;
-        
-        // Create Pause Button (Right-most)
-        // User request: Same size as Fullscreen (40x40)
-        // Adjusted padding to match header (-50 from right), aligned Y (-30)
-        pauseBtn = CreateControlButton("PauseButton", finalPauseSprite, new Vector2(-50, -30), new Vector2(40, 40), () => {
+        // Create Pause Button matching the X close button (bubble style, 95x95, anchored top-right at -60, -60)
+        pauseBtn = CreatePauseBubbleButton(mainCanvas, () => {
              PlayButtonSound();
              GameManager.instance.PlayPause();
         });
         
         if (pauseBtn != null)
         {
-             pauseBtn.transform.SetParent(mainCanvas.transform, false);
              pauseBtn.transform.SetAsLastSibling();
         }
+    }
 
-        // 3. Handle Fullscreen Button (Left of Pause Button)
-        /* DISABLED PER USER REQUEST
-        if (fullscreenSprite == null) fullscreenSprite = Resources.Load<Sprite>("fullscreen_icon");
-        
-        // Position: -50 (Pause Pos) - 30 (Pause Size) - 10 (Gap) = -90
-        // Y aligned with Pause (-30)
-        fullscreenBtn = CreateControlButton("FullscreenButton", fullscreenSprite, new Vector2(-90, -30), new Vector2(40, 40), () => GoFullScreen());
-        if (fullscreenBtn != null)
+    private GameObject CreatePauseBubbleButton(Canvas parentCanvas, UnityEngine.Events.UnityAction action)
+    {
+        GameObject btnObj = new GameObject("PauseButton");
+        btnObj.transform.SetParent(parentCanvas.transform, false);
+
+        // RectTransform: Compact bubble button for in-game HUD (size 48x48, anchored top-right at -35, -25)
+        RectTransform rt = btnObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1f, 1f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(1f, 1f);
+        rt.sizeDelta = new Vector2(48f, 48f);
+        rt.anchoredPosition = new Vector2(-35f, -25f);
+        rt.localScale = Vector3.one;
+
+        // Bubble Background Image
+        Image bgImg = btnObj.AddComponent<Image>();
+        Sprite bubble = GetBubbleSprite();
+        if (bubble != null)
         {
-             fullscreenBtn.transform.SetParent(mainCanvas.transform, false);
-             fullscreenBtn.transform.SetAsLastSibling();
+            bgImg.sprite = bubble;
+            bgImg.type = Image.Type.Simple;
         }
-        */
+        bgImg.color = Color.white;
+        bgImg.raycastTarget = true;
+
+        // Button component
+        Button btn = btnObj.AddComponent<Button>();
+        btn.onClick.AddListener(() => PlayButtonSound());
+        btn.onClick.AddListener(action);
+
+        // Hover Effect
+        if (btnObj.GetComponent<ButtonHoverEffect>() == null)
+            btnObj.AddComponent<ButtonHoverEffect>();
+
+        // Layout Element (Ignore Layout)
+        LayoutElement le = btnObj.AddComponent<LayoutElement>();
+        le.ignoreLayout = true;
+
+        // Canvas & Raycaster for Sorting & Touch Reliability
+        Canvas c = btnObj.AddComponent<Canvas>();
+        c.overrideSorting = true;
+        c.sortingOrder = 2001; // Above normal canvas elements
+        btnObj.AddComponent<GraphicRaycaster>();
+
+        // Hit Area padding for easier touch interaction
+        GameObject hitArea = new GameObject("HitArea");
+        hitArea.transform.SetParent(btnObj.transform, false);
+        RectTransform rtHit = hitArea.AddComponent<RectTransform>();
+        rtHit.anchorMin = new Vector2(0.5f, 0.5f);
+        rtHit.anchorMax = new Vector2(0.5f, 0.5f);
+        rtHit.pivot = new Vector2(0.5f, 0.5f);
+        rtHit.sizeDelta = new Vector2(65f, 65f);
+        Image imgHit = hitArea.AddComponent<Image>();
+        imgHit.color = new Color(0, 0, 0, 0); // Transparent
+        imgHit.raycastTarget = true;
+        Button btnHit = hitArea.AddComponent<Button>();
+        btnHit.onClick.AddListener(() => btn.onClick.Invoke());
+
+        // Child: Pause Icon Centered inside bubble
+        GameObject iconObj = new GameObject("PauseIcon");
+        iconObj.transform.SetParent(btnObj.transform, false);
+
+        RectTransform rtIcon = iconObj.AddComponent<RectTransform>();
+        rtIcon.anchorMin = new Vector2(0.5f, 0.5f);
+        rtIcon.anchorMax = new Vector2(0.5f, 0.5f);
+        rtIcon.pivot = new Vector2(0.5f, 0.5f);
+        rtIcon.anchoredPosition = Vector2.zero;
+        rtIcon.sizeDelta = new Vector2(16f, 20f); // Cleanly proportioned inside the 48x48 bubble
+
+        Sprite pauseIco = GetPauseIconSprite();
+        if (pauseIco != null)
+        {
+            Image imgIcon = iconObj.AddComponent<Image>();
+            imgIcon.sprite = pauseIco;
+            imgIcon.color = Color.white;
+            imgIcon.preserveAspect = true;
+            imgIcon.raycastTarget = false;
+        }
+        else
+        {
+            Text t = iconObj.AddComponent<Text>();
+            Font standardFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (standardFont == null) standardFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            if (standardFont == null) standardFont = Font.CreateDynamicFontFromOSFont("Arial", 20);
+            if (standardFont != null) t.font = standardFont;
+            t.text = "❚❚";
+            t.fontSize = 16;
+            t.fontStyle = FontStyle.Bold;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.color = Color.white;
+            t.raycastTarget = false;
+        }
+
+        return btnObj;
     }
 
     private GameObject CreateControlButton(string name, Sprite sprite, Vector2 anchoredPos, Vector2 size, UnityEngine.Events.UnityAction action)
@@ -789,6 +895,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
     public void PlayButtonSound()
     {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
         if (GameManager.instance != null && GameManager.instance.ButtonSoundEffect != null)
         {
             if (uiAudioSource == null) 
@@ -918,13 +1025,12 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         // Ensure scale doesn't get too crazy (Clamp between 0.5x and 2.0x)
         scaleFactor = Mathf.Clamp(scaleFactor, 0.5f, 2.0f);
 
-        // 2. Define Style (Match Main Menu but Scaled)
-        // Reduced base size from 180 to 150 ("tiny bit smaller")
+        // 2. Define Style (Match Main Menu Bubble Button)
         float baseSize = 150f;
         Vector2 buttonSize = new Vector2(baseSize * scaleFactor, baseSize * scaleFactor);
         
-        // Main Menu Style: White with 50% opacity
-        Color buttonColor = new Color(1f, 1f, 1f, 0.5f); 
+        // Full white to show translucent iridescent bubble shader
+        Color buttonColor = Color.white; 
 
         // Text Size Calculation: Increased from 50 to 60 per user request
         int fontSize = Mathf.RoundToInt(60f * scaleFactor);
@@ -952,23 +1058,22 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
     {
         if (btnObj == null) return;
         
-        // 1. Image Style
+        // 1. Image Style: Use Bubble_Button with full white for iridescent translucent look
         Image img = btnObj.GetComponent<Image>();
         if (img != null)
         {
-            // Use assigned shape if available (Performance Boost)
-            if (buttonShape != null)
+            Sprite bubble = GetBubbleSprite();
+            if (bubble != null)
             {
-                 img.sprite = buttonShape;
-                 img.name = "CustomShape";
+                img.sprite = bubble;
+                img.name = "Bubble_Button";
             }
-            // Otherwise generate procedural circle
             else if (img.sprite == null || img.sprite.name != "ProceduralCircle")
             {
-                 img.sprite = CreateCircleSprite(256, 2);
-                 img.sprite.name = "ProceduralCircle";
+                img.sprite = CreateCircleSprite(256, 2);
+                img.sprite.name = "ProceduralCircle";
             }
-            img.color = color;
+            img.color = Color.white;
             img.type = Image.Type.Simple;
             img.raycastTarget = true; // Ensure clickable!
         }
@@ -983,12 +1088,12 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             rt.sizeDelta = size;
         }
         
-        // 3. Text Style (Black, Bold, No Best Fit - Match Main Menu)
+        // 3. Text Style (White, Bold, No Best Fit - Match Main Menu)
         Text txt = btnObj.GetComponentInChildren<Text>();
         if (txt != null)
         {
             txt.text = label;
-            txt.color = Color.black;
+            txt.color = Color.white;
             txt.resizeTextForBestFit = false; // Main Menu uses fixed size
             txt.fontSize = fontSize;
             txt.fontStyle = FontStyle.Bold; // Main Menu is Bold
@@ -1039,7 +1144,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         if (tmp != null)
         {
             tmp.text = label;
-            tmp.color = Color.black;
+            tmp.color = Color.white;
             tmp.enableAutoSizing = false;
             tmp.fontSize = fontSize;
             tmp.fontStyle = FontStyles.Bold;

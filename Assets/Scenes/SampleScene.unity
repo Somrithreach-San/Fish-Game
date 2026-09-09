@@ -1086,9 +1086,9 @@ MonoBehaviour:
     type: 3}
   poolSize: 20
   fullscreenSprite: {fileID: 21300000, guid: d5eecfa0678ba6442a01c8c474bb0466, type: 3}
-  pauseSprite: {fileID: 21300000, guid: 4221cbb7e1437c94188affba03b4ce31, type: 3}
-  customFont: {fileID: 0}
-  buttonShape: {fileID: 0}
+  pauseSprite: {fileID: 21300000, guid: 1efe4aa24a33d0e4181b793c7107a7df, type: 3}
+  customFont: {fileID: 12800000, guid: 5ce6b23634ffd4b488437333b3deb3ca, type: 3}
+  buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe, type: 3}
 --- !u!114 &549443012
 MonoBehaviour:
   m_ObjectHideFlags: 0

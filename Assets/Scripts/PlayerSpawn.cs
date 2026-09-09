@@ -96,6 +96,7 @@ public class PlayerSpawn : MonoBehaviour
 
     private void PlaySpawnSound(GameObject p)
     {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
         if (spawnSound == null || p == null) return;
         AudioSource src = p.GetComponent<AudioSource>();
         if (src == null)
@@ -108,6 +109,7 @@ public class PlayerSpawn : MonoBehaviour
 
     private void PlayBubble(GameObject p)
     {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
         if (bubbleClips == null || bubbleClips.Length == 0 || p == null) return;
         AudioSource src = p.GetComponent<AudioSource>();
         if (src == null)

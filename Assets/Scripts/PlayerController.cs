@@ -139,12 +139,21 @@ public class PlayerController : MonoBehaviour
             Cursor.lockState = CursorLockMode.Confined;
         }
         // If GameManager isn't ready yet, GameManager.Start will handle it or we update in Start
+
+        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
     }
 
     void OnDisable()
     {
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+    }
+
+    private void HandleSfxSettingChanged(bool enabled)
+    {
+        if (audioSource != null) audioSource.mute = !enabled;
     }
 
     // Start is called before the first frame update
@@ -237,6 +246,7 @@ public class PlayerController : MonoBehaviour
 
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
 
         // Ensure AudioListener is on the player or camera
         audioListener = GetComponent<AudioListener>();

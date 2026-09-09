@@ -73,6 +73,7 @@ public class Hazard : MonoBehaviour
         {
             var a = audioSources[i];
             if (a == null) continue;
+            a.mute = !AudioSettingsManager.IsSfxEnabled;
             a.volume = 0.5f;
             a.spatialBlend = 0f;
             a.playOnAwake = false;
@@ -446,6 +447,7 @@ public class Hazard : MonoBehaviour
 
     private void PlayMoveSound()
     {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
         if (GameManager.instance != null && GameManager.Paused) return;
         if (audioSource != null && moveSound != null)
         {
@@ -458,6 +460,7 @@ public class Hazard : MonoBehaviour
     
     private IEnumerator PlayDropSfxBurst()
     {
+        if (!AudioSettingsManager.IsSfxEnabled) yield break;
         if (audioSource == null || moveSound == null) yield break;
         if (GameManager.instance != null && GameManager.Paused) yield break;
         audioSource.loop = false;
@@ -465,6 +468,7 @@ public class Hazard : MonoBehaviour
         audioSource.Stop();
         audioSource.PlayOneShot(moveSound);
         yield return new WaitForSeconds(0.15f);
+        if (!AudioSettingsManager.IsSfxEnabled) yield break;
         if (GameManager.instance != null && GameManager.Paused) yield break;
         audioSource.PlayOneShot(moveSound);
     }

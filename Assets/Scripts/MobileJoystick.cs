@@ -14,9 +14,21 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
     public RectTransform background;
     public RectTransform handle;
 
+    [Header("Visuals")]
+    [SerializeField] public Sprite buttonShape;
+
     public Vector2 InputDirection { get; private set; }
 
-    // Removed unused cached members
+    private Sprite GetBubbleSprite()
+    {
+        if (buttonShape != null) return buttonShape;
+        Sprite[] allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
+        foreach (Sprite s in allSprites)
+        {
+            if (s.name.Contains("Bubble_Button")) return s;
+        }
+        return null;
+    }
 
     private void Awake()
     {
@@ -24,9 +36,31 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         
         if (background == null) background = GetComponent<RectTransform>();
         if (handle == null && transform.childCount > 0) handle = transform.GetChild(0).GetComponent<RectTransform>();
-        
-        // No need to cache parent Canvas or initial position
 
+        // Apply Glass Bubble Styling
+        Sprite bubble = GetBubbleSprite();
+        if (bubble != null)
+        {
+            if (background != null)
+            {
+                Image bgImg = background.GetComponent<Image>();
+                if (bgImg != null)
+                {
+                    bgImg.sprite = bubble;
+                    bgImg.color = Color.white;
+                }
+            }
+            if (handle != null)
+            {
+                Image handleImg = handle.GetComponent<Image>();
+                if (handleImg != null)
+                {
+                    handleImg.sprite = bubble;
+                    handleImg.color = Color.white;
+                }
+            }
+        }
+        
         // Determine if we should show or hide
         bool shouldShow = false;
 

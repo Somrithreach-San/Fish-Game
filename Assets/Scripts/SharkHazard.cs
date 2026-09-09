@@ -60,11 +60,13 @@ public class SharkHazard : MonoBehaviour
     {
         // Listen for Pause
         EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
     }
 
     private void OnDestroy()
     {
         EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
         
         // Ensure shared canvas is hidden when shark is destroyed
         // This handles cases where shark is destroyed during warning phase (e.g. game over/restart)
@@ -72,6 +74,12 @@ public class SharkHazard : MonoBehaviour
         {
             _sharedCanvasObj.SetActive(false);
         }
+    }
+
+    private void HandleSfxSettingChanged(bool enabled)
+    {
+        if (audioSource != null) audioSource.mute = !enabled;
+        if (swimSource != null) swimSource.mute = !enabled;
     }
     
     private void OnDisable()
@@ -126,6 +134,7 @@ public class SharkHazard : MonoBehaviour
         // audioSource.minDistance = 5.0f;  // Irrelevant for 2D
         // audioSource.maxDistance = 25.0f; // Irrelevant for 2D
         audioSource.rolloffMode = AudioRolloffMode.Linear;
+        audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
 
         // Setup Swim Source
         swimSource = gameObject.AddComponent<AudioSource>();
@@ -136,6 +145,7 @@ public class SharkHazard : MonoBehaviour
         swimSource.loop = true;
         swimSource.playOnAwake = false;
         swimSource.volume = 0.9f;
+        swimSource.mute = !AudioSettingsManager.IsSfxEnabled;
         
         // Setup Eat Particles
         // Optimization: Only create if null. The heavy allocation is here.

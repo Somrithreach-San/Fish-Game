@@ -94,6 +94,8 @@ public class GameManager : MonoBehaviour
 
     private AudioSource ambientSource;
     private AudioSource sfxSource;
+    private float defaultBgmVolume = 1f;
+    private float defaultAmbientVolume = 1f;
 
 
     [Range(0f, 10f)]
@@ -165,8 +167,8 @@ public class GameManager : MonoBehaviour
 
         // Play level up sound when player levels up (if assigned)
         EventManager.StartListening<int>("onLevelUp", (lvl) => {
-            if (audioSource != null && levelUpClip != null)
-                audioSource.PlayOneShot(levelUpClip);
+            if (AudioSettingsManager.IsSfxEnabled && sfxSource != null && levelUpClip != null)
+                sfxSource.PlayOneShot(levelUpClip);
         });
 
         EventManager.Trigger("GameStart");
@@ -174,14 +176,25 @@ public class GameManager : MonoBehaviour
         // FIX: Ensure Audio settings are correct for background music
         if (audioSource != null)
         {
+            defaultBgmVolume = audioSource.volume > 0f ? audioSource.volume : 1f;
             audioSource.loop = true;
-            audioSource.playOnAwake = true; // Try to play immediately (Autoplay policy permitting)
-            if (!audioSource.isPlaying) audioSource.Play();
+            audioSource.playOnAwake = true;
+            audioSource.mute = !AudioSettingsManager.IsMusicEnabled;
+            audioSource.volume = AudioSettingsManager.IsMusicEnabled ? defaultBgmVolume : 0f;
+            if (AudioSettingsManager.IsMusicEnabled)
+            {
+                if (!audioSource.isPlaying) audioSource.Play();
+            }
+            else
+            {
+                audioSource.Pause();
+            }
         }
 
         // Setup SFX Source
         sfxSource = gameObject.AddComponent<AudioSource>();
         sfxSource.playOnAwake = false;
+        sfxSource.mute = !AudioSettingsManager.IsSfxEnabled;
 
         // Setup Ambient Source
         if (waterLoopClip != null)
@@ -189,15 +202,28 @@ public class GameManager : MonoBehaviour
             ambientSource = gameObject.AddComponent<AudioSource>();
             ambientSource.clip = waterLoopClip;
             ambientSource.loop = true;
-            ambientSource.playOnAwake = true; // Try to play immediately
-            if (!ambientSource.isPlaying) ambientSource.Play();
+            ambientSource.playOnAwake = true;
+            defaultAmbientVolume = ambientSource.volume > 0f ? ambientSource.volume : 1f;
+            ambientSource.mute = !AudioSettingsManager.IsMusicEnabled;
+            ambientSource.volume = AudioSettingsManager.IsMusicEnabled ? defaultAmbientVolume : 0f;
+            if (AudioSettingsManager.IsMusicEnabled)
+            {
+                if (!ambientSource.isPlaying) ambientSource.Play();
+            }
+            else
+            {
+                ambientSource.Pause();
+            }
         }
 
         EventManager.StartListening("playerDeath", PlayerDeathSequence);
         
-        // FORCE AUDIO CHECK ON START (Mobile/Web)
+        // Audio Settings Check On Start
         AudioListener.pause = false;
-        AudioListener.volume = 1f;
+        AudioListener.volume = AudioSettingsManager.MasterVolume;
+
+        AudioSettingsManager.OnMusicSettingChanged += HandleMusicSettingChanged;
+        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
 
         // FORCE MOUSE SIMULATION FOR TOUCH (Fixes UI buttons on Mobile)
         Input.simulateMouseWithTouches = true;
@@ -224,7 +250,7 @@ public class GameManager : MonoBehaviour
                 if (Input.touchCount > 0 || Input.GetMouseButtonDown(0) || Input.anyKeyDown) inputDetected = true;
             } catch { }
 
-            if (inputDetected)
+            if (inputDetected && AudioSettingsManager.IsMusicEnabled)
             {
                 if (audioSource != null && !audioSource.isPlaying) audioSource.Play();
                 if (ambientSource != null && !ambientSource.isPlaying) ambientSource.Play();
@@ -435,6 +461,35 @@ public class GameManager : MonoBehaviour
             Vcam.m_Lens.OrthographicSize = size;
             yield return null;
         }
+    }
+
+    private void HandleMusicSettingChanged(bool enabled)
+    {
+        if (audioSource != null)
+        {
+            audioSource.mute = !enabled;
+            audioSource.volume = enabled ? defaultBgmVolume : 0f;
+            if (!enabled) audioSource.Pause();
+            else if (!audioSource.isPlaying) audioSource.Play();
+        }
+        if (ambientSource != null)
+        {
+            ambientSource.mute = !enabled;
+            ambientSource.volume = enabled ? defaultAmbientVolume : 0f;
+            if (!enabled) ambientSource.Pause();
+            else if (!ambientSource.isPlaying) ambientSource.Play();
+        }
+    }
+
+    private void HandleSfxSettingChanged(bool enabled)
+    {
+        if (sfxSource != null) sfxSource.mute = !enabled;
+    }
+
+    private void OnDestroy()
+    {
+        AudioSettingsManager.OnMusicSettingChanged -= HandleMusicSettingChanged;
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
     }
 
     //==============| /Cinemachine |======================//
