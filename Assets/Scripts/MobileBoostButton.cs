@@ -59,27 +59,23 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
         {
             rt.sizeDelta = new Vector2(targetSize, targetSize);
             rt.anchoredPosition = new Vector2(-200, 380); // Improved position (Aligned with Joystick)
-            
-            // Also scale the icon if it exists (Child 0 usually)
-            if (transform.childCount > 0)
-            {
-                RectTransform iconRt = transform.GetChild(0).GetComponent<RectTransform>();
-                if (iconRt != null)
-                {
-                     // Ensure icon fits nicely (approx 45% of button size)
-                     float iconSize = targetSize * 0.45f;
-                     iconRt.sizeDelta = new Vector2(iconSize, iconSize);
-                     iconRt.anchoredPosition = Vector2.zero; // Center in bubble
-                }
-            }
-             Debug.Log($"MobileBoostButton: Auto-synced size to {targetSize}px.");
+            Debug.Log($"MobileBoostButton: Auto-synced size to {targetSize}px.");
         }
-        else if (transform.childCount > 0)
+
+        // Scale and perfectly center the icon inside the glass bubble button
+        if (transform.childCount > 0)
         {
             RectTransform iconRt = transform.GetChild(0).GetComponent<RectTransform>();
             if (iconRt != null)
             {
-                iconRt.anchoredPosition = Vector2.zero;
+                iconRt.anchorMin = new Vector2(0.5f, 0.5f);
+                iconRt.anchorMax = new Vector2(0.5f, 0.5f);
+                iconRt.pivot = new Vector2(0.5f, 0.5f);
+                iconRt.anchoredPosition = Vector2.zero; // Perfectly center in bubble
+                
+                // Reduced icon size (32% of button size: ~80px for a 250px button)
+                float iconSize = targetSize * 0.32f;
+                iconRt.sizeDelta = new Vector2(iconSize, iconSize);
             }
         }
     }

@@ -265,9 +265,19 @@ public class FishAI : MonoBehaviour
         float targetSpeed = moveSpeed;
         if (currentState == State.Flee)
         {
-            float proximity = Mathf.InverseLerp(fleeRadius, 0f, lastDistToPlayer);
-            float mult = Mathf.Lerp(1.05f, fleeSpeedMultiplier, proximity);
+            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 3.2f : fleeRadius;
+            float proximity = Mathf.InverseLerp(activeFleeRadius, 0f, lastDistToPlayer);
+            
+            // Level 1 fish flee slightly calmer so the player can catch them more easily
+            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.03f : fleeSpeedMultiplier;
+            float mult = Mathf.Lerp(1.0f, activeFleeMult, proximity);
             targetSpeed *= mult;
+
+            if (fishData != null && fishData.Level == 1)
+            {
+                // Cap fleeing speed of Level 1 fish to 2.5f so they don't outspeed the player
+                targetSpeed = Mathf.Min(targetSpeed, 2.5f);
+            }
         }
         if (currentState == State.Chase) targetSpeed *= chaseSpeedMultiplier;
         targetSpeed = Mathf.Clamp(targetSpeed, minSpeed, maxSpeed);
@@ -356,14 +366,23 @@ public class FishAI : MonoBehaviour
         int playerLevel = GameManager.PlayerLevel;
 
         // 1. FLEE PLAYER (Priority: Survival)
-        if (distToPlayer < fleeRadius && playerLevel > fishData.Level)
+        bool playerCanEatMe = playerLevel >= fishData.Level;
+        float currentFleeRadius = fleeRadius;
+        
+        // Smallest fish (Level 1 / grouped together): slightly smaller flee radius so it's a bit easier to catch
+        if (fishData != null && fishData.Level == 1)
+        {
+            currentFleeRadius = 3.2f; // Reduced from 4.5f
+        }
+
+        if (distToPlayer < currentFleeRadius && playerCanEatMe)
         {
             currentState = State.Flee;
             chaseTarget = null;
             currentChaseTimer = 0f;
 
-            // Break Formation!
-            if (fishData.school != null)
+            // Only break formation when player gets very close so the school stays grouped initially
+            if (distToPlayer < 2.0f && fishData.school != null)
             {
                 fishData.school = null;
                 fishData.formationOffset = Vector2.zero;

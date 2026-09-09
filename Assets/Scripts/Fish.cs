@@ -73,20 +73,68 @@ public class Fish : MonoBehaviour
     private ParticleSystem eatEffect;
     private Material bubbleMaterial;
     private Texture2D bubbleTexture;
+    private static Material sharedBubbleMaterial;
+    private static Texture2D sharedBubbleTexture;
     private static Shader cachedParticleShader;
 
     public void InitializeParticles(Material mat, Texture2D tex)
     {
         this.bubbleMaterial = mat;
         this.bubbleTexture = tex;
+        if (mat != null) sharedBubbleMaterial = mat;
+        if (tex != null) sharedBubbleTexture = tex;
         
-        // Pre-create to be ready
+        CreateEatParticles();
+    }
+
+    public void EnsureEatParticles()
+    {
+        if (eatEffect != null) return;
         CreateEatParticles();
     }
 
     private void CreateEatParticles()
     {
         if (eatEffect != null) return;
+
+        // Auto-resolve bubble material and texture if not already assigned
+        if (bubbleMaterial == null)
+        {
+            if (sharedBubbleMaterial != null)
+            {
+                bubbleMaterial = sharedBubbleMaterial;
+            }
+            else
+            {
+                PlayerController pc = FindObjectOfType<PlayerController>();
+                if (pc != null)
+                {
+                    bubbleMaterial = pc.BubbleMaterial;
+                    bubbleTexture = pc.BubbleTexture;
+                    if (bubbleMaterial != null) sharedBubbleMaterial = bubbleMaterial;
+                    if (bubbleTexture != null) sharedBubbleTexture = bubbleTexture;
+                }
+
+                if (bubbleMaterial == null)
+                {
+                    Material[] allMats = Resources.FindObjectsOfTypeAll<Material>();
+                    foreach (Material m in allMats)
+                    {
+                        if (m != null && m.name.Contains("bubbleParticleMat"))
+                        {
+                            bubbleMaterial = m;
+                            sharedBubbleMaterial = m;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bubbleTexture == null && sharedBubbleTexture != null)
+        {
+            bubbleTexture = sharedBubbleTexture;
+        }
 
         GameObject bubbles = new GameObject("EatBubbles");
         bubbles.transform.SetParent(transform, false);
@@ -95,7 +143,7 @@ public class Fish : MonoBehaviour
         eatEffect = bubbles.AddComponent<ParticleSystem>();
         var renderer = bubbles.GetComponent<ParticleSystemRenderer>();
 
-        // Main Settings
+        // Main Settings - Identical to PlayerController eat bubble particles
         var main = eatEffect.main;
         main.loop = false;
         main.playOnAwake = false;
@@ -110,7 +158,7 @@ public class Fish : MonoBehaviour
         var emission = eatEffect.emission;
         emission.rateOverTime = 0;
 
-        // Shape
+        // Shape (Cone/Circle)
         var shape = eatEffect.shape;
         shape.shapeType = ParticleSystemShapeType.Circle;
         shape.radius = 0.5f;
@@ -122,8 +170,18 @@ public class Fish : MonoBehaviour
         noise.strength = 0.5f;
         noise.frequency = 0.8f;
         noise.scrollSpeed = 1f;
+        noise.damping = true;
+        noise.quality = ParticleSystemNoiseQuality.Medium;
 
-        // Color
+        // Velocity over Lifetime (Upward with lateral drift)
+        var vel = eatEffect.velocityOverLifetime;
+        vel.enabled = true;
+        vel.x = new ParticleSystem.MinMaxCurve(-1f, 1f);
+        vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f);
+        vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.space = ParticleSystemSimulationSpace.World;
+
+        // Color (Transparent fade)
         var col = eatEffect.colorOverLifetime;
         col.enabled = true;
         Gradient grad = new Gradient();
@@ -154,14 +212,17 @@ public class Fish : MonoBehaviour
              }
         }
         
-        renderer.sortingOrder = 5; // Visible
+        renderer.sortingOrder = 6; // Above fish
     }
 
     public void PlayEatEffect()
     {
+        EnsureEatParticles();
         if (eatEffect != null)
         {
-            eatEffect.Emit(10); // Burst 10 bubbles
+            // Burst 2 to 4 bubbles, identical to PlayerController
+            int count = Random.Range(2, 4);
+            eatEffect.Emit(count);
         }
     }
 
@@ -239,6 +300,8 @@ public class Fish : MonoBehaviour
         contactFilter = new ContactFilter2D();
         contactFilter.useTriggers = true; 
         contactFilter.useLayerMask = false; // Check against everything, then filter by Component
+
+        EnsureEatParticles();
     }
 
     private ParticleSystem goldenParticles;
@@ -576,9 +639,8 @@ public class Fish : MonoBehaviour
             speed *= 1.2f; 
 
             // ENSURE IT CAN BE EATEN
-            // Golden fish are bonus/loot, so they should be low level (1) so the player can eat them early.
-            // Unless manually set to something specifically lower/higher, we force it to 1 to ensure edibility.
-            if (level <= 0 || level > 5) level = 1;
+            // Golden fish level is 1 so player can eat it right from Level 1
+            level = 1;
 
             // ENSURE MOVEMENT for Golden Fish
             // Ensure Rigidbody is Dynamic and configured for FishAI
@@ -726,6 +788,8 @@ public class Fish : MonoBehaviour
             {
                 otherFish.Die();
                 PlayEatEffect();
+                var ai = GetComponent<FishAI>();
+                if (ai != null) ai.OnAteFish(otherFish);
             }
         }
     }

@@ -61,7 +61,7 @@ public class PlayerController : MonoBehaviour
     [Header("Manual Level Scaling")]
     [Tooltip("Define exact scale for each level (Index 0 = Level 1, Index 1 = Level 2, etc.)")]
     [SerializeField]
-    private float[] levelScales = new float[] { 0.5f, 0.7f, 0.9f, 1.1f, 1.3f, 1.5f };
+    private float[] levelScales = new float[] { 0.5f, 0.62f, 0.74f, 0.86f, 0.98f, 1.1f };
 
     #endregion
 
@@ -176,13 +176,13 @@ public class PlayerController : MonoBehaviour
             System.Array.Resize(ref levelScales, maxLevel);
             
             // Fill new slots if they were empty (0)
-            // Default pattern: 0.5, 0.7, 0.9, 1.1, 1.3, 1.5
-            // Formula: 0.5 + (Index * 0.2)
+            // Default pattern: 0.5, 0.62, 0.74, 0.86, 0.98, 1.10
+            // Formula: 0.5 + (Index * 0.12)
             for (int i = 0; i < levelScales.Length; i++)
             {
                 if (levelScales[i] == 0f)
                 {
-                    levelScales[i] = 0.5f + (i * 0.2f);
+                    levelScales[i] = 0.5f + (i * 0.12f);
                 }
             }
         }
@@ -729,26 +729,47 @@ public class PlayerController : MonoBehaviour
             float halfWidth = camWidth / 2f;
             float halfHeight = camHeight / 2f;
 
-            // Margin to keep player fully on screen (approx half sprite width)
-            float margin = 0.5f; 
+            // Option 1 (Feeding Frenzy style): Fixed margin so boundaries never pinch inward as you grow
+            float margin = 0.25f; 
             
             float minX = camPos.x - halfWidth + margin;
             float maxX = camPos.x + halfWidth - margin;
             float minY = camPos.y - halfHeight + margin;
             float maxY = camPos.y + halfHeight - margin;
 
-            float clampedX = Mathf.Clamp(rb.position.x, minX, maxX);
-            float clampedY = Mathf.Clamp(rb.position.y, minY, maxY);
+            Vector2 pos = rb.position;
+            Vector2 vel = rb.linearVelocity;
 
-            if (rb.position.x != clampedX || rb.position.y != clampedY)
+            // Horizontal bounds: clamp position & only kill velocity pushing into the wall
+            if (pos.x < minX)
             {
-                rb.position = new Vector2(clampedX, clampedY);
-                // Kill velocity into the wall
-                Vector2 newVel = rb.linearVelocity;
-                if (Mathf.Abs(rb.position.x - clampedX) < 0.01f) newVel.x = 0;
-                if (Mathf.Abs(rb.position.y - clampedY) < 0.01f) newVel.y = 0;
-                rb.linearVelocity = newVel;
+                pos.x = minX;
+                if (vel.x < 0f) vel.x = 0f;
+                if (_smoothVelocity.x < 0f) _smoothVelocity.x = 0f;
             }
+            else if (pos.x > maxX)
+            {
+                pos.x = maxX;
+                if (vel.x > 0f) vel.x = 0f;
+                if (_smoothVelocity.x > 0f) _smoothVelocity.x = 0f;
+            }
+
+            // Vertical bounds: clamp position & only kill velocity pushing into the wall
+            if (pos.y < minY)
+            {
+                pos.y = minY;
+                if (vel.y < 0f) vel.y = 0f;
+                if (_smoothVelocity.y < 0f) _smoothVelocity.y = 0f;
+            }
+            else if (pos.y > maxY)
+            {
+                pos.y = maxY;
+                if (vel.y > 0f) vel.y = 0f;
+                if (_smoothVelocity.y > 0f) _smoothVelocity.y = 0f;
+            }
+
+            rb.position = pos;
+            rb.linearVelocity = vel;
         }
     }
 
@@ -1038,8 +1059,11 @@ public class PlayerController : MonoBehaviour
         
         EventManager.Trigger<int>("onLevelUp", Level);
 
-        float cameraMultiplier = 1f + ((Level - 1) * 0.10f);
-        GameManager.instance.CameraZoom(cameraMultiplier, 0.5f);
+        // Option 1 (Feeding Frenzy style): Keep camera viewport fixed at default framing
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.CameraZoom(1f, 0.5f);
+        }
 
 
         //Increase speed
@@ -1092,6 +1116,11 @@ public class PlayerController : MonoBehaviour
                 
                 if (fishLevel > Level)
                 {
+                    if (collidedFish.IsGoldenFish)
+                    {
+                        // Golden fish is a bonus prey fish, NOT a predator, so it never kills the player.
+                        return;
+                    }
                     Death();
                 }
                 else

@@ -571,7 +571,7 @@ public class MainMenuManager : MonoBehaviour
         Transform vLabelTr = settingsPanel.transform.Find("VolumeLabel");
         if (vLabelTr != null) vLabelTr.gameObject.SetActive(false);
 
-        // Format Back Button as top-right 'X' close button (same size as On/Off toggle: 90x90)
+        // Format Back Button as top-right 'X' close button (same size as landing page buttons: 180x180)
         if (backButton != null)
         {
             FormatCloseButton(backButton);
@@ -587,7 +587,7 @@ public class MainMenuManager : MonoBehaviour
             musicLabel = null;
             musicStatusText = null;
         }
-        CreateAudioToggleRow("MusicRow", new Vector2(0, 5f), "eP\xf8g", out musicLabel, out musicToggleButton, out musicStatusText);
+        CreateAudioToggleRow("MusicRow", new Vector2(0, 60f), "eP\xf8g", out musicLabel, out musicToggleButton, out musicStatusText);
         if (musicToggleButton != null)
         {
             SetupButton(musicToggleButton, ToggleMusic);
@@ -603,7 +603,7 @@ public class MainMenuManager : MonoBehaviour
             sfxLabel = null;
             sfxStatusText = null;
         }
-        CreateAudioToggleRow("SfxRow", new Vector2(0, -125f), "sMeLg", out sfxLabel, out sfxToggleButton, out sfxStatusText);
+        CreateAudioToggleRow("SfxRow", new Vector2(0, -150f), "sMeLg", out sfxLabel, out sfxToggleButton, out sfxStatusText);
         if (sfxToggleButton != null)
         {
             SetupButton(sfxToggleButton, ToggleSfx);
@@ -616,7 +616,7 @@ public class MainMenuManager : MonoBehaviour
     {
         if (btn == null) return;
 
-        // 1. RectTransform: Size 95 x 95 (Exact same size as the On/Off buttons), Top-Right corner
+        // 1. RectTransform: Size 180 x 180 (Exact same size as the 3 landing page buttons), Top-Right corner
         RectTransform rt = btn.GetComponent<RectTransform>();
         if (rt != null)
         {
@@ -624,7 +624,7 @@ public class MainMenuManager : MonoBehaviour
             rt.anchorMax = new Vector2(1f, 1f);
             rt.pivot = new Vector2(1f, 1f);
             rt.localScale = Vector3.one;
-            rt.sizeDelta = new Vector2(95f, 95f);
+            rt.sizeDelta = new Vector2(180f, 180f);
             rt.anchoredPosition = new Vector2(-60f, -60f);
         }
 
@@ -642,7 +642,7 @@ public class MainMenuManager : MonoBehaviour
             img.raycastTarget = true;
         }
 
-        // 3. Text Child: Standard font for Latin 'X', sleek size 34, Bold, Black, Center
+        // 3. Text Child: Standard font for Latin 'X', size 70, Bold, White, Center
         UpdateCloseButtonText(btn);
 
         // 4. Hover effect
@@ -658,14 +658,14 @@ public class MainMenuManager : MonoBehaviour
 
         Font standardFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         if (standardFont == null) standardFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        if (standardFont == null) standardFont = Font.CreateDynamicFontFromOSFont("Arial", 34);
+        if (standardFont == null) standardFont = Font.CreateDynamicFontFromOSFont("Arial", 70);
 
         Text txt = btn.GetComponentInChildren<Text>();
         if (txt != null)
         {
             if (standardFont != null) txt.font = standardFont;
             txt.text = "X";
-            txt.fontSize = 34;
+            txt.fontSize = 70;
             txt.fontStyle = FontStyle.Bold;
             txt.alignment = TextAnchor.MiddleCenter;
             txt.color = Color.white;
@@ -679,7 +679,7 @@ public class MainMenuManager : MonoBehaviour
         if (tmp != null)
         {
             tmp.text = "X";
-            tmp.fontSize = 34;
+            tmp.fontSize = 70;
             tmp.fontStyle = FontStyles.Bold;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.color = Color.white;
@@ -692,7 +692,7 @@ public class MainMenuManager : MonoBehaviour
         Font limonFont = customFont;
         if (limonFont == null) limonFont = Resources.Load<Font>("lmns1");
 
-        // Row Root - Tighter 460px width brings text and toggle button closer
+        // Row Root - 720px width accommodates 500px label and 180px toggle button
         GameObject row = new GameObject(rowName);
         row.transform.SetParent(settingsPanel.transform, false);
         row.layer = settingsPanel.layer;
@@ -701,9 +701,9 @@ public class MainMenuManager : MonoBehaviour
         rowRt.anchorMax = new Vector2(0.5f, 0.5f);
         rowRt.pivot = new Vector2(0.5f, 0.5f);
         rowRt.anchoredPosition = position;
-        rowRt.sizeDelta = new Vector2(460f, 120f);
+        rowRt.sizeDelta = new Vector2(720f, 180f);
 
-        // Label - Left Aligned, bigger font (76), clean without stroke
+        // Label - Left Aligned, bigger font (100), clean without stroke
         string labelName = rowName.Replace("Row", "") + "Label";
         GameObject lblObj = new GameObject(labelName);
         lblObj.transform.SetParent(row.transform, false);
@@ -713,12 +713,12 @@ public class MainMenuManager : MonoBehaviour
         lblRt.anchorMax = new Vector2(0f, 0.5f);
         lblRt.pivot = new Vector2(0f, 0.5f);
         lblRt.anchoredPosition = new Vector2(0f, 0);
-        lblRt.sizeDelta = new Vector2(300f, 100f);
+        lblRt.sizeDelta = new Vector2(500f, 180f);
 
         labelComp = lblObj.AddComponent<Text>();
         labelComp.font = limonFont;
         labelComp.text = labelText;
-        labelComp.fontSize = 76;
+        labelComp.fontSize = 100;
         labelComp.fontStyle = FontStyle.Bold;
         labelComp.alignment = TextAnchor.MiddleLeft;
         labelComp.color = Color.white;
@@ -726,7 +726,7 @@ public class MainMenuManager : MonoBehaviour
         labelComp.verticalOverflow = VerticalWrapMode.Overflow;
         labelComp.raycastTarget = false;
 
-        // Button - Circle styled like back button, size (95x95, matching X button)
+        // Button - Circle styled like back button, size 180x180 (matching landing page 3 main buttons)
         string toggleName = rowName.Replace("Row", "") + "Toggle";
         GameObject btnObj = new GameObject(toggleName);
         btnObj.transform.SetParent(row.transform, false);
@@ -736,7 +736,7 @@ public class MainMenuManager : MonoBehaviour
         btnRt.anchorMax = new Vector2(1f, 0.5f);
         btnRt.pivot = new Vector2(1f, 0.5f);
         btnRt.anchoredPosition = new Vector2(0f, 0);
-        btnRt.sizeDelta = new Vector2(95f, 95f);
+        btnRt.sizeDelta = new Vector2(180f, 180f);
 
         Image img = btnObj.AddComponent<Image>();
         Sprite bubble = GetButtonSprite();
@@ -752,7 +752,7 @@ public class MainMenuManager : MonoBehaviour
             btnObj.AddComponent<ButtonHoverEffect>();
         }
 
-        // Text Child - Font size 44
+        // Text Child - Font size 75 (matching landing page 3 main buttons)
         GameObject txtObj = new GameObject("Text");
         txtObj.transform.SetParent(btnObj.transform, false);
         txtObj.layer = settingsPanel.layer;
@@ -763,7 +763,7 @@ public class MainMenuManager : MonoBehaviour
 
         statusComp = txtObj.AddComponent<Text>();
         statusComp.font = limonFont;
-        statusComp.fontSize = 44;
+        statusComp.fontSize = 75;
         statusComp.fontStyle = FontStyle.Bold;
         statusComp.alignment = TextAnchor.MiddleCenter;
         statusComp.color = Color.white;
@@ -783,14 +783,14 @@ public class MainMenuManager : MonoBehaviour
             if (limonFont != null) musicLabel.font = limonFont;
             musicLabel.text = "eP\xf8g"; // ភ្លេង (Music)
             musicLabel.alignment = TextAnchor.MiddleLeft;
-            musicLabel.fontSize = 76;
+            musicLabel.fontSize = 100;
         }
         if (sfxLabel != null)
         {
             if (limonFont != null) sfxLabel.font = limonFont;
             sfxLabel.text = "sMeLg"; // សំឡេង (Sound)
             sfxLabel.alignment = TextAnchor.MiddleLeft;
-            sfxLabel.fontSize = 76;
+            sfxLabel.fontSize = 100;
         }
 
         // Music toggle status
@@ -800,7 +800,7 @@ public class MainMenuManager : MonoBehaviour
             if (limonFont != null) musicStatusText.font = limonFont;
             musicStatusText.text = musicOn ? "ebIk" : "biT"; // ebIk = បើក (ON), biT = បិទ (OFF)
             musicStatusText.color = Color.white;
-            musicStatusText.fontSize = 44;
+            musicStatusText.fontSize = 75;
         }
         if (musicToggleButton != null)
         {
@@ -818,7 +818,7 @@ public class MainMenuManager : MonoBehaviour
             if (limonFont != null) sfxStatusText.font = limonFont;
             sfxStatusText.text = sfxOn ? "ebIk" : "biT"; // ebIk = បើក (ON), biT = បិទ (OFF)
             sfxStatusText.color = Color.white;
-            sfxStatusText.fontSize = 44;
+            sfxStatusText.fontSize = 75;
         }
         if (sfxToggleButton != null)
         {

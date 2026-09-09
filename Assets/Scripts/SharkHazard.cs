@@ -486,9 +486,11 @@ public class SharkHazard : MonoBehaviour
                 pc.Death();
             }
         }
-        else if (other.CompareTag("Enemy"))
+        else
         {
-            if (other.TryGetComponent<Fish>(out var fish))
+            Fish fish = other.GetComponent<Fish>();
+            if (fish == null) fish = other.GetComponentInParent<Fish>();
+            if (fish != null)
             {
                 fish.Die(); 
                 PlayEatEffect();

@@ -206,14 +206,15 @@ public class GridController : MonoBehaviour
             // User Request: "increase the chanes of the hazrd hook more"
             
             // User Request: "start spawning the fishserman hazard only when player reaches level 2"
+            // Slightly reduced chances per user request
             if (GameManager.PlayerLevel >= 2)
             {
-                float effectiveHazardChance = Mathf.Max(hazardChance, 0.35f); // Reduced max from 0.5f
+                float effectiveHazardChance = Mathf.Max(hazardChance, 0.22f); // Reduced from 0.35f
                 
                 // Further boost for low levels since they don't have sharks
                 if (GameManager.PlayerLevel <= 2) 
                 {
-                    effectiveHazardChance = 0.5f; // Reduced from 0.7f
+                    effectiveHazardChance = 0.30f; // Reduced from 0.5f
                 }
 
                 // Clean up nulls
@@ -323,20 +324,19 @@ public class GridController : MonoBehaviour
             // Difficulty Logic:
             
             // SPECIAL: Check for Golden Fish Spawn (Rare!)
-            // Chance: 5% (0.05) - Game Ready Setting
-            // User Request: "the chances of golden fish at the late game is higer"
-            float goldenChance = 0.05f;
+            // Reduced spawn chances so golden fish feels rare and special
+            float goldenChance = 0.02f; // 2% at Early Game (Level 1-2)
             if (playerLevel >= 5)
             {
-                goldenChance = 0.20f; // 20% at End Game (Level 5+)
+                goldenChance = 0.10f; // 10% at End Game (Level 5+)
             }
             else if (playerLevel >= 4)
             {
-                goldenChance = 0.15f; // 15% at Late Game (Level 4)
+                goldenChance = 0.07f; // 7% at Late Game (Level 4)
             }
             else if (playerLevel >= 3)
             {
-                goldenChance = 0.08f; // 8% at Mid Game
+                goldenChance = 0.04f; // 4% at Mid Game (Level 3)
             }
 
             if (Random.value < goldenChance)
@@ -369,7 +369,7 @@ public class GridController : MonoBehaviour
                         // but calling it again is safe due to our checks.
                         golden.SetGoldenStatus(true);
                         
-                        // Force Level 1 so it can be eaten by Level 2+ fish and the Player
+                        // Force Level 1 so it can be eaten by Level 2+ enemy fish, Player, and Shark
                         golden.ForceLevel(1);
 
                         OrientFish(golden, spawnPos, new Vector2(_camPos.x, spawnPos.y));
@@ -382,9 +382,9 @@ public class GridController : MonoBehaviour
             
             int spawnLevel = 1;
             
-        float eatableChance = (playerLevel >= 4) ? 0.92f : 0.86f; 
-            
-            // If we hit the predator cap, we FORCE eatable fish (100% chance)
+            // FEEDING FRENZY BIOMASS PYRAMID:
+            // 88% eatable prey, 12% predator threat (100% eatable if predator cap reached)
+            float eatableChance = 0.88f;
             if (forceEatable)
             {
                 eatableChance = 1.0f;
@@ -392,41 +392,20 @@ public class GridController : MonoBehaviour
             
             if (Random.value < eatableChance)
             {
-                // === EATABLE POOL ===
-                
-                // User Request: "Spawn less and less lower level fish but keep spawning them"
-                // Dynamic Distribution:
-                // Base chance for Lower Level starts at 50% (Level 2) and drops to ~30% (Level 8+)
-                // This ensures we always have some lower level fish (popcorn) but focus shifts to current level.
-                // Adjusted min from 0.20f to 0.30f to prevent extinction.
-                float lowerLevelChance = Mathf.Clamp(0.55f - (playerLevel * 0.05f), 0.30f, 0.50f);
-                if (playerLevel >= 4) lowerLevelChance = Mathf.Clamp(lowerLevelChance + 0.08f, 0.30f, 0.70f);
-                
-                if (playerLevel > 1 && Random.value < lowerLevelChance)
-                {
-                     // Spawn any lower level (1 to PlayerLevel-1)
-                     spawnLevel = Random.Range(1, playerLevel);
-                }
-                else
-                {
-                     // Spawn fish of the current player level
-                     spawnLevel = playerLevel;
-                }
+                // === EATABLE PYRAMID POOL ===
+                // Bottom tier (Level 1) remains abundant (30-60%) at all stages so schools of fry always exist!
+                spawnLevel = SelectEatableLevel(playerLevel);
             }
             else
             {
-                // === PREDATOR POOL (20% Total) ===
-                // Spawn fish of the next level
+                // === PREDATOR POOL ===
+                // Spawn fish of the next level to maintain danger
                 spawnLevel = playerLevel + 1;
             }
 
             if (spawnLevel > 6) spawnLevel = 6;
             
-            // Debug Log for verification
-            // Debug.Log($"Spawning Level {spawnLevel} Fish (Player Level: {playerLevel}) | Eatable Chance: {eatableChance}");
-
             // Determine Prefab
-            // User Request: Check for prefab name correctly and check their assigned level
             string targetName = "level " + spawnLevel + " fish";
             Fish prefabToSpawn = enemyLibrary.GetPrefabByName(spawnLevel, targetName);
             
@@ -442,17 +421,10 @@ public class GridController : MonoBehaviour
                 if (prefabToSpawn.Level != spawnLevel)
                 {
                     Debug.LogWarning($"Spawn Mismatch! Intended: {spawnLevel}, Prefab: {prefabToSpawn.name} has Level {prefabToSpawn.Level}");
-                    // We continue spawning, as the user might have custom setups, but we warned them.
                 }
 
-                // SCHOOLING LOGIC: Level 1, L01-00 (level 1 fish)
-                // User Request: "For the entry level i want u to spawn more schooling fish. than the level 2"
-                float schoolChance = 0.1f; // Default low chance (10%) for Level 2+
-                
-                if (GameManager.PlayerLevel == 1)
-                {
-                    schoolChance = 0.6f; // High chance (60%) for Level 1
-                }
+                // SCHOOLING LOGIC: Level 1 fish regularly form schools (Feeding Frenzy style) across ALL player levels!
+                float schoolChance = 0.50f;
 
                 if (spawnLevel == 1 && prefabToSpawn.name.Contains("level 1 fish") && Random.value < schoolChance)
                 {
@@ -506,6 +478,52 @@ public class GridController : MonoBehaviour
 
     //==============================| Helpers |========================//
 
+    private int SelectEatableLevel(int playerLevel)
+    {
+        if (playerLevel <= 1) return 1;
+
+        float roll = Random.value;
+        if (playerLevel == 2)
+        {
+            // 60% Level 1 (small fry / schools), 40% Level 2 (current level)
+            return (roll < 0.60f) ? 1 : 2;
+        }
+        else if (playerLevel == 3)
+        {
+            // 40% Level 1, 35% Level 2, 25% Level 3
+            if (roll < 0.40f) return 1;
+            if (roll < 0.75f) return 2;
+            return 3;
+        }
+        else if (playerLevel == 4)
+        {
+            // 35% Level 1, 25% Level 2, 20% Level 3, 20% Level 4
+            if (roll < 0.35f) return 1;
+            if (roll < 0.60f) return 2;
+            if (roll < 0.80f) return 3;
+            return 4;
+        }
+        else if (playerLevel == 5)
+        {
+            // 30% Level 1, 25% Level 2, 20% Level 3, 15% Level 4, 10% Level 5
+            if (roll < 0.30f) return 1;
+            if (roll < 0.55f) return 2;
+            if (roll < 0.75f) return 3;
+            if (roll < 0.90f) return 4;
+            return 5;
+        }
+        else // Level 6+
+        {
+            // 30% Level 1, 20% Level 2, 18% Level 3, 14% Level 4, 10% Level 5, 8% Level 6
+            if (roll < 0.30f) return 1;
+            if (roll < 0.50f) return 2;
+            if (roll < 0.68f) return 3;
+            if (roll < 0.82f) return 4;
+            if (roll < 0.92f) return 5;
+            return 6;
+        }
+    }
+
     private bool CullObsoleteFish(int playerLevel, bool forceRecycle = false)
     {
         UpdateCameraCache();
@@ -516,7 +534,7 @@ public class GridController : MonoBehaviour
         Bounds viewBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 5f, _camHeight + 5f, 100f));
 
         // Define a larger bounding box for "Distant" culling (Cleanup)
-        // Any fish that wanders this far (high level or not) should be removed to free up memory/slots
+        // Any fish that wanders this far should be removed to free up memory/slots
         Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 30f, _camHeight + 30f, 100f));
 
         // Find a candidate
@@ -524,24 +542,20 @@ public class GridController : MonoBehaviour
         {
             if (fish == null) continue;
 
-            // Condition 0: Is Way Off-Screen? (Universal Cleanup)
-            // This handles High-Level fish that leave the screen and keep going.
+            // Universal Cleanup: fish that has wandered far away outside distant bounds
             if (!distantBounds.Contains(fish.transform.position))
             {
                 fish.DespawnSelf();
                 return true; 
             }
 
-            // Condition 1: Is Obsolete? (Lower level than player)
-            // Only cull obsolete fish if we are FORCED to recycle (e.g. population full)
-            if (forceRecycle && fish.Level < playerLevel)
+            // Population Full: recycle any fish that is currently off-screen (Feeding Frenzy style: don't target lower level fish specifically)
+            if (forceRecycle)
             {
-                // Condition 2: Is Off-Screen?
                 if (!viewBounds.Contains(fish.transform.position))
                 {
-                    // Found one! Cull it.
                     fish.DespawnSelf();
-                    return true; // Culled one, job done.
+                    return true;
                 }
             }
         }

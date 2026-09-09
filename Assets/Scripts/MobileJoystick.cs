@@ -16,6 +16,7 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
 
     [Header("Visuals")]
     [SerializeField] public Sprite buttonShape;
+    [SerializeField] public Sprite handleShape;
 
     public Vector2 InputDirection { get; private set; }
 
@@ -30,6 +31,23 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         return null;
     }
 
+    private Sprite GetHandleSprite()
+    {
+        if (handleShape != null) return handleShape;
+        Sprite[] sprites = Resources.LoadAll<Sprite>("JoystickCircle");
+        if (sprites != null && sprites.Length > 0) return sprites[0];
+        Sprite single = Resources.Load<Sprite>("JoystickCircle");
+        if (single != null) return single;
+        Sprite knob = Resources.Load<Sprite>("Knob");
+        if (knob != null) return knob;
+        Sprite[] allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
+        foreach (Sprite s in allSprites)
+        {
+            if (s.name.Contains("JoystickCircle") || s.name.Contains("Knob")) return s;
+        }
+        return null;
+    }
+
     private void Awake()
     {
         Instance = this;
@@ -37,27 +55,27 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         if (background == null) background = GetComponent<RectTransform>();
         if (handle == null && transform.childCount > 0) handle = transform.GetChild(0).GetComponent<RectTransform>();
 
-        // Apply Glass Bubble Styling
+        // 1. Outer Joystick: Glass Bubble Button
         Sprite bubble = GetBubbleSprite();
-        if (bubble != null)
+        if (background != null)
         {
-            if (background != null)
+            Image bgImg = background.GetComponent<Image>();
+            if (bgImg != null)
             {
-                Image bgImg = background.GetComponent<Image>();
-                if (bgImg != null)
-                {
-                    bgImg.sprite = bubble;
-                    bgImg.color = Color.white;
-                }
+                if (bubble != null) bgImg.sprite = bubble;
+                bgImg.color = Color.white;
             }
-            if (handle != null)
+        }
+
+        // 2. Inner Handle: Normal White Color Circle
+        if (handle != null)
+        {
+            Image handleImg = handle.GetComponent<Image>();
+            if (handleImg != null)
             {
-                Image handleImg = handle.GetComponent<Image>();
-                if (handleImg != null)
-                {
-                    handleImg.sprite = bubble;
-                    handleImg.color = Color.white;
-                }
+                Sprite circle = GetHandleSprite();
+                if (circle != null) handleImg.sprite = circle;
+                handleImg.color = Color.white;
             }
         }
         
