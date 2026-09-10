@@ -12,11 +12,9 @@ public class Hazard : MonoBehaviour
     [SerializeField]
     private float retractSpeed = 8f; // Faster speed for pulling up
     [SerializeField]
-    private float roamSpeed = 1.5f;
+    private float minRoamTime = 3.0f; // Duration rod stays stationary in the water
     [SerializeField]
-    private float minRoamTime = 6.0f; // Increased roam time (User request: roam longer)
-    [SerializeField]
-    private float maxRoamTime = 10.0f; // Increased roam time
+    private float maxRoamTime = 4.0f;
 
     [Header("Effects")]
     [SerializeField]
@@ -34,6 +32,14 @@ public class Hazard : MonoBehaviour
 
     private enum State { Dropping, Roaming, Retracting }
     private State currentState = State.Dropping;
+
+    [Header("Boat Link")]
+    private FishermanBoat linkedBoat;
+    public FishermanBoat LinkedBoat
+    {
+        get => linkedBoat;
+        set => linkedBoat = value;
+    }
 
     private float targetY;
     private int roamDirection = 0; // -1 left, 1 right
@@ -250,7 +256,7 @@ public class Hazard : MonoBehaviour
         }
         else if (currentState == State.Roaming)
         {
-            // Ensure absolute silence while roaming
+            // Ensure absolute silence while still/fishing
             if (audioSources == null || audioSources.Length == 0) audioSources = GetComponentsInChildren<AudioSource>(true);
             for (int i = 0; i < audioSources.Length; i++)
             {
@@ -258,18 +264,8 @@ public class Hazard : MonoBehaviour
                 if (a != null && a.isPlaying) a.Stop();
             }
 
-            // Move horizontally
-            transform.Translate(Vector3.right * roamDirection * roamSpeed * Time.deltaTime, Space.World);
-
-            // Flip Sprite based on direction
-            // Assumption: Sprite faces Right by default.
-            // If moving Right (1), Scale X is positive. If Left (-1), Scale X is negative.
-            Vector3 s = transform.localScale;
-            s.x = Mathf.Abs(s.x) * (roamDirection > 0 ? 1 : -1);
-            transform.localScale = s;
-
-            // Keep in bounds (Bounce instead of Destroy so it can pull up later)
-            KeepInBounds();
+            // User Request: The fishing rod moving left-right logic is no longer active.
+            // It stays still in place at its target depth.
             
             // Check Lifetime
             lifeTimer += Time.deltaTime;
@@ -287,6 +283,11 @@ public class Hazard : MonoBehaviour
             // Use dynamic calculation to ensure full sprite clearance
             if (transform.position.y >= GetRetractTargetY())
             {
+                if (linkedBoat != null)
+                {
+                    linkedBoat.OnHazardRetracted(this);
+                }
+
                 if (ObjectPoolManager.Instance != null)
                 {
                     ObjectPoolManager.Instance.Despawn(gameObject);
@@ -418,6 +419,11 @@ public class Hazard : MonoBehaviour
     
     private void OnDisable()
     {
+        if (linkedBoat != null)
+        {
+            linkedBoat.OnHazardRetracted(this);
+        }
+
         if (audioSources == null || audioSources.Length == 0) audioSources = GetComponentsInChildren<AudioSource>(true);
         for (int i = 0; i < audioSources.Length; i++)
         {
@@ -430,8 +436,9 @@ public class Hazard : MonoBehaviour
         }
     }
     
-    public void Initialize(AudioClip sound, GameObject particles, Material mat, Texture2D tex, float? overrideDepth = null)
+    public void Initialize(AudioClip sound, GameObject particles, Material mat, Texture2D tex, float? overrideDepth = null, FishermanBoat boat = null)
     {
+        if (boat != null) linkedBoat = boat;
         if (moveSound == null) moveSound = sound;
         if (bubbleParticlesPrefab == null) bubbleParticlesPrefab = particles;
         if (bubbleMaterial == null) bubbleMaterial = mat;

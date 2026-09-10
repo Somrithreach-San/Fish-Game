@@ -86,6 +86,7 @@ public class PlayerController : MonoBehaviour
     private int currentXp = 0;
 
     public int Level { get; private set; } = 1;
+    public float LevelProgress => currentLevelXp > 0 ? Mathf.Clamp01((float)currentXp / currentLevelXp) : 0f;
 
     private int score = 0;
 

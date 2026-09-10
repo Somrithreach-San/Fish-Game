@@ -71,6 +71,15 @@ public class GameManager : MonoBehaviour
         } 
     }
 
+    public static float PlayerLevelProgress {
+        get
+        {
+            if (instance != null && instance.player != null)
+                return instance.player.LevelProgress;
+            return 0f;
+        }
+    }
+
     //==============| INSTANCED API |======================//
     public bool isPaused { get; private set; } = false;
     public bool IsGameOver { get; private set; } = false; // Added to prevent pause during Game Over

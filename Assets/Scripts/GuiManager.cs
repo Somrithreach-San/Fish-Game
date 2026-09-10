@@ -38,11 +38,41 @@ public class GuiManager : Singleton<GuiManager>
     [SerializeField]
     private Sprite warningIconSprite; // Sprite for the warning icon on locked fishes
 
+    [Header("Modular Segmented XP Bar")]
+    public Sprite domeLeftGlass;
+    public Sprite domeLeftFill;
+    public Sprite tubeGlass;
+    public Sprite tubeFill;
+    public Sprite domeRightGlass;
+    public Sprite domeRightFill;
+    // Legacy fallback references
+    public Sprite capLeftGlass;
+    public Sprite capLeftFill;
+    public Sprite midGlass;
+    public Sprite midFill;
+    public Sprite capRightGlass;
+    public Sprite capRightFill;
 
-
+    private GameObject segmentedBarRoot;
+    private RectTransform fillMaskRt;
+    private GameObject fillMaskObj;
+    private float targetFillPct = 0f;
+    private float currentFillPct = 0f;
+    public float sectionWidth = 85f;
+    public float barHeight = 26f;
+    [Range(0f, 2f)]
+    public float segmentGap = 0f;
+    private float _lastSectionWidth = -1f;
+    private float _lastBarHeight = -1f;
+    private float _lastSegmentGap = -1f;
+    private float totalBarWidth = 285f;
+    private List<RectTransform> segmentMasks = new List<RectTransform>();
+    private List<float> segmentWidths = new List<float>();
+    private List<float> targetSegmentFills = new List<float>();
+    private List<float> currentSegmentFills = new List<float>();
+    private int currentSegmentCount = -1;
     [SerializeField]
     private GameObject pauseBtn;
-    private GameObject hackWinBtn;
     [SerializeField]
     private GameObject resumeBtn;
     [SerializeField]
@@ -216,6 +246,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
         EventManager.StartListening("GameStart", () => {
             SetXp(0, 1, 1);
+            SnapSegmentFills();
             HideScore();
             UpdateGrowthIcons(1); // Reset icons to level 1
         });
@@ -233,6 +264,19 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         EventManager.StartListening<int>("onLevelUp", (level) => {
             UpdateGrowthIcons(level);
         });
+
+        // Auto-heal XpBar and GrowthIcons if references were accidentally lost
+        if (XpBar == null)
+        {
+            GameObject pbGo = GameObject.Find("ProgressBar1");
+            if (pbGo != null)
+            {
+                Transform f = pbGo.transform.Find("XpBar");
+                if (f != null) XpBar = f.GetComponent<Image>();
+                else XpBar = pbGo.GetComponentInChildren<Image>();
+            }
+        }
+        EnsureGrowthIconsAssigned();
 
         // Ensure XP bar starts empty and ProgressBar1 is uniformly scaled
         if (XpBar != null)
@@ -252,15 +296,16 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
                  if (pbRt != null)
                  {
                      pbRt.localScale = Vector3.one;
-                     pbRt.sizeDelta = new Vector2(285f, 28f);
                      pbRt.anchoredPosition = new Vector2(35f, -45f);
                  }
              }
         }
 
-        // Ensure layout is fixed at start with large, clearly visible fish icons
-        FormatGrowthIconsLayout();
+        // Initialize dynamic segmented XP bar and icons for current stage
+        EnsureModularSpritesLoaded();
+        RebuildSegmentedBar(LevelManager.GetCurrentConfig().targetPlayerLevel);
         UpdateGrowthIcons(1); // Initial state
+        SnapSegmentFills();
 
         // Ensure UI overlays are hidden at start (Fix Black Screen)
         if (pausedBg != null) pausedBg.SetActive(false);
@@ -382,18 +427,9 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
              pauseBtn.transform.SetAsLastSibling();
         }
 
-        // 3. Handle Hack Win Debug Button (for rapid level complete verification)
-        if (hackWinBtn != null)
-        {
-            Destroy(hackWinBtn);
-            hackWinBtn = null;
-        }
-
-        hackWinBtn = CreateHackWinButton(mainCanvas, HackCompleteLevel);
-        if (hackWinBtn != null)
-        {
-            hackWinBtn.transform.SetAsLastSibling();
-        }
+        // Ensure any old HackWinButton is removed
+        GameObject oldHackBtn = GameObject.Find("HackWinButton");
+        if (oldHackBtn != null) Destroy(oldHackBtn);
     }
 
     private GameObject CreatePauseBubbleButton(Canvas parentCanvas, UnityEngine.Events.UnityAction action)
@@ -488,89 +524,6 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             t.color = Color.white;
             t.raycastTarget = false;
         }
-
-        return btnObj;
-    }
-
-    public void HackCompleteLevel()
-    {
-        LevelManager.CompleteCurrentLevel();
-        if (GameManager.instance != null)
-        {
-            GameManager.instance.TriggerGameWin();
-        }
-        EventManager.Trigger("GameWin");
-    }
-
-    private GameObject CreateHackWinButton(Canvas parentCanvas, UnityEngine.Events.UnityAction action)
-    {
-        GameObject btnObj = new GameObject("HackWinButton");
-        btnObj.transform.SetParent(parentCanvas.transform, false);
-
-        RectTransform rt = btnObj.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(1f, 1f);
-        rt.anchorMax = new Vector2(1f, 1f);
-        rt.pivot = new Vector2(1f, 1f);
-        rt.sizeDelta = new Vector2(48f, 48f);
-        rt.anchoredPosition = new Vector2(-92f, -25f);
-        rt.localScale = Vector3.one;
-
-        Image bgImg = btnObj.AddComponent<Image>();
-        Sprite bubble = GetBubbleSprite();
-        if (bubble != null)
-        {
-            bgImg.sprite = bubble;
-            bgImg.type = Image.Type.Simple;
-        }
-        bgImg.color = new Color(1f, 0.85f, 0.2f, 1f); // Golden bubble
-        bgImg.raycastTarget = true;
-
-        Button btn = btnObj.AddComponent<Button>();
-        btn.onClick.AddListener(() => PlayButtonSound());
-        btn.onClick.AddListener(action);
-
-        if (btnObj.GetComponent<ButtonHoverEffect>() == null)
-            btnObj.AddComponent<ButtonHoverEffect>();
-
-        LayoutElement le = btnObj.AddComponent<LayoutElement>();
-        le.ignoreLayout = true;
-
-        Canvas c = btnObj.AddComponent<Canvas>();
-        c.overrideSorting = true;
-        c.sortingOrder = 2001;
-        btnObj.AddComponent<GraphicRaycaster>();
-
-        // Text label "WIN"
-        GameObject textObj = new GameObject("Text");
-        textObj.transform.SetParent(btnObj.transform, false);
-        RectTransform rtText = textObj.AddComponent<RectTransform>();
-        rtText.anchorMin = Vector2.zero;
-        rtText.anchorMax = Vector2.one;
-        rtText.sizeDelta = Vector2.zero;
-        rtText.anchoredPosition = Vector2.zero;
-
-        Text t = textObj.AddComponent<Text>();
-        t.font = GetStandardFont();
-        t.text = "WIN";
-        t.alignment = TextAnchor.MiddleCenter;
-        t.fontSize = 15;
-        t.fontStyle = FontStyle.Bold;
-        t.color = new Color(0.2f, 0.12f, 0f, 1f);
-        t.raycastTarget = false;
-
-        // Hit Area padding for easy touch
-        GameObject hitArea = new GameObject("HitArea");
-        hitArea.transform.SetParent(btnObj.transform, false);
-        RectTransform rtHit = hitArea.AddComponent<RectTransform>();
-        rtHit.anchorMin = new Vector2(0.5f, 0.5f);
-        rtHit.anchorMax = new Vector2(0.5f, 0.5f);
-        rtHit.pivot = new Vector2(0.5f, 0.5f);
-        rtHit.sizeDelta = new Vector2(65f, 65f);
-        Image imgHit = hitArea.AddComponent<Image>();
-        imgHit.color = new Color(0, 0, 0, 0);
-        imgHit.raycastTarget = true;
-        Button btnHit = hitArea.AddComponent<Button>();
-        btnHit.onClick.AddListener(() => btn.onClick.Invoke());
 
         return btnObj;
     }
@@ -972,17 +925,56 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
     private void Update()
     {
-        // Smooth Fill XP Bar
-        if (XpBar != null)
+        // Live update segment layout if inspector parameters changed
+        if (currentSegmentCount > 0 && segmentedBarRoot != null &&
+            (Mathf.Abs(_lastSectionWidth - sectionWidth) > 0.01f ||
+             Mathf.Abs(_lastBarHeight - barHeight) > 0.01f ||
+             Mathf.Abs(_lastSegmentGap - segmentGap) > 0.01f))
         {
-            XpBar.fillAmount = Mathf.Lerp(XpBar.fillAmount, targetXpFill, Time.deltaTime * 5f);
+            RefreshSegmentLayout();
         }
 
-        // Debug shortcut: press 'W' on keyboard to complete level instantly
-        var kb = UnityEngine.InputSystem.Keyboard.current;
-        if (kb != null && kb.wKey.wasPressedThisFrame && GameManager.instance != null && !GameManager.instance.isPaused && !GameManager.instance.IsGameOver)
+        // Smooth Fill Modular XP Bar via RectMask2D per segment
+        for (int i = 0; i < segmentMasks.Count; i++)
         {
-            HackCompleteLevel();
+            if (segmentMasks[i] != null && i < targetSegmentFills.Count && i < currentSegmentFills.Count)
+            {
+                currentSegmentFills[i] = Mathf.Lerp(currentSegmentFills[i], targetSegmentFills[i], Time.deltaTime * 6f);
+                if (Mathf.Abs(currentSegmentFills[i] - targetSegmentFills[i]) < 0.001f)
+                {
+                    currentSegmentFills[i] = targetSegmentFills[i];
+                }
+                float fillW = sectionWidth * currentSegmentFills[i];
+                segmentMasks[i].sizeDelta = new Vector2(fillW, 0f);
+                bool shouldShow = currentSegmentFills[i] > 0.001f;
+                if (segmentMasks[i].gameObject.activeSelf != shouldShow)
+                {
+                    segmentMasks[i].gameObject.SetActive(shouldShow);
+                }
+            }
+        }
+
+        // Continuous XP Bar fallback if single fill mask used
+        if (fillMaskRt != null && segmentMasks.Count == 0)
+        {
+            currentFillPct = Mathf.Lerp(currentFillPct, targetFillPct, Time.deltaTime * 6f);
+            if (Mathf.Abs(currentFillPct - targetFillPct) < 0.001f)
+            {
+                currentFillPct = targetFillPct;
+            }
+            float fillW = totalBarWidth * currentFillPct;
+            fillMaskRt.sizeDelta = new Vector2(fillW, 0f);
+            bool shouldShow = currentFillPct > 0.0001f;
+            if (fillMaskObj != null && fillMaskObj.activeSelf != shouldShow)
+            {
+                fillMaskObj.SetActive(shouldShow);
+            }
+        }
+
+        // Legacy fill fallback if legacy XpBar active
+        if (XpBar != null && XpBar.gameObject.activeSelf)
+        {
+            XpBar.fillAmount = Mathf.Lerp(XpBar.fillAmount, targetXpFill, Time.deltaTime * 5f);
         }
     }
 
@@ -993,6 +985,10 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         {
              // Try to find default TMP font
              messageFontTmp = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+        }
+        if (segmentedBarRoot != null && currentSegmentCount > 0)
+        {
+            RefreshSegmentLayout();
         }
     }
 #endif
@@ -1422,62 +1418,420 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
 
 
-    public void SetXp(int currentXP, int maxXp, int currentLevel = 1, int maxLevels = 6)
+    private Sprite LoadSpriteWithFallback(string name)
     {
-        if (XpBar == null) return;
-        
-        // Calculate progress within current level (0 to 1)
-        float levelProgress = (float)currentXP / (float)maxXp;
+        Sprite s = Resources.Load<Sprite>(name);
+        if (s != null) return s;
 
-        UpdateGrowthIcons(currentLevel);
+        Sprite[] allInRes = Resources.LoadAll<Sprite>(name);
+        if (allInRes != null && allInRes.Length > 0 && allInRes[0] != null) return allInRes[0];
 
-        if (growthIcons != null && growthIcons.Length > 0)
+        Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
+        for (int i = 0; i < all.Length; i++)
         {
-            // Determine Start Position
-            float startPos = 0f;
-            int startIdx = currentLevel - 1;
-            
-            // FIX: For Level 1, start at 0 (empty bar) instead of the first icon position
-            if (currentLevel == 1)
+            if (all[i] != null && all[i].name == name) return all[i];
+        }
+
+#if UNITY_EDITOR
+        string[] paths = new string[] {
+            $"Assets/Resources/{name}.png",
+            $"Assets/Graphics/{name}.png"
+        };
+        foreach (var p in paths)
+        {
+            Sprite edSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(p);
+            if (edSprite != null) return edSprite;
+        }
+#endif
+        return null;
+    }
+
+    private void EnsureModularSpritesLoaded()
+    {
+        if (capLeftGlass == null) capLeftGlass = LoadSpriteWithFallback("xp_cap_left_glass");
+        if (capLeftFill == null) capLeftFill = LoadSpriteWithFallback("xp_cap_left_fill");
+        if (midGlass == null) midGlass = LoadSpriteWithFallback("xp_mid_glass");
+        if (midFill == null) midFill = LoadSpriteWithFallback("xp_mid_fill");
+        if (capRightGlass == null) capRightGlass = LoadSpriteWithFallback("xp_cap_right_glass");
+        if (capRightFill == null) capRightFill = LoadSpriteWithFallback("xp_cap_right_fill");
+
+        // Fallbacks
+        if (capLeftGlass == null) capLeftGlass = LoadSpriteWithFallback("xp_dome_left_glass");
+        if (capLeftFill == null) capLeftFill = LoadSpriteWithFallback("xp_dome_left_fill");
+        if (midGlass == null) midGlass = LoadSpriteWithFallback("xp_tube_glass");
+        if (midFill == null) midFill = LoadSpriteWithFallback("xp_tube_fill");
+        if (capRightGlass == null) capRightGlass = LoadSpriteWithFallback("xp_dome_right_glass");
+        if (capRightFill == null) capRightFill = LoadSpriteWithFallback("xp_dome_right_fill");
+    }
+
+    private GameObject CreateImageChild(Transform parent, string name, Sprite sprite,
+        Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 anchoredPos, Vector2 sizeDelta)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.pivot = pivot;
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = sizeDelta;
+        rt.localScale = Vector3.one;
+
+        Image img = go.AddComponent<Image>();
+        img.sprite = sprite;
+        img.type = Image.Type.Simple;
+        img.color = Color.white;
+        img.raycastTarget = false;
+        return go;
+    }
+
+    private GameObject CreateStretchChild(Transform parent, string name, Sprite sprite,
+        float leftOffset, float bottomOffset, float rightOffset, float topOffset)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = new Vector2(leftOffset, bottomOffset);
+        rt.offsetMax = new Vector2(-rightOffset, -topOffset);
+        rt.localScale = Vector3.one;
+
+        Image img = go.AddComponent<Image>();
+        img.sprite = sprite;
+        img.type = Image.Type.Simple;
+        img.color = Color.white;
+        img.raycastTarget = false;
+        return go;
+    }
+
+    public void SnapSegmentFills()
+    {
+        currentFillPct = targetFillPct;
+        for (int i = 0; i < segmentMasks.Count; i++)
+        {
+            if (i < targetSegmentFills.Count && i < currentSegmentFills.Count)
             {
-                startPos = 0f;
+                currentSegmentFills[i] = targetSegmentFills[i];
+                if (segmentMasks[i] != null)
+                {
+                    float fillW = sectionWidth * currentSegmentFills[i];
+                    segmentMasks[i].sizeDelta = new Vector2(fillW, 0f);
+                    bool shouldShow = currentSegmentFills[i] > 0.001f;
+                    if (segmentMasks[i].gameObject.activeSelf != shouldShow)
+                    {
+                        segmentMasks[i].gameObject.SetActive(shouldShow);
+                    }
+                }
             }
-            else if (startIdx >= 0 && startIdx < growthIcons.Length)
+        }
+        if (fillMaskRt != null && segmentMasks.Count == 0)
+        {
+            float fillW = totalBarWidth * currentFillPct;
+            fillMaskRt.sizeDelta = new Vector2(fillW, 0f);
+            bool shouldShow = currentFillPct > 0.0001f;
+            if (fillMaskObj != null && fillMaskObj.activeSelf != shouldShow)
             {
-                startPos = GetNormalizedPosition(growthIcons[startIdx].rectTransform);
+                fillMaskObj.SetActive(shouldShow);
             }
-            else if (startIdx >= growthIcons.Length)
+        }
+    }
+
+    [ContextMenu("Rebuild XP Bar Now")]
+    public void RebuildSegmentedBarEditor()
+    {
+        EnsureModularSpritesLoaded();
+        RebuildSegmentedBar(LevelManager.GetCurrentConfig().targetPlayerLevel);
+        UpdateGrowthIcons(1);
+        SnapSegmentFills();
+    }
+
+    public void RefreshSegmentLayout()
+    {
+        if (segmentedBarRoot == null || currentSegmentCount <= 0) return;
+
+        totalBarWidth = currentSegmentCount * sectionWidth + (currentSegmentCount - 1) * segmentGap;
+
+        Transform pbTr = (XpBar != null) ? XpBar.transform.parent : null;
+        if (pbTr == null)
+        {
+            GameObject pbGo = GameObject.Find("ProgressBar1");
+            if (pbGo != null) pbTr = pbGo.transform;
+        }
+        if (pbTr != null)
+        {
+            RectTransform pbRt = pbTr.GetComponent<RectTransform>();
+            if (pbRt != null)
             {
-                // If we are past the last icon, start from the last icon's position
-                startPos = GetNormalizedPosition(growthIcons[growthIcons.Length - 1].rectTransform);
+                pbRt.sizeDelta = new Vector2(totalBarWidth, barHeight);
+            }
+        }
+
+        for (int i = 0; i < segmentedBarRoot.transform.childCount; i++)
+        {
+            Transform segChild = segmentedBarRoot.transform.GetChild(i);
+            RectTransform segRt = segChild.GetComponent<RectTransform>();
+            if (segRt != null)
+            {
+                segRt.anchoredPosition = new Vector2(i * (sectionWidth + segmentGap), 0f);
+                segRt.sizeDelta = new Vector2(sectionWidth, 0f);
             }
 
-            // Determine End Position
-            float endPos = 1f; // Default to full bar if no next icon
-            int endIdx = currentLevel;
-
-            if (endIdx >= 0 && endIdx < growthIcons.Length)
+            Transform maskChild = segChild.Find("FillMask");
+            if (maskChild != null)
             {
-                endPos = GetNormalizedPosition(growthIcons[endIdx].rectTransform);
+                Transform fillImgChild = maskChild.Find("FillImg");
+                if (fillImgChild != null)
+                {
+                    RectTransform fillImgRt = fillImgChild.GetComponent<RectTransform>();
+                    if (fillImgRt != null)
+                    {
+                        fillImgRt.sizeDelta = new Vector2(sectionWidth, 0f);
+                    }
+                }
+            }
+        }
+
+        // Clean up any old DividersRoot
+        Transform divRoot = segmentedBarRoot.transform.Find("DividersRoot");
+        if (divRoot != null) Destroy(divRoot.gameObject);
+
+        FormatGrowthIconsLayout(currentSegmentCount);
+
+        _lastSectionWidth = sectionWidth;
+        _lastBarHeight = barHeight;
+        _lastSegmentGap = segmentGap;
+    }
+
+    public void RebuildSegmentedBar(int segmentCount)
+    {
+        if (segmentCount <= 0)
+        {
+            segmentCount = LevelManager.GetCurrentConfig().targetPlayerLevel;
+        }
+        segmentCount = Mathf.Clamp(segmentCount, 2, (growthIcons != null && growthIcons.Length > 0) ? growthIcons.Length : 6);
+
+        Transform pbTr = (XpBar != null) ? XpBar.transform.parent : null;
+        if (pbTr == null)
+        {
+            GameObject pbGo = GameObject.Find("ProgressBar1");
+            if (pbGo != null) pbTr = pbGo.transform;
+        }
+        if (pbTr == null) return;
+
+        // Hide legacy single glass background and legacy single fill
+        Image pbImg = pbTr.GetComponent<Image>();
+        if (pbImg != null) pbImg.enabled = false;
+
+        if (XpBar != null)
+        {
+            XpBar.gameObject.SetActive(false);
+        }
+
+        EnsureModularSpritesLoaded();
+
+        if (currentSegmentCount == segmentCount && segmentedBarRoot != null && segmentMasks.Count == segmentCount)
+        {
+            return;
+        }
+
+        // Locate or create segmentedBarRoot
+        if (segmentedBarRoot == null)
+        {
+            Transform existing = pbTr.Find("SegmentedBarRoot");
+            if (existing != null)
+            {
+                segmentedBarRoot = existing.gameObject;
             }
             else
             {
-                endPos = 1f;
+                segmentedBarRoot = new GameObject("SegmentedBarRoot");
+                segmentedBarRoot.transform.SetParent(pbTr, false);
+            }
+        }
+
+        // Ensure segmentedBarRoot is behind GrowthIconsContainer
+        segmentedBarRoot.transform.SetSiblingIndex(0);
+
+        // Dynamically expand total bar width based on number of modular sections and intentional gap
+        totalBarWidth = segmentCount * sectionWidth + (segmentCount - 1) * segmentGap;
+        float totalHeight = barHeight;
+        float capRadius = totalHeight * 0.5f; // EXACT 1:1 circular dome radius
+
+        RectTransform pbRt = pbTr.GetComponent<RectTransform>();
+        if (pbRt != null)
+        {
+            pbRt.sizeDelta = new Vector2(totalBarWidth, totalHeight);
+        }
+
+        RectTransform rootRt = segmentedBarRoot.GetComponent<RectTransform>();
+        if (rootRt == null) rootRt = segmentedBarRoot.AddComponent<RectTransform>();
+        rootRt.anchorMin = Vector2.zero;
+        rootRt.anchorMax = Vector2.one;
+        rootRt.sizeDelta = Vector2.zero;
+        rootRt.anchoredPosition = Vector2.zero;
+        rootRt.localScale = Vector3.one;
+
+        // Clean out any old children
+        for (int c = segmentedBarRoot.transform.childCount - 1; c >= 0; c--)
+        {
+            Transform child = segmentedBarRoot.transform.GetChild(c);
+            child.SetParent(null);
+            Destroy(child.gameObject);
+        }
+
+        segmentMasks.Clear();
+        targetSegmentFills.Clear();
+        currentSegmentFills.Clear();
+
+        // Build modular segment GameObjects separated by small visible gap
+        for (int i = 0; i < segmentCount; i++)
+        {
+            GameObject segObj = new GameObject($"Seg_{i}");
+            segObj.transform.SetParent(segmentedBarRoot.transform, false);
+
+            RectTransform segRt = segObj.AddComponent<RectTransform>();
+            segRt.anchorMin = new Vector2(0f, 0f);
+            segRt.anchorMax = new Vector2(0f, 1f);
+            segRt.pivot = new Vector2(0f, 0.5f);
+            segRt.anchoredPosition = new Vector2(i * (sectionWidth + segmentGap), 0f);
+            segRt.sizeDelta = new Vector2(sectionWidth, 0f);
+            segRt.localScale = Vector3.one;
+
+            // Pick modular sprites for this segment
+            Sprite gSprite, fSprite;
+            if (segmentCount == 2)
+            {
+                gSprite = (i == 0) ? capLeftGlass : capRightGlass;
+                fSprite = (i == 0) ? capLeftFill : capRightFill;
+            }
+            else
+            {
+                if (i == 0)
+                {
+                    gSprite = capLeftGlass;
+                    fSprite = capLeftFill;
+                }
+                else if (i == segmentCount - 1)
+                {
+                    gSprite = capRightGlass;
+                    fSprite = capRightFill;
+                }
+                else
+                {
+                    gSprite = midGlass;
+                    fSprite = midFill;
+                }
             }
 
-            // Interpolate
-            float finalFill = Mathf.Lerp(startPos, endPos, levelProgress);
-            
-            // Set Target for Smooth Animation
-            targetXpFill = finalFill;
+            // Fallbacks
+            if (gSprite == null) gSprite = (i == 0) ? domeLeftGlass : ((i == segmentCount - 1) ? domeRightGlass : tubeGlass);
+            if (fSprite == null) fSprite = (i == 0) ? domeLeftFill : ((i == segmentCount - 1) ? domeRightFill : tubeFill);
+
+            // 1. Fill Layer (revealed horizontally by RectMask2D, rendered underneath glass)
+            GameObject maskObj = new GameObject("FillMask");
+            maskObj.transform.SetParent(segObj.transform, false);
+
+            RectTransform maskRt = maskObj.AddComponent<RectTransform>();
+            maskRt.anchorMin = new Vector2(0f, 0f);
+            maskRt.anchorMax = new Vector2(0f, 1f);
+            maskRt.pivot = new Vector2(0f, 0.5f);
+            maskRt.anchoredPosition = Vector2.zero;
+            maskRt.sizeDelta = new Vector2(0f, 0f);
+            maskRt.localScale = Vector3.one;
+
+            maskObj.AddComponent<RectMask2D>();
+
+            // Fill Image inside mask (fixed sectionWidth x full height)
+            GameObject fillImgObj = new GameObject("FillImg");
+            fillImgObj.transform.SetParent(maskObj.transform, false);
+
+            RectTransform fillImgRt = fillImgObj.AddComponent<RectTransform>();
+            fillImgRt.anchorMin = new Vector2(0f, 0f);
+            fillImgRt.anchorMax = new Vector2(0f, 1f);
+            fillImgRt.pivot = new Vector2(0f, 0.5f);
+            fillImgRt.anchoredPosition = Vector2.zero;
+            fillImgRt.sizeDelta = new Vector2(sectionWidth, 0f);
+            fillImgRt.localScale = Vector3.one;
+
+            Image fImg = fillImgObj.AddComponent<Image>();
+            fImg.sprite = fSprite;
+            fImg.type = Image.Type.Simple;
+            fImg.color = Color.white;
+            fImg.raycastTarget = false;
+
+            maskObj.SetActive(false);
+
+            // 2. Glass Layer (rendered on top of fill)
+            GameObject glassImgObj = new GameObject("GlassImg");
+            glassImgObj.transform.SetParent(segObj.transform, false);
+
+            RectTransform glassImgRt = glassImgObj.AddComponent<RectTransform>();
+            glassImgRt.anchorMin = Vector2.zero;
+            glassImgRt.anchorMax = Vector2.one;
+            glassImgRt.sizeDelta = Vector2.zero;
+            glassImgRt.anchoredPosition = Vector2.zero;
+            glassImgRt.localScale = Vector3.one;
+
+            Image gImg = glassImgObj.AddComponent<Image>();
+            gImg.sprite = gSprite;
+            gImg.type = Image.Type.Simple;
+            gImg.color = Color.white;
+            gImg.raycastTarget = false;
+
+            segmentMasks.Add(maskRt);
+            targetSegmentFills.Add(0f);
+            currentSegmentFills.Add(0f);
         }
-        else
+
+        currentSegmentCount = segmentCount;
+        _lastSectionWidth = sectionWidth;
+        _lastBarHeight = barHeight;
+        _lastSegmentGap = segmentGap;
+    }
+
+    public void SetXp(int currentXP, int maxXp, int currentLevel = 1, int maxLevels = -1)
+    {
+        if (maxLevels <= 0)
         {
-            // Fallback to simple math if icons are missing
-            float segmentSize = 1f / (float)maxLevels;
-            float totalProgress = ((currentLevel - 1) * segmentSize) + (levelProgress * segmentSize);
-            targetXpFill = totalProgress;
+            maxLevels = LevelManager.GetCurrentConfig().targetPlayerLevel;
         }
+        maxLevels = Mathf.Clamp(maxLevels, 2, (growthIcons != null && growthIcons.Length > 0) ? growthIcons.Length : 6);
+
+        // Ensure modular bar is built for the current stage segment count
+        RebuildSegmentedBar(maxLevels);
+
+        // Calculate progress within current level (0 to 1)
+        float levelProgress = (maxXp > 0) ? Mathf.Clamp01((float)currentXP / (float)maxXp) : 0f;
+
+        UpdateGrowthIcons(currentLevel, maxLevels);
+
+        // Feeding frenzy modular segment logic:
+        // Segments before currentLevel-1 are fully completed (100%)
+        // Current segment reveals levelProgress (0 to 1)
+        // Future segments stay empty (0%)
+        int currentSegIndex = Mathf.Clamp(currentLevel - 1, 0, maxLevels - 1);
+        for (int j = 0; j < targetSegmentFills.Count; j++)
+        {
+            if (j < currentSegIndex)
+            {
+                targetSegmentFills[j] = 1.0f;
+            }
+            else if (j == currentSegIndex)
+            {
+                targetSegmentFills[j] = levelProgress;
+            }
+            else
+            {
+                targetSegmentFills[j] = 0.0f;
+            }
+        }
+
+        // Backward compatibility
+        targetFillPct = Mathf.Clamp01(((float)currentSegIndex + levelProgress) / (float)maxLevels);
+        targetXpFill = targetFillPct;
     }
 
     private void InitializeFloatingTextPool()
@@ -1787,19 +2141,64 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         return Mathf.Clamp01(normalized);
     }
 
-    public void UpdateGrowthIcons(int currentLevel, int maxLevel = 6)
+    public void EnsureGrowthIconsAssigned()
     {
+        bool needsPopulation = (growthIcons == null || growthIcons.Length == 0);
+        if (!needsPopulation)
+        {
+            bool hasNull = false;
+            for (int i = 0; i < growthIcons.Length; i++)
+            {
+                if (growthIcons[i] == null) { hasNull = true; break; }
+            }
+            needsPopulation = hasNull;
+        }
+
+        if (needsPopulation)
+        {
+            GameObject container = GameObject.Find("GrowthIconsContainer");
+            if (container != null)
+            {
+                List<Image> found = new List<Image>();
+                for (int i = 1; i <= 6; i++)
+                {
+                    Transform t = container.transform.Find($"FishIcon_{i}");
+                    if (t != null)
+                    {
+                        Image img = t.GetComponent<Image>();
+                        if (img != null) found.Add(img);
+                    }
+                }
+                if (found.Count > 0)
+                {
+                    growthIcons = found.ToArray();
+                }
+            }
+        }
+    }
+
+    public void UpdateGrowthIcons(int currentLevel, int maxLevel = -1)
+    {
+        EnsureGrowthIconsAssigned();
         if (growthIcons == null || growthIcons.Length == 0) return;
 
-        FormatGrowthIconsLayout();
+        if (maxLevel <= 0)
+        {
+            maxLevel = LevelManager.GetCurrentConfig().targetPlayerLevel;
+        }
+        maxLevel = Mathf.Clamp(maxLevel, 1, growthIcons.Length);
+
+        FormatGrowthIconsLayout(maxLevel);
 
         for (int i = 0; i < growthIcons.Length; i++)
         {
             if (growthIcons[i] == null) continue;
 
             int iconLevel = i + 1;
+            bool isVisible = (iconLevel <= maxLevel);
+            growthIcons[i].gameObject.SetActive(isVisible);
 
-            growthIcons[i].gameObject.SetActive(true);
+            if (!isVisible) continue;
 
             // --- Warning Icon Cleanup ---
             Transform warningTrans = growthIcons[i].transform.Find("WarningIcon");
@@ -1816,9 +2215,9 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             }
             else if (iconLevel == currentLevel)
             {
-                // Current Level: Highlighted (White) + Scaled Up (1.2x)
+                // Current Level: Highlighted (White) + Slightly Enlarged (1.12x)
                 growthIcons[i].color = currentColor;
-                growthIcons[i].transform.localScale = Vector3.one * 1.2f;
+                growthIcons[i].transform.localScale = Vector3.one * 1.12f;
             }
             else
             {
@@ -1829,51 +2228,95 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         }
     }
 
-    public void FormatGrowthIconsLayout()
+    public void FormatGrowthIconsLayout(int activeCount = -1)
     {
+        EnsureGrowthIconsAssigned();
         if (growthIcons == null || growthIcons.Length == 0) return;
 
+        if (activeCount <= 0)
+        {
+            activeCount = LevelManager.GetCurrentConfig().targetPlayerLevel;
+        }
+        activeCount = Mathf.Clamp(activeCount, 1, growthIcons.Length);
+
+        float totalWidth = activeCount * sectionWidth + (activeCount - 1) * segmentGap;
+
         // 1. Position the container cleanly right above the glass bar
-        Transform container = growthIcons[0].transform.parent;
+        Transform container = null;
+        for (int cIdx = 0; cIdx < growthIcons.Length; cIdx++)
+        {
+            if (growthIcons[cIdx] != null)
+            {
+                container = growthIcons[cIdx].transform.parent;
+                break;
+            }
+        }
+        if (container == null)
+        {
+            GameObject cGo = GameObject.Find("GrowthIconsContainer");
+            if (cGo != null) container = cGo.transform;
+        }
+
         if (container != null)
         {
             RectTransform containerRt = container.GetComponent<RectTransform>();
             if (containerRt != null)
             {
-                containerRt.sizeDelta = new Vector2(285f, 34f);
-                containerRt.anchoredPosition = new Vector2(0f, 32f);
+                containerRt.anchorMin = new Vector2(0f, 0.5f);
+                containerRt.anchorMax = new Vector2(0f, 0.5f);
+                containerRt.pivot = new Vector2(0f, 0.5f);
+                containerRt.anchoredPosition = new Vector2(0f, 26f);
+                containerRt.sizeDelta = new Vector2(totalWidth, 26f);
             }
 
+            // Completely eliminate HorizontalLayoutGroup so it never scrambles or centers icons in slots
             HorizontalLayoutGroup hlg = container.GetComponent<HorizontalLayoutGroup>();
             if (hlg != null)
             {
-                hlg.spacing = 6f;
-                hlg.childAlignment = TextAnchor.MiddleCenter;
-                hlg.childForceExpandWidth = true;
-                hlg.childForceExpandHeight = true;
-                hlg.childControlWidth = false;
-                hlg.childControlHeight = false;
+                hlg.enabled = false;
+                Destroy(hlg);
             }
         }
 
-        // 2. Balanced fish icon sizes (subtle, clean, and proportional)
+        // 2. Compact, balanced fish icon sizes
         Vector2[] targetSizes = new Vector2[]
         {
             new Vector2(26f, 17f),
             new Vector2(29f, 19f),
-            new Vector2(33f, 21f),
-            new Vector2(37f, 23f),
-            new Vector2(41f, 25f),
-            new Vector2(45f, 27f)
+            new Vector2(33f, 22f),
+            new Vector2(37f, 24f),
+            new Vector2(41f, 27f),
+            new Vector2(46f, 30f)
         };
 
         for (int i = 0; i < growthIcons.Length; i++)
         {
             if (growthIcons[i] == null) continue;
 
+            bool isVisible = (i < activeCount);
+            growthIcons[i].gameObject.SetActive(isVisible);
+
+            if (!isVisible) continue;
+
+            RectTransform rt = growthIcons[i].rectTransform;
+            rt.anchorMin = new Vector2(0f, 0.5f);
+            rt.anchorMax = new Vector2(0f, 0.5f);
+            rt.pivot = new Vector2(0f, 0.5f); // Align left to its own bar section
+
             growthIcons[i].preserveAspect = true;
-            Vector2 sz = (i < targetSizes.Length) ? targetSizes[i] : new Vector2(35f, 22f);
-            growthIcons[i].rectTransform.sizeDelta = sz;
+
+            float maxW = Mathf.Min(sectionWidth * 0.65f, 40f);
+            float baseW = (i < targetSizes.Length) ? targetSizes[i].x : 35f;
+            float baseH = (i < targetSizes.Length) ? targetSizes[i].y : 23f;
+            float aspect = (baseW > 0) ? (baseH / baseW) : 0.67f;
+            float actualW = Mathf.Min(baseW, maxW);
+            rt.sizeDelta = new Vector2(actualW, actualW * aspect);
+
+            // Align to the left of its own bar section
+            float sectionLeft = i * (sectionWidth + segmentGap);
+            float leftPad = (i == 0) ? 5f : 2f; // Small padding for dome curvature
+            float posX = sectionLeft + leftPad;
+            rt.anchoredPosition = new Vector2(posX, 0f);
         }
     }
 
@@ -1889,7 +2332,6 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         if(isPaused)
         {
             pauseBtn.SetActive(false);
-            if (hackWinBtn != null) hackWinBtn.SetActive(false);
             
             resumeBtn.SetActive(true);
             if(restartBtn != null) restartBtn.SetActive(true);
@@ -1911,7 +2353,6 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         }else
         {
             pauseBtn.SetActive(true);
-            if (hackWinBtn != null) hackWinBtn.SetActive(true);
             
             resumeBtn.SetActive(false);
             if(restartBtn != null) restartBtn.SetActive(false);
@@ -1998,9 +2439,8 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
     {
         if (endLevelModalObj != null) Destroy(endLevelModalObj);
 
-        // Hide pause button, pausedBg, hackWinBtn, and old ScoreScreen
+        // Hide pause button, pausedBg, and old ScoreScreen
         if (pauseBtn != null) pauseBtn.SetActive(false);
-        if (hackWinBtn != null) hackWinBtn.SetActive(false);
         if (pausedBg != null) pausedBg.SetActive(false);
         if (ScoreScreen != null) ScoreScreen.SetActive(false);
 
