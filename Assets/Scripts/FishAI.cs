@@ -255,32 +255,36 @@ public class FishAI : MonoBehaviour
         {
             // FIX: Use RotateTowards with actual turnSpeed to prevent snapping/jittering
             // "turn left right left right crazily" fix.
-            float step = turnSpeed * Mathf.Deg2Rad * Time.fixedDeltaTime;
+            float activeTurnSpeed = (fishData != null && fishData.Level == 1 && currentState == State.Flee) ? 140f : turnSpeed;
+            float step = activeTurnSpeed * Mathf.Deg2Rad * Time.fixedDeltaTime;
             currentDirection = Vector3.RotateTowards(currentDirection, targetDir, step, 0f).normalized;
         }
         
         // Safety check
         if (currentDirection == Vector2.zero) currentDirection = transform.right;
 
-        float targetSpeed = moveSpeed;
+        // Level 1 minnows swim slower (2.4f) so the player can catch them easily
+        float baseSpeed = (fishData != null && fishData.Level == 1) ? 2.4f : moveSpeed;
+        float targetSpeed = baseSpeed;
         if (currentState == State.Flee)
         {
-            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 3.2f : fleeRadius;
+            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 2.0f : fleeRadius;
             float proximity = Mathf.InverseLerp(activeFleeRadius, 0f, lastDistToPlayer);
             
-            // Level 1 fish flee slightly calmer so the player can catch them more easily
-            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.03f : fleeSpeedMultiplier;
+            // Level 1 fish flee calmly without sudden turbo boosts
+            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.0f : fleeSpeedMultiplier;
             float mult = Mathf.Lerp(1.0f, activeFleeMult, proximity);
             targetSpeed *= mult;
 
             if (fishData != null && fishData.Level == 1)
             {
-                // Cap fleeing speed of Level 1 fish to 2.5f so they don't outspeed the player
-                targetSpeed = Mathf.Min(targetSpeed, 2.5f);
+                // Cap fleeing speed of Level 1 fish to 2.4f so player (speed 5) easily catches them
+                targetSpeed = Mathf.Min(targetSpeed, 2.4f);
             }
         }
         if (currentState == State.Chase) targetSpeed *= chaseSpeedMultiplier;
-        targetSpeed = Mathf.Clamp(targetSpeed, minSpeed, maxSpeed);
+        float activeMinSpeed = (fishData != null && fishData.Level == 1) ? 1.5f : minSpeed;
+        targetSpeed = Mathf.Clamp(targetSpeed, activeMinSpeed, maxSpeed);
         float rate = targetSpeed > currentSpeed ? accel : decel;
         currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.fixedDeltaTime);
         KeepVerticalInBounds();
@@ -369,10 +373,10 @@ public class FishAI : MonoBehaviour
         bool playerCanEatMe = playerLevel >= fishData.Level;
         float currentFleeRadius = fleeRadius;
         
-        // Smallest fish (Level 1 / grouped together): slightly smaller flee radius so it's a bit easier to catch
+        // Smallest fish (Level 1 / grouped together): small flee radius so player can easily approach and eat them
         if (fishData != null && fishData.Level == 1)
         {
-            currentFleeRadius = 3.2f; // Reduced from 4.5f
+            currentFleeRadius = 2.0f;
         }
 
         if (distToPlayer < currentFleeRadius && playerCanEatMe)

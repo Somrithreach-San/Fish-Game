@@ -160,20 +160,19 @@ public class PlayerController : MonoBehaviour
     void Start()
     {
         // USER REQUEST: "Feeding Frenzy" Style Progression
-        // Easy start, but gets significantly harder at higher levels.
-        baseXpRequirement = 80;
-        levelXpIncreasePercentage = 0.7f;
+        // Level 1 takes ~15 minnows (120 XP / 8 XP) to advance, preventing instant level skips.
+        baseXpRequirement = 120;
+        levelXpIncreasePercentage = 0.65f;
+        currentLevelXp = baseXpRequirement;
 
-        // FIX: Ensure MaxLevel is at least 6 (User reported Level 6 issues)
-        if (maxLevel < 6)
-        {
-            maxLevel = 6;
-        }
+        // Level Progression: Set target level from LevelManager configuration
+        LevelConfig cfg = LevelManager.GetCurrentConfig();
+        maxLevel = cfg.targetPlayerLevel;
 
-        // FIX: Ensure levelScales array matches MaxLevel
-        if (levelScales == null || levelScales.Length < maxLevel)
+        // Ensure levelScales array has slots for all levels
+        if (levelScales == null || levelScales.Length < 6)
         {
-            System.Array.Resize(ref levelScales, maxLevel);
+            System.Array.Resize(ref levelScales, 6);
             
             // Fill new slots if they were empty (0)
             // Default pattern: 0.5, 0.62, 0.74, 0.86, 0.98, 1.10
@@ -918,7 +917,6 @@ public class PlayerController : MonoBehaviour
 
         EventManager.Trigger("playerDeath");
         EventManager.Trigger("GameLoss"); // Trigger Loss Message
-        EventManager.Trigger<int>("GameOver", score);
         
         // FIX: Stop input and movement immediately
         isAlive = false;
@@ -949,7 +947,7 @@ public class PlayerController : MonoBehaviour
         }
 
         //Kill the referenced fish
-
+        LevelManager.RecordFishEaten(fish.Level, fish.IsGoldenFish);
         fish.Die();
 
         // Check for Golden Fish
@@ -1013,15 +1011,15 @@ public class PlayerController : MonoBehaviour
 
             if (!isPaused && isAlive)
             {
+                 LevelManager.CompleteCurrentLevel();
                  GameManager.instance.TriggerGameWin();
                  isAlive = false;
                  _moveInput = Vector2.zero;
                  if (rb != null) rb.linearVelocity = Vector2.zero;
                  StopSpeedEffect();
                  
-                 // Trigger Game Over event so UI knows?
+                 // Trigger Game Win event
                  EventManager.Trigger("GameWin"); // Trigger Win Message
-                 EventManager.Trigger<int>("GameOver", score);
             }
             return;
         }

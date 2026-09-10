@@ -15,12 +15,24 @@ public class Fish : MonoBehaviour
 
     [SerializeField]
     private int xp = 0;
-    // Standardized XP based on Level (can still be overridden in Inspector if needed, but we default it)
+    // Standardized XP based on Level (Level 1 is 8 XP so eating small minnows doesn't cause instant skips)
     public int Xp
     {
         get
         {
-            if (xp <= 0) return Mathf.Max(10, level * 18);
+            if (xp <= 0)
+            {
+                switch (level)
+                {
+                    case 1: return 8;
+                    case 2: return 18;
+                    case 3: return 32;
+                    case 4: return 50;
+                    case 5: return 75;
+                    case 6: return 110;
+                    default: return Mathf.Max(8, level * 16);
+                }
+            }
             return xp;
         }
     }
@@ -106,7 +118,7 @@ public class Fish : MonoBehaviour
             }
             else
             {
-                PlayerController pc = FindObjectOfType<PlayerController>();
+                PlayerController pc = FindFirstObjectByType<PlayerController>();
                 if (pc != null)
                 {
                     bubbleMaterial = pc.BubbleMaterial;
@@ -496,8 +508,9 @@ public class Fish : MonoBehaviour
         Vector3 worldCenter = gfx.TransformPoint(spriteCenter);
         Vector3 localCenter = transform.InverseTransformPoint(worldCenter);
 
-        // Apply Forgiveness (0.85f) - "Feeding Frenzy" feel
-        float forgiveness = 0.85f;
+        // Apply Forgiveness - Feeding Frenzy feel.
+        // Level 1 fish get a generous bite box (1.15f) so they are easy to scoop up and eat
+        float forgiveness = (level == 1) ? 1.15f : 0.85f;
         
         capsule.size = finalSize * forgiveness;
         capsule.offset = localCenter;

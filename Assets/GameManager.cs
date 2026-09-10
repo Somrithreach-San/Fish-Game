@@ -98,9 +98,7 @@ public class GameManager : MonoBehaviour
     private float defaultAmbientVolume = 1f;
 
 
-    [Range(0f, 10f)]
-    [SerializeField]
-    private float restartLevelTimer = 0f;
+
 
     // Called from WebGL JS interface
     public void SetPausedFromJS(int pausedState)
@@ -145,6 +143,7 @@ public class GameManager : MonoBehaviour
     private void Start()
     {
         IsGameOver = false; // Reset Game Over state
+        LevelManager.ResetLevelStats();
         
         //Get Virtual Camera Defaults
         GetVcamComponents();
@@ -233,6 +232,11 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
+        if (!isPaused && !IsGameOver)
+        {
+            LevelManager.LevelTimer += Time.deltaTime;
+        }
+
         // FIX: Mobile/Web Autoplay Policy
         // Browsers often block audio until the first user interaction.
         // If audio should be playing but isn't, retry on any input.
@@ -300,27 +304,25 @@ public class GameManager : MonoBehaviour
     }
 
 
-    Coroutine restartLevelSequence;
     void PlayerDeathSequence()
     {
-        // Fix: If game was paused, force unpause to allow restart sequence to run and hide pause menu
+        // Fix: If game was paused, force unpause to allow death sequence to run and hide pause menu
         if (isPaused)
         {
             PlayPause();
         }
 
         IsGameOver = true; // Flag Game Over to block pause
-        
-        if (restartLevelSequence == null)
-            restartLevelSequence = StartCoroutine( RestartLevel() );
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
     }
 
     /// <summary>
-    /// Public API to trigger game restart (e.g. on Win)
+    /// Public API to trigger game win
     /// </summary>
     public void TriggerGameWin()
     {
-        // Fix: If game was paused, force unpause to allow restart sequence to run and hide pause menu
+        // Fix: If game was paused, force unpause to allow win sequence to run and hide pause menu
         if (isPaused)
         {
             PlayPause();
@@ -328,32 +330,11 @@ public class GameManager : MonoBehaviour
 
         IsGameOver = true; // Flag Game Over to block pause
         
-        if (restartLevelSequence == null)
-        {
-            // Play win sound
-            if (sfxSource != null && stageClearClip != null)
-                sfxSource.PlayOneShot(stageClearClip);
+        if (sfxSource != null && stageClearClip != null)
+            sfxSource.PlayOneShot(stageClearClip);
 
-            // Optional: Play a win sound or show effect here
-            restartLevelSequence = StartCoroutine(RestartLevel());
-        }
-    }
-    
-    IEnumerator RestartLevel()
-    {
-        float resetTime = 0f;
-        while(resetTime < restartLevelTimer)
-        {
-            resetTime += Time.deltaTime;
-            yield return null;
-        }
-
-        Scene currentScene = SceneManager.GetActiveScene();
-        SceneManager.LoadScene(currentScene.buildIndex);
-
-        yield return new WaitForSeconds(1f);
-        
-        Start();
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
     }
 
 

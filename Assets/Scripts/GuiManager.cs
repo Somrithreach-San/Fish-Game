@@ -42,6 +42,7 @@ public class GuiManager : Singleton<GuiManager>
 
     [SerializeField]
     private GameObject pauseBtn;
+    private GameObject hackWinBtn;
     [SerializeField]
     private GameObject resumeBtn;
     [SerializeField]
@@ -200,21 +201,21 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         }
 
         EventManager.StartListening("GameWin", () => {
-             ShowGameMessage(victoryMessage);
              // Ensure cursor is visible for UI interaction
              Cursor.visible = true;
              Cursor.lockState = CursorLockMode.None;
+             ShowStageClearModal();
         });
 
         EventManager.StartListening("GameLoss", () => {
-             ShowGameMessage(defeatMessage);
              // Ensure cursor is visible for UI interaction
              Cursor.visible = true;
              Cursor.lockState = CursorLockMode.None;
+             ShowGameOverModal();
         });
 
         EventManager.StartListening("GameStart", () => {
-            SetXp(0, 1);
+            SetXp(0, 1, 1);
             HideScore();
             UpdateGrowthIcons(1); // Reset icons to level 1
         });
@@ -233,10 +234,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             UpdateGrowthIcons(level);
         });
 
-        // Ensure layout is fixed at start
-        UpdateGrowthIcons(1); // Initial state
-        
-        // Ensure XP bar starts empty
+        // Ensure XP bar starts empty and ProgressBar1 is uniformly scaled
         if (XpBar != null)
         {
              if (XpBar.type != Image.Type.Filled)
@@ -245,7 +243,24 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
                  XpBar.fillMethod = Image.FillMethod.Horizontal;
              }
              XpBar.fillAmount = 0f;
+
+             // Runtime enforcement: Ensure root ProgressBar1 is uniformly scaled 1:1 and properly sized
+             Transform pbTr = XpBar.transform.parent;
+             if (pbTr != null)
+             {
+                 RectTransform pbRt = pbTr.GetComponent<RectTransform>();
+                 if (pbRt != null)
+                 {
+                     pbRt.localScale = Vector3.one;
+                     pbRt.sizeDelta = new Vector2(285f, 28f);
+                     pbRt.anchoredPosition = new Vector2(35f, -45f);
+                 }
+             }
         }
+
+        // Ensure layout is fixed at start with large, clearly visible fish icons
+        FormatGrowthIconsLayout();
+        UpdateGrowthIcons(1); // Initial state
 
         // Ensure UI overlays are hidden at start (Fix Black Screen)
         if (pausedBg != null) pausedBg.SetActive(false);
@@ -366,6 +381,19 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         {
              pauseBtn.transform.SetAsLastSibling();
         }
+
+        // 3. Handle Hack Win Debug Button (for rapid level complete verification)
+        if (hackWinBtn != null)
+        {
+            Destroy(hackWinBtn);
+            hackWinBtn = null;
+        }
+
+        hackWinBtn = CreateHackWinButton(mainCanvas, HackCompleteLevel);
+        if (hackWinBtn != null)
+        {
+            hackWinBtn.transform.SetAsLastSibling();
+        }
     }
 
     private GameObject CreatePauseBubbleButton(Canvas parentCanvas, UnityEngine.Events.UnityAction action)
@@ -460,6 +488,89 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             t.color = Color.white;
             t.raycastTarget = false;
         }
+
+        return btnObj;
+    }
+
+    public void HackCompleteLevel()
+    {
+        LevelManager.CompleteCurrentLevel();
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.TriggerGameWin();
+        }
+        EventManager.Trigger("GameWin");
+    }
+
+    private GameObject CreateHackWinButton(Canvas parentCanvas, UnityEngine.Events.UnityAction action)
+    {
+        GameObject btnObj = new GameObject("HackWinButton");
+        btnObj.transform.SetParent(parentCanvas.transform, false);
+
+        RectTransform rt = btnObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1f, 1f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(1f, 1f);
+        rt.sizeDelta = new Vector2(48f, 48f);
+        rt.anchoredPosition = new Vector2(-92f, -25f);
+        rt.localScale = Vector3.one;
+
+        Image bgImg = btnObj.AddComponent<Image>();
+        Sprite bubble = GetBubbleSprite();
+        if (bubble != null)
+        {
+            bgImg.sprite = bubble;
+            bgImg.type = Image.Type.Simple;
+        }
+        bgImg.color = new Color(1f, 0.85f, 0.2f, 1f); // Golden bubble
+        bgImg.raycastTarget = true;
+
+        Button btn = btnObj.AddComponent<Button>();
+        btn.onClick.AddListener(() => PlayButtonSound());
+        btn.onClick.AddListener(action);
+
+        if (btnObj.GetComponent<ButtonHoverEffect>() == null)
+            btnObj.AddComponent<ButtonHoverEffect>();
+
+        LayoutElement le = btnObj.AddComponent<LayoutElement>();
+        le.ignoreLayout = true;
+
+        Canvas c = btnObj.AddComponent<Canvas>();
+        c.overrideSorting = true;
+        c.sortingOrder = 2001;
+        btnObj.AddComponent<GraphicRaycaster>();
+
+        // Text label "WIN"
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(btnObj.transform, false);
+        RectTransform rtText = textObj.AddComponent<RectTransform>();
+        rtText.anchorMin = Vector2.zero;
+        rtText.anchorMax = Vector2.one;
+        rtText.sizeDelta = Vector2.zero;
+        rtText.anchoredPosition = Vector2.zero;
+
+        Text t = textObj.AddComponent<Text>();
+        t.font = GetStandardFont();
+        t.text = "WIN";
+        t.alignment = TextAnchor.MiddleCenter;
+        t.fontSize = 15;
+        t.fontStyle = FontStyle.Bold;
+        t.color = new Color(0.2f, 0.12f, 0f, 1f);
+        t.raycastTarget = false;
+
+        // Hit Area padding for easy touch
+        GameObject hitArea = new GameObject("HitArea");
+        hitArea.transform.SetParent(btnObj.transform, false);
+        RectTransform rtHit = hitArea.AddComponent<RectTransform>();
+        rtHit.anchorMin = new Vector2(0.5f, 0.5f);
+        rtHit.anchorMax = new Vector2(0.5f, 0.5f);
+        rtHit.pivot = new Vector2(0.5f, 0.5f);
+        rtHit.sizeDelta = new Vector2(65f, 65f);
+        Image imgHit = hitArea.AddComponent<Image>();
+        imgHit.color = new Color(0, 0, 0, 0);
+        imgHit.raycastTarget = true;
+        Button btnHit = hitArea.AddComponent<Button>();
+        btnHit.onClick.AddListener(() => btn.onClick.Invoke());
 
         return btnObj;
     }
@@ -866,6 +977,13 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         {
             XpBar.fillAmount = Mathf.Lerp(XpBar.fillAmount, targetXpFill, Time.deltaTime * 5f);
         }
+
+        // Debug shortcut: press 'W' on keyboard to complete level instantly
+        var kb = UnityEngine.InputSystem.Keyboard.current;
+        if (kb != null && kb.wKey.wasPressedThisFrame && GameManager.instance != null && !GameManager.instance.isPaused && !GameManager.instance.IsGameOver)
+        {
+            HackCompleteLevel();
+        }
     }
 
 #if UNITY_EDITOR
@@ -927,7 +1045,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             
             // Add semi-transparent background image
             Image img = pausedBg.AddComponent<Image>();
-            img.color = new Color(0, 0, 0, 0.20f); // Darker background (User Request: 65%)
+            img.color = new Color(0, 0, 0, 0.40f); // Dark overlay
         }
         else
         {
@@ -935,7 +1053,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
              Image img = pausedBg.GetComponent<Image>();
              if (img != null)
              {
-                 img.color = new Color(0, 0, 0, 0.20f); // Darker background (User Request: 65%)
+                 img.color = new Color(0, 0, 0, 0.40f); // Dark overlay
              }
              
              // Ensure it has a Canvas for proper sorting (Overlay on top of everything)
@@ -1304,12 +1422,14 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
 
 
-    public void SetXp(int currentXP, int maxXp, int currentLevel = 1, int maxLevels = 1)
+    public void SetXp(int currentXP, int maxXp, int currentLevel = 1, int maxLevels = 6)
     {
         if (XpBar == null) return;
         
         // Calculate progress within current level (0 to 1)
         float levelProgress = (float)currentXP / (float)maxXp;
+
+        UpdateGrowthIcons(currentLevel);
 
         if (growthIcons != null && growthIcons.Length > 0)
         {
@@ -1339,6 +1459,10 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             if (endIdx >= 0 && endIdx < growthIcons.Length)
             {
                 endPos = GetNormalizedPosition(growthIcons[endIdx].rectTransform);
+            }
+            else
+            {
+                endPos = 1f;
             }
 
             // Interpolate
@@ -1663,9 +1787,11 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         return Mathf.Clamp01(normalized);
     }
 
-    private void UpdateGrowthIcons(int currentLevel)
+    public void UpdateGrowthIcons(int currentLevel, int maxLevel = 6)
     {
         if (growthIcons == null || growthIcons.Length == 0) return;
+
+        FormatGrowthIconsLayout();
 
         for (int i = 0; i < growthIcons.Length; i++)
         {
@@ -1673,14 +1799,14 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
             int iconLevel = i + 1;
 
+            growthIcons[i].gameObject.SetActive(true);
+
             // --- Warning Icon Cleanup ---
-            // We check for and destroy any existing "WarningIcon" objects to clean up the scene.
             Transform warningTrans = growthIcons[i].transform.Find("WarningIcon");
             if (warningTrans != null)
             {
                 Destroy(warningTrans.gameObject);
             }
-            // ---------------------------
 
             if (iconLevel < currentLevel)
             {
@@ -1703,6 +1829,54 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         }
     }
 
+    public void FormatGrowthIconsLayout()
+    {
+        if (growthIcons == null || growthIcons.Length == 0) return;
+
+        // 1. Position the container cleanly right above the glass bar
+        Transform container = growthIcons[0].transform.parent;
+        if (container != null)
+        {
+            RectTransform containerRt = container.GetComponent<RectTransform>();
+            if (containerRt != null)
+            {
+                containerRt.sizeDelta = new Vector2(285f, 34f);
+                containerRt.anchoredPosition = new Vector2(0f, 32f);
+            }
+
+            HorizontalLayoutGroup hlg = container.GetComponent<HorizontalLayoutGroup>();
+            if (hlg != null)
+            {
+                hlg.spacing = 6f;
+                hlg.childAlignment = TextAnchor.MiddleCenter;
+                hlg.childForceExpandWidth = true;
+                hlg.childForceExpandHeight = true;
+                hlg.childControlWidth = false;
+                hlg.childControlHeight = false;
+            }
+        }
+
+        // 2. Balanced fish icon sizes (subtle, clean, and proportional)
+        Vector2[] targetSizes = new Vector2[]
+        {
+            new Vector2(26f, 17f),
+            new Vector2(29f, 19f),
+            new Vector2(33f, 21f),
+            new Vector2(37f, 23f),
+            new Vector2(41f, 25f),
+            new Vector2(45f, 27f)
+        };
+
+        for (int i = 0; i < growthIcons.Length; i++)
+        {
+            if (growthIcons[i] == null) continue;
+
+            growthIcons[i].preserveAspect = true;
+            Vector2 sz = (i < targetSizes.Length) ? targetSizes[i] : new Vector2(35f, 22f);
+            growthIcons[i].rectTransform.sizeDelta = sz;
+        }
+    }
+
     // Removed duplicate CreateMissingButtons
     private void TogglePauseBtn(bool isPaused)
     {
@@ -1715,6 +1889,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         if(isPaused)
         {
             pauseBtn.SetActive(false);
+            if (hackWinBtn != null) hackWinBtn.SetActive(false);
             
             resumeBtn.SetActive(true);
             if(restartBtn != null) restartBtn.SetActive(true);
@@ -1736,6 +1911,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         }else
         {
             pauseBtn.SetActive(true);
+            if (hackWinBtn != null) hackWinBtn.SetActive(true);
             
             resumeBtn.SetActive(false);
             if(restartBtn != null) restartBtn.SetActive(false);
@@ -1774,46 +1950,411 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
 
     private void ShowScore(int score = 0)
     {
-        if (ScoreScreen == null || ScoreText == null) return;
-        ScoreScreen.SetActive(true);
-        ScoreText.gameObject.SetActive(false);
-        
-        // Fix: Removed score display logic per user request
-        /*
-        if (messageText != null)
-        {
-            if (messageText.gameObject.activeSelf && !messageText.text.Contains("Score:"))
-            {
-                messageText.text += "\nScore: " + score.ToString();
-            }
-            else
-            {
-                messageText.text = "Score: " + score.ToString();
-            }
-            messageText.gameObject.SetActive(true);
-        }
-        */
+        if (ScoreScreen != null) ScoreScreen.SetActive(false);
     }
 
     private void ShowGameMessage(string message)
     {
-        if (ScoreScreen == null) return;
-        ScoreScreen.SetActive(true);
-        if (ScoreText != null) ScoreText.gameObject.SetActive(false);
-        
-        if (messageText != null)
-        {
-            messageText.text = message;
-            messageText.gameObject.SetActive(true);
-        }
+        if (ScoreScreen != null) ScoreScreen.SetActive(false);
     }
 
     private void HideScore()
     {
-        if (ScoreScreen == null || ScoreText == null) return;
-        ScoreScreen.SetActive(false);
-        ScoreText.text = "0";
+        if (ScoreScreen != null) ScoreScreen.SetActive(false);
+        if (ScoreText != null) ScoreText.text = "0";
         if (messageText != null) messageText.gameObject.SetActive(false);
+    }
+
+    private GameObject endLevelModalObj;
+
+    public void ShowStageClearModal()
+    {
+        CreateEndLevelModal(true);
+    }
+
+    public void ShowGameOverModal()
+    {
+        CreateEndLevelModal(false);
+    }
+
+    private Font GetStandardFont()
+    {
+        Font f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (f == null) f = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        if (f == null) f = Font.CreateDynamicFontFromOSFont("Arial", 24);
+        if (f == null) f = Resources.Load<Font>("Arial");
+        return f;
+    }
+
+    private Font GetKhmerFont()
+    {
+        Font f = customFont;
+        if (f == null) f = messageFont;
+        if (f == null) f = Resources.Load<Font>("lmns1");
+        return f;
+    }
+
+    private void CreateEndLevelModal(bool isVictory)
+    {
+        if (endLevelModalObj != null) Destroy(endLevelModalObj);
+
+        // Hide pause button, pausedBg, hackWinBtn, and old ScoreScreen
+        if (pauseBtn != null) pauseBtn.SetActive(false);
+        if (hackWinBtn != null) hackWinBtn.SetActive(false);
+        if (pausedBg != null) pausedBg.SetActive(false);
+        if (ScoreScreen != null) ScoreScreen.SetActive(false);
+
+        // Freeze game time cleanly while showing modal (just like Pause menu)
+        Time.timeScale = 0f;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+
+        // Find the main UI Canvas (the exact same one pausedBg lives in)
+        Canvas mainCanvas = null;
+        if (pausedBg != null) mainCanvas = pausedBg.GetComponentInParent<Canvas>();
+        if (mainCanvas == null) mainCanvas = FindFirstObjectByType<Canvas>();
+
+        endLevelModalObj = new GameObject("EndLevelModal");
+        if (mainCanvas != null)
+        {
+            endLevelModalObj.transform.SetParent(mainCanvas.transform, false);
+        }
+
+        Canvas modalCanvas = endLevelModalObj.AddComponent<Canvas>();
+        modalCanvas.overrideSorting = true;
+        modalCanvas.sortingOrder = 3000; // Topmost
+
+        endLevelModalObj.AddComponent<GraphicRaycaster>();
+
+        // Dark transparent background matching pause menu (0.40f opacity)
+        Image bgImg = endLevelModalObj.AddComponent<Image>();
+        bgImg.color = new Color(0, 0, 0, 0.40f);
+        bgImg.raycastTarget = true;
+
+        RectTransform rtBg = endLevelModalObj.GetComponent<RectTransform>();
+        rtBg.anchorMin = Vector2.zero;
+        rtBg.anchorMax = Vector2.one;
+        rtBg.offsetMin = Vector2.zero;
+        rtBg.offsetMax = Vector2.zero;
+        rtBg.pivot = new Vector2(0.5f, 0.5f);
+        rtBg.localScale = Vector3.one;
+
+        endLevelModalObj.transform.SetAsLastSibling();
+
+        // Dynamic scale factor matching pause menu
+        float scaleFactor = 1.0f;
+        if (mainCanvas != null)
+        {
+            RectTransform canvasRect = mainCanvas.GetComponent<RectTransform>();
+            if (canvasRect != null && canvasRect.rect.height > 0)
+            {
+                scaleFactor = Mathf.Clamp(canvasRect.rect.height / 1080f, 0.5f, 2.0f);
+            }
+        }
+
+        Font stdFont = GetStandardFont();
+        Font khFont = GetKhmerFont();
+
+        int currentLvl = LevelManager.CurrentLevel;
+        bool hasNext = isVictory && (currentLvl < LevelManager.TOTAL_LEVELS);
+        Font activeFont = (khFont != null) ? khFont : stdFont;
+
+        if (isVictory)
+        {
+            LevelConfig cfg = LevelManager.GetCurrentConfig();
+            int numFish = Mathf.Clamp(cfg.maxEnemyLevel, 1, 6);
+            bool isTwoColumn = (numFish > 3);
+            int maxRows = isTwoColumn ? 3 : numFish;
+            float rowSpacing = 58f * scaleFactor;
+            float colOffset = 160f * scaleFactor;
+            float fishListHeight = (maxRows - 1) * rowSpacing;
+
+            // Centering math: perfectly balances title, subtitle, duration, vertical fish list, and buttons
+            float fishListCenterY = -15f * scaleFactor;
+            float startY = fishListCenterY + (fishListHeight / 2f);
+
+            float timeY = startY + (64f * scaleFactor);
+            float subtitleY = timeY + (58f * scaleFactor);
+            float titleY = subtitleY + (68f * scaleFactor);
+            float buttonY = (fishListCenterY - (fishListHeight / 2f)) - (125f * scaleFactor);
+
+            // 1. Victory Title: "sUmGbGrsaTr" (សូមអបអរសាទរ - Congratulations)
+            GameObject titleObj = new GameObject("TitleText");
+            titleObj.transform.SetParent(endLevelModalObj.transform, false);
+            RectTransform rtTitle = titleObj.AddComponent<RectTransform>();
+            rtTitle.anchorMin = new Vector2(0.5f, 0.5f);
+            rtTitle.anchorMax = new Vector2(0.5f, 0.5f);
+            rtTitle.pivot = new Vector2(0.5f, 0.5f);
+            rtTitle.anchoredPosition = new Vector2(0, titleY);
+            rtTitle.sizeDelta = new Vector2(1000f * scaleFactor, 95f * scaleFactor);
+
+            Text titleTxt = titleObj.AddComponent<Text>();
+            if (activeFont != null) titleTxt.font = activeFont;
+            titleTxt.text = !string.IsNullOrEmpty(victoryMessage) ? victoryMessage : "sUmGbGrsaTr"; // សូមអបអរសាទរ
+            titleTxt.alignment = TextAnchor.MiddleCenter;
+            titleTxt.fontSize = Mathf.RoundToInt(72f * scaleFactor); // Larger font size
+            titleTxt.fontStyle = FontStyle.Bold;
+            titleTxt.color = new Color(1f, 0.88f, 0.25f, 1f); // Bright Gold
+            Shadow tShadow = titleObj.AddComponent<Shadow>();
+            tShadow.effectColor = new Color(0, 0, 0, 0.85f);
+            tShadow.effectDistance = new Vector2(2.5f * scaleFactor, -2.5f * scaleFactor);
+
+            // 2. Level Subtitle: "kmrit X )anbBa©ab;" (កម្រិត X បានបញ្ចប់ - Level X Completed)
+            GameObject subTitleObj = new GameObject("KhmerSubtitle");
+            subTitleObj.transform.SetParent(endLevelModalObj.transform, false);
+            RectTransform rtSubTitle = subTitleObj.AddComponent<RectTransform>();
+            rtSubTitle.anchorMin = new Vector2(0.5f, 0.5f);
+            rtSubTitle.anchorMax = new Vector2(0.5f, 0.5f);
+            rtSubTitle.pivot = new Vector2(0.5f, 0.5f);
+            rtSubTitle.anchoredPosition = new Vector2(0, subtitleY);
+            rtSubTitle.sizeDelta = new Vector2(800f * scaleFactor, 65f * scaleFactor);
+
+            Text subTitleTxt = subTitleObj.AddComponent<Text>();
+            if (activeFont != null) subTitleTxt.font = activeFont;
+            subTitleTxt.text = "kmrit " + currentLvl + " )anbBa©ab;"; // កម្រិត X បានបញ្ចប់
+            subTitleTxt.alignment = TextAnchor.MiddleCenter;
+            subTitleTxt.fontSize = Mathf.RoundToInt(44f * scaleFactor); // Larger font size
+            subTitleTxt.fontStyle = FontStyle.Bold;
+            subTitleTxt.color = new Color(0.85f, 0.95f, 1f, 0.95f);
+            Shadow stShadow = subTitleObj.AddComponent<Shadow>();
+            stShadow.effectColor = new Color(0, 0, 0, 0.85f);
+            stShadow.effectDistance = new Vector2(2f * scaleFactor, -2f * scaleFactor);
+
+            // 3. Duration: "ryHeBl : 00:00" (Khmer Label + Clean standard digital clock)
+            int totalSeconds = Mathf.Max(0, Mathf.FloorToInt(LevelManager.LevelTimer));
+            string timeFormatted = (totalSeconds >= 3600)
+                ? string.Format("{0:00}:{1:00}:{2:00}", totalSeconds / 3600, (totalSeconds % 3600) / 60, totalSeconds % 60)
+                : string.Format("{0:00}:{1:00}", totalSeconds / 60, totalSeconds % 60);
+
+            GameObject timeRowObj = new GameObject("TimeSpentRow");
+            timeRowObj.transform.SetParent(endLevelModalObj.transform, false);
+            RectTransform rtTime = timeRowObj.AddComponent<RectTransform>();
+            rtTime.anchorMin = new Vector2(0.5f, 0.5f);
+            rtTime.anchorMax = new Vector2(0.5f, 0.5f);
+            rtTime.pivot = new Vector2(0.5f, 0.5f);
+            rtTime.anchoredPosition = new Vector2(0, timeY);
+            rtTime.sizeDelta = new Vector2(600f * scaleFactor, 55f * scaleFactor);
+
+            // Duration Label (Khmer: ryHeBl = រយៈពេល)
+            GameObject lblObj = new GameObject("Label");
+            lblObj.transform.SetParent(timeRowObj.transform, false);
+            RectTransform rtLbl = lblObj.AddComponent<RectTransform>();
+            rtLbl.anchorMin = new Vector2(0.5f, 0.5f);
+            rtLbl.anchorMax = new Vector2(0.5f, 0.5f);
+            rtLbl.pivot = new Vector2(1f, 0.5f);
+            rtLbl.anchoredPosition = new Vector2(-10f * scaleFactor, 0);
+            rtLbl.sizeDelta = new Vector2(300f * scaleFactor, 55f * scaleFactor);
+
+            Text lblTxt = lblObj.AddComponent<Text>();
+            if (activeFont != null) lblTxt.font = activeFont;
+            lblTxt.text = "ryHeBl"; // រយៈពេល
+            lblTxt.alignment = TextAnchor.MiddleRight;
+            lblTxt.fontSize = Mathf.RoundToInt(42f * scaleFactor); // Larger font size
+            lblTxt.fontStyle = FontStyle.Bold;
+            lblTxt.color = new Color(0.4f, 0.9f, 1f, 1f); // Bright Aqua/Cyan
+            Shadow lblShadow = lblObj.AddComponent<Shadow>();
+            lblShadow.effectColor = new Color(0, 0, 0, 0.85f);
+            lblShadow.effectDistance = new Vector2(2f * scaleFactor, -2f * scaleFactor);
+
+            // Duration Clock Value (: 00:00 in standard font so digits and colon are crisp)
+            GameObject valObj = new GameObject("Value");
+            valObj.transform.SetParent(timeRowObj.transform, false);
+            RectTransform rtVal = valObj.AddComponent<RectTransform>();
+            rtVal.anchorMin = new Vector2(0.5f, 0.5f);
+            rtVal.anchorMax = new Vector2(0.5f, 0.5f);
+            rtVal.pivot = new Vector2(0f, 0.5f);
+            rtVal.anchoredPosition = new Vector2(0f, 0);
+            rtVal.sizeDelta = new Vector2(300f * scaleFactor, 55f * scaleFactor);
+
+            Text valTxt = valObj.AddComponent<Text>();
+            if (stdFont != null) valTxt.font = stdFont;
+            valTxt.text = ": " + timeFormatted;
+            valTxt.alignment = TextAnchor.MiddleLeft;
+            valTxt.fontSize = Mathf.RoundToInt(42f * scaleFactor); // Larger font size
+            valTxt.fontStyle = FontStyle.Bold;
+            valTxt.color = new Color(0.4f, 0.9f, 1f, 1f);
+            Shadow valShadow = valObj.AddComponent<Shadow>();
+            valShadow.effectColor = new Color(0, 0, 0, 0.85f);
+            valShadow.effectDistance = new Vector2(2f * scaleFactor, -2f * scaleFactor);
+
+            // 4. Fish Rows (Max 3 per vertical column, 2 columns if > 3 fish)
+            for (int i = 1; i <= numFish; i++)
+            {
+                float colX = 0f;
+                int rowIndex = i - 1;
+                if (isTwoColumn)
+                {
+                    if (i <= 3)
+                    {
+                        colX = -colOffset;
+                        rowIndex = i - 1;
+                    }
+                    else
+                    {
+                        colX = colOffset;
+                        rowIndex = i - 4;
+                    }
+                }
+                float rowY = startY - (rowIndex * rowSpacing);
+
+                GameObject fishItemObj = new GameObject("FishItem_" + i);
+                fishItemObj.transform.SetParent(endLevelModalObj.transform, false);
+                RectTransform rtItem = fishItemObj.AddComponent<RectTransform>();
+                rtItem.anchorMin = new Vector2(0.5f, 0.5f);
+                rtItem.anchorMax = new Vector2(0.5f, 0.5f);
+                rtItem.pivot = new Vector2(0.5f, 0.5f);
+                rtItem.anchoredPosition = new Vector2(colX, rowY);
+                rtItem.sizeDelta = new Vector2(280f * scaleFactor, 52f * scaleFactor);
+
+                // Fish Icon (Left of column divider: pivot (1, 0.5), right edge at X = -12)
+                GameObject iconObj = new GameObject("Icon");
+                iconObj.transform.SetParent(fishItemObj.transform, false);
+                RectTransform rtIcon = iconObj.AddComponent<RectTransform>();
+                rtIcon.anchorMin = new Vector2(0.5f, 0.5f);
+                rtIcon.anchorMax = new Vector2(0.5f, 0.5f);
+                rtIcon.pivot = new Vector2(1f, 0.5f);
+                rtIcon.anchoredPosition = new Vector2(-12f * scaleFactor, 0);
+                rtIcon.sizeDelta = new Vector2(70f * scaleFactor, 48f * scaleFactor);
+
+                Image iconImg = iconObj.AddComponent<Image>();
+                if (growthIcons != null && (i - 1) < growthIcons.Length && growthIcons[i - 1] != null)
+                {
+                    iconImg.sprite = growthIcons[i - 1].sprite;
+                }
+                iconImg.preserveAspect = true;
+
+                // Fish Count Text (Right of column divider: pivot (0, 0.5), left edge at X = 0)
+                int eatenCount = (i < LevelManager.FishEatenCounts.Length) ? LevelManager.FishEatenCounts[i] : 0;
+
+                GameObject countObj = new GameObject("Count");
+                countObj.transform.SetParent(fishItemObj.transform, false);
+                RectTransform rtCount = countObj.AddComponent<RectTransform>();
+                rtCount.anchorMin = new Vector2(0.5f, 0.5f);
+                rtCount.anchorMax = new Vector2(0.5f, 0.5f);
+                rtCount.pivot = new Vector2(0f, 0.5f);
+                rtCount.anchoredPosition = new Vector2(0f, 0);
+                rtCount.sizeDelta = new Vector2(150f * scaleFactor, 50f * scaleFactor);
+
+                Text countTxt = countObj.AddComponent<Text>();
+                if (stdFont != null) countTxt.font = stdFont;
+                countTxt.text = ":  " + eatenCount;
+                countTxt.alignment = TextAnchor.MiddleLeft;
+                countTxt.fontSize = Mathf.RoundToInt(42f * scaleFactor); // Larger font size
+                countTxt.fontStyle = FontStyle.Bold;
+                countTxt.color = Color.white;
+                Shadow cShadow = countObj.AddComponent<Shadow>();
+                cShadow.effectColor = new Color(0, 0, 0, 0.85f);
+                cShadow.effectDistance = new Vector2(2f * scaleFactor, -2f * scaleFactor);
+            }
+
+            // 6. Action Buttons: Menu, Play Again, Next (Clean buttons with no English subtitles)
+            Vector2 btnSize = new Vector2(135f * scaleFactor, 135f * scaleFactor);
+            int btnFontSize = Mathf.RoundToInt(50f * scaleFactor);
+
+            if (hasNext)
+            {
+                // Menu (Left)
+                GameObject menuBtnObj = CreateButton("MenuBtn", endLevelModalObj.transform);
+                CustomizeButton(menuBtnObj, "muWnuy", Color.white, btnSize, btnFontSize);
+                PositionButton(menuBtnObj, new Vector2(-180f * scaleFactor, buttonY));
+                SetupButton(menuBtnObj, () =>
+                {
+                    MainMenuManager.OpenLevelSelectOnLoad = true;
+                    Time.timeScale = 1f;
+                    SceneManager.LoadScene("MainMenu");
+                });
+
+                // Play Again (Center)
+                GameObject replayBtn = CreateButton("PlayAgainBtn", endLevelModalObj.transform);
+                CustomizeButton(replayBtn, "safµI", Color.white, btnSize, btnFontSize);
+                PositionButton(replayBtn, new Vector2(0f, buttonY));
+                SetupButton(replayBtn, () =>
+                {
+                    Time.timeScale = 1f;
+                    SceneManager.LoadScene("SampleScene");
+                });
+
+                // Next Level (Right) - Short "Next" text: "bnÞab;" (បន្ទាប់)
+                GameObject nextBtn = CreateButton("NextLevelBtn", endLevelModalObj.transform);
+                CustomizeButton(nextBtn, "bnÞab;", Color.white, btnSize, btnFontSize);
+                PositionButton(nextBtn, new Vector2(180f * scaleFactor, buttonY));
+                SetupButton(nextBtn, () =>
+                {
+                    LevelManager.CurrentLevel = currentLvl + 1;
+                    Time.timeScale = 1f;
+                    SceneManager.LoadScene("SampleScene");
+                });
+            }
+            else
+            {
+                // All levels completed: Menu & Play Again
+                GameObject menuBtnObj = CreateButton("MenuBtn", endLevelModalObj.transform);
+                CustomizeButton(menuBtnObj, "muWnuy", Color.white, btnSize, btnFontSize);
+                PositionButton(menuBtnObj, new Vector2(-110f * scaleFactor, buttonY));
+                SetupButton(menuBtnObj, () =>
+                {
+                    MainMenuManager.OpenLevelSelectOnLoad = true;
+                    Time.timeScale = 1f;
+                    SceneManager.LoadScene("MainMenu");
+                });
+
+                GameObject replayBtn = CreateButton("PlayAgainBtn", endLevelModalObj.transform);
+                CustomizeButton(replayBtn, "safµI", Color.white, btnSize, btnFontSize);
+                PositionButton(replayBtn, new Vector2(110f * scaleFactor, buttonY));
+                SetupButton(replayBtn, () =>
+                {
+                    Time.timeScale = 1f;
+                    SceneManager.LoadScene("SampleScene");
+                });
+            }
+        }
+        else
+        {
+            // Defeat (Try Again) - Clean 0.40f overlay
+            GameObject titleObj = new GameObject("DefeatTitle");
+            titleObj.transform.SetParent(endLevelModalObj.transform, false);
+            RectTransform rtTitle = titleObj.AddComponent<RectTransform>();
+            rtTitle.anchorMin = new Vector2(0.5f, 0.5f);
+            rtTitle.anchorMax = new Vector2(0.5f, 0.5f);
+            rtTitle.pivot = new Vector2(0.5f, 0.5f);
+            rtTitle.anchoredPosition = new Vector2(0, 100f * scaleFactor);
+            rtTitle.sizeDelta = new Vector2(800f * scaleFactor, 105f * scaleFactor);
+
+            Text titleTxt = titleObj.AddComponent<Text>();
+            if (activeFont != null) titleTxt.font = activeFont;
+            titleTxt.text = !string.IsNullOrEmpty(defeatMessage) ? defeatMessage : "B\xfcayamm\xfegeTot"; // ព្យាយាមម្តងទៀត
+            titleTxt.alignment = TextAnchor.MiddleCenter;
+            titleTxt.fontSize = Mathf.RoundToInt(78f * scaleFactor); // Larger font size
+            titleTxt.fontStyle = FontStyle.Bold;
+            titleTxt.color = Color.white;
+            Shadow dtShadow = titleObj.AddComponent<Shadow>();
+            dtShadow.effectColor = new Color(0, 0, 0, 0.85f);
+            dtShadow.effectDistance = new Vector2(2.5f * scaleFactor, -2.5f * scaleFactor);
+
+            Vector2 btnSize = new Vector2(140f * scaleFactor, 140f * scaleFactor);
+            int btnFontSize = Mathf.RoundToInt(50f * scaleFactor);
+
+            // Retry Button (Left)
+            GameObject retryBtn = CreateButton("RetryBtn", endLevelModalObj.transform);
+            CustomizeButton(retryBtn, "safµI", Color.white, btnSize, btnFontSize);
+            PositionButton(retryBtn, new Vector2(-120f * scaleFactor, -60f * scaleFactor));
+            SetupButton(retryBtn, () =>
+            {
+                Time.timeScale = 1f;
+                SceneManager.LoadScene("SampleScene");
+            });
+
+            // Menu Button (Right)
+            GameObject menuBtnObj = CreateButton("MenuBtn", endLevelModalObj.transform);
+            CustomizeButton(menuBtnObj, "muWnuy", Color.white, btnSize, btnFontSize);
+            PositionButton(menuBtnObj, new Vector2(120f * scaleFactor, -60f * scaleFactor));
+            SetupButton(menuBtnObj, () =>
+            {
+                MainMenuManager.OpenLevelSelectOnLoad = true;
+                Time.timeScale = 1f;
+                SceneManager.LoadScene("MainMenu");
+            });
+        }
     }
 
     // Helper to find UI objects even if inactive

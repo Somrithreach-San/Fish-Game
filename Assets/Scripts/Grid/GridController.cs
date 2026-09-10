@@ -205,9 +205,10 @@ public class GridController : MonoBehaviour
             // User Request: "More frequent both of it" -> Boosted chances
             // User Request: "increase the chanes of the hazrd hook more"
             
-            // User Request: "start spawning the fishserman hazard only when player reaches level 2"
-            // Slightly reduced chances per user request
-            if (GameManager.PlayerLevel >= 2)
+            // 1. Hazard Spawn Check (Priority over Fish)
+            LevelConfig levelCfg = LevelManager.GetCurrentConfig();
+
+            if (levelCfg.enableFishingRod && GameManager.PlayerLevel >= 2)
             {
                 float effectiveHazardChance = Mathf.Max(hazardChance, 0.22f); // Reduced from 0.35f
                 
@@ -229,16 +230,14 @@ public class GridController : MonoBehaviour
 
             // 1.5 Shark Spawn Check (Priority over Fish, Independent of Fisherman)
             // Can happen alongside other things, but limit to 1 active shark
-            
-            // User Request: "when player is still low level around level 1 -2 dont spawn the shark hazzard yet"
-            if (GameManager.PlayerLevel > 2)
+            if (levelCfg.enableShark && GameManager.PlayerLevel >= 2)
             {
-                // User Request: "Shark should appear more when user reaches level 4 5 6"
-                float effectiveSharkChance = Mathf.Max(sharkChance, 0.10f); // Reduced boost base from 0.15f
+                // Shark appears more when user reaches higher levels
+                float effectiveSharkChance = Mathf.Max(sharkChance, 0.10f);
                 
                 if (GameManager.PlayerLevel >= 4)
                 {
-                    effectiveSharkChance = 0.30f; // Reduced from 0.45f (User Request: "reduce it abit")
+                    effectiveSharkChance = 0.30f;
                 }
 
                 if (activeShark == null && Random.value < effectiveSharkChance)
@@ -403,6 +402,8 @@ public class GridController : MonoBehaviour
                 spawnLevel = playerLevel + 1;
             }
 
+            LevelConfig currentCfg = LevelManager.GetCurrentConfig();
+            if (spawnLevel > currentCfg.maxEnemyLevel) spawnLevel = currentCfg.maxEnemyLevel;
             if (spawnLevel > 6) spawnLevel = 6;
             
             // Determine Prefab
@@ -423,8 +424,8 @@ public class GridController : MonoBehaviour
                     Debug.LogWarning($"Spawn Mismatch! Intended: {spawnLevel}, Prefab: {prefabToSpawn.name} has Level {prefabToSpawn.Level}");
                 }
 
-                // SCHOOLING LOGIC: Level 1 fish regularly form schools (Feeding Frenzy style) across ALL player levels!
-                float schoolChance = 0.50f;
+                // SCHOOLING LOGIC: Level 1 fish can form schools, but toned down so they don't drown the screen
+                float schoolChance = (playerLevel == 1) ? 0.25f : 0.35f;
 
                 if (spawnLevel == 1 && prefabToSpawn.name.Contains("level 1 fish") && Random.value < schoolChance)
                 {
@@ -434,9 +435,8 @@ public class GridController : MonoBehaviour
                     bool movingRight = (spawnX < 0); 
                     school.Initialize(movingRight);
                     
-                    // User Request: "group of babies fish form together"
-                    // Reduced count to prevent crowding/jitter (3 to 5 fish)
-                    int schoolSize = Random.Range(3, 6);
+                    // Reduced count at Level 1 to prevent instant level skipping (2-3 fish)
+                    int schoolSize = (playerLevel == 1) ? Random.Range(2, 4) : Random.Range(3, 5);
                     
                     for (int s = 0; s < schoolSize; s++)
                     {
@@ -485,41 +485,41 @@ public class GridController : MonoBehaviour
         float roll = Random.value;
         if (playerLevel == 2)
         {
-            // 60% Level 1 (small fry / schools), 40% Level 2 (current level)
-            return (roll < 0.60f) ? 1 : 2;
+            // 35% Level 1, 65% Level 2 (focus primarily on current level prey)
+            return (roll < 0.35f) ? 1 : 2;
         }
         else if (playerLevel == 3)
         {
-            // 40% Level 1, 35% Level 2, 25% Level 3
-            if (roll < 0.40f) return 1;
-            if (roll < 0.75f) return 2;
+            // 20% Level 1, 40% Level 2, 40% Level 3
+            if (roll < 0.20f) return 1;
+            if (roll < 0.60f) return 2;
             return 3;
         }
         else if (playerLevel == 4)
         {
-            // 35% Level 1, 25% Level 2, 20% Level 3, 20% Level 4
-            if (roll < 0.35f) return 1;
-            if (roll < 0.60f) return 2;
-            if (roll < 0.80f) return 3;
+            // 15% Level 1, 25% Level 2, 30% Level 3, 30% Level 4
+            if (roll < 0.15f) return 1;
+            if (roll < 0.40f) return 2;
+            if (roll < 0.70f) return 3;
             return 4;
         }
         else if (playerLevel == 5)
         {
-            // 30% Level 1, 25% Level 2, 20% Level 3, 15% Level 4, 10% Level 5
-            if (roll < 0.30f) return 1;
-            if (roll < 0.55f) return 2;
-            if (roll < 0.75f) return 3;
-            if (roll < 0.90f) return 4;
+            // 15% Level 1, 20% Level 2, 25% Level 3, 25% Level 4, 15% Level 5
+            if (roll < 0.15f) return 1;
+            if (roll < 0.35f) return 2;
+            if (roll < 0.60f) return 3;
+            if (roll < 0.85f) return 4;
             return 5;
         }
         else // Level 6+
         {
-            // 30% Level 1, 20% Level 2, 18% Level 3, 14% Level 4, 10% Level 5, 8% Level 6
-            if (roll < 0.30f) return 1;
-            if (roll < 0.50f) return 2;
-            if (roll < 0.68f) return 3;
-            if (roll < 0.82f) return 4;
-            if (roll < 0.92f) return 5;
+            // 10% Level 1, 15% Level 2, 20% Level 3, 20% Level 4, 20% Level 5, 15% Level 6
+            if (roll < 0.10f) return 1;
+            if (roll < 0.25f) return 2;
+            if (roll < 0.45f) return 3;
+            if (roll < 0.65f) return 4;
+            if (roll < 0.85f) return 5;
             return 6;
         }
     }
