@@ -901,18 +901,18 @@ public class MainMenuManager : MonoBehaviour
         rtGrid.anchorMax = new Vector2(0.5f, 0.5f);
         rtGrid.pivot = new Vector2(0.5f, 0.5f);
         rtGrid.anchoredPosition = Vector2.zero;
-        rtGrid.sizeDelta = new Vector2(920f, 220f); // 1 row of 4 buttons
+        rtGrid.sizeDelta = new Vector2(950f, 440f); // 2 rows of 4 buttons (Row 1: 1-4 Ocean, Row 2: 5-8 Lake)
         rtGrid.localScale = Vector3.one;
 
         GridLayoutGroup grid = gridObj.GetComponent<GridLayoutGroup>();
         if (grid == null) grid = gridObj.AddComponent<GridLayoutGroup>();
         grid.cellSize = new Vector2(180f, 180f); // Same size as the 3 main buttons outside (180x180)
-        grid.spacing = new Vector2(50f, 0f);
+        grid.spacing = new Vector2(50f, 40f);
         grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
         grid.startAxis = GridLayoutGroup.Axis.Horizontal;
         grid.childAlignment = TextAnchor.MiddleCenter;
         grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        grid.constraintCount = 4; // 4 levels per row
+        grid.constraintCount = 4; // 4 levels per row (4x2 grid)
 
         Font limonFont = customFont;
         if (limonFont == null) limonFont = Resources.Load<Font>("lmns1");

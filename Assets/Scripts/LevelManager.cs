@@ -2,18 +2,19 @@ using UnityEngine;
 
 public struct LevelConfig
 {
-    public int levelNumber;        // 1, 2, 3, 4
+    public int levelNumber;        // 1 to 8
     public int startPlayerLevel;   // 1
-    public int targetPlayerLevel;  // Level 1 -> 2, Level 2 -> 3, Level 3 -> 4, Level 4 -> 6
-    public int maxEnemyLevel;      // Level 1 -> 2, Level 2 -> 3, Level 3 -> 4, Level 4 -> 6
-    public bool enableFishingRod;  // Lv 1: false, Lv 2: true, Lv 3: false, Lv 4: true
-    public bool enableShark;       // Lv 1: false, Lv 2: false, Lv 3: true, Lv 4: true
+    public int targetPlayerLevel;  // 2, 3, 4, 6
+    public int maxEnemyLevel;      // 2, 3, 4, 6
+    public bool enableFishingRod;  // Lv 1/5: false, Lv 2/6: true, Lv 3/7: false, Lv 4/8: true
+    public bool enableShark;       // Lv 1/5: false, Lv 2/6: false, Lv 3/7: true, Lv 4/8: true
+    public bool isLake;            // Lv 1-4: Ocean (false), Lv 5-8: Lake (true)
 }
 
 public static class LevelManager
 {
     private const string UNLOCKED_KEY = "HighestUnlockedLevel";
-    public const int TOTAL_LEVELS = 4;
+    public const int TOTAL_LEVELS = 8;
 
     private static int _currentLevel = 1;
     public static int CurrentLevel
@@ -36,6 +37,13 @@ public static class LevelManager
     {
         return level <= HighestUnlockedLevel;
     }
+
+    public static bool IsLakeLevel(int level)
+    {
+        return level >= 5 && level <= TOTAL_LEVELS;
+    }
+
+    public static bool IsCurrentLakeLevel => IsLakeLevel(CurrentLevel);
 
     public static void CompleteCurrentLevel()
     {
@@ -74,6 +82,7 @@ public static class LevelManager
     {
         switch (level)
         {
+            // === OCEAN SCENARIOS (Levels 1 - 4) ===
             case 1:
                 return new LevelConfig
                 {
@@ -82,7 +91,8 @@ public static class LevelManager
                     targetPlayerLevel = 2,
                     maxEnemyLevel = 2,
                     enableFishingRod = false,
-                    enableShark = false
+                    enableShark = false,
+                    isLake = false
                 };
             case 2:
                 return new LevelConfig
@@ -92,7 +102,8 @@ public static class LevelManager
                     targetPlayerLevel = 3,
                     maxEnemyLevel = 3,
                     enableFishingRod = true,
-                    enableShark = false
+                    enableShark = false,
+                    isLake = false
                 };
             case 3:
                 return new LevelConfig
@@ -102,10 +113,10 @@ public static class LevelManager
                     targetPlayerLevel = 4,
                     maxEnemyLevel = 4,
                     enableFishingRod = false,
-                    enableShark = true
+                    enableShark = true,
+                    isLake = false
                 };
             case 4:
-            default:
                 return new LevelConfig
                 {
                     levelNumber = 4,
@@ -113,7 +124,55 @@ public static class LevelManager
                     targetPlayerLevel = 6,
                     maxEnemyLevel = 6,
                     enableFishingRod = true,
-                    enableShark = true
+                    enableShark = true,
+                    isLake = false
+                };
+
+            // === LAKE SCENARIOS (Levels 5 - 8: Duplicated Ocean Logic with Lake Background) ===
+            case 5:
+                return new LevelConfig
+                {
+                    levelNumber = 5,
+                    startPlayerLevel = 1,
+                    targetPlayerLevel = 2,
+                    maxEnemyLevel = 2,
+                    enableFishingRod = false,
+                    enableShark = false,
+                    isLake = true
+                };
+            case 6:
+                return new LevelConfig
+                {
+                    levelNumber = 6,
+                    startPlayerLevel = 1,
+                    targetPlayerLevel = 3,
+                    maxEnemyLevel = 3,
+                    enableFishingRod = true,
+                    enableShark = false,
+                    isLake = true
+                };
+            case 7:
+                return new LevelConfig
+                {
+                    levelNumber = 7,
+                    startPlayerLevel = 1,
+                    targetPlayerLevel = 4,
+                    maxEnemyLevel = 4,
+                    enableFishingRod = false,
+                    enableShark = true,
+                    isLake = true
+                };
+            case 8:
+            default:
+                return new LevelConfig
+                {
+                    levelNumber = 8,
+                    startPlayerLevel = 1,
+                    targetPlayerLevel = 6,
+                    maxEnemyLevel = 6,
+                    enableFishingRod = true,
+                    enableShark = true,
+                    isLake = true
                 };
         }
     }

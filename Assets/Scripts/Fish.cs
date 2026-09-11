@@ -53,6 +53,15 @@ public class Fish : MonoBehaviour
     private bool isGoldenFish = false; // Is this the rare "Golden" fish?
     public bool IsGoldenFish => isGoldenFish;
 
+    [Header("Fishing Rod Hook State")]
+    private bool isHooked = false;
+    public bool IsHooked => isHooked;
+    private Hazard caughtHazard = null;
+    private Vector3 hookStartPos;
+    private float hookCurrentAngle = 0f;
+    private float hookAngleVelocity = 0f;
+    private float hookElapsedTime = 0f;
+
     [SerializeField]
     private GameObject goldenParticlePrefab; // Assign in prefab if needed, or we create one
     private bool goldenStatusActive = false;
@@ -60,12 +69,38 @@ public class Fish : MonoBehaviour
     // Schooling
     public FishSchool school;
     public Vector2 formationOffset;
+    public FishSchool GroupSchool { get; set; }
+    private bool isEaten = false;
 
     [Header("Bobbing Animation")]
     [SerializeField] private float bobSpeed = 2f;
     [SerializeField] private float bobAmount = 0.1f;
     private float randomBobOffset;
     private float defaultYLocal;
+
+    [Header("Pufferfish Settings")]
+    [SerializeField] private bool isPufferFish = false;
+    public bool IsPufferFish => isPufferFish;
+    [SerializeField] private Sprite normalSprite;
+    [SerializeField] private Sprite spikeSprite;
+    [SerializeField] private float spikeDetectRadius = 5.0f;
+    public float SpikeDetectRadius { get => spikeDetectRadius; set => spikeDetectRadius = value; }
+    [SerializeField] private float spikeDuration = 3.5f;
+    [SerializeField] private float deflateCooldown = 3.0f;
+    [SerializeField] private float spikeScaleMultiplier = 1.0f;
+    private bool isSpiked = false;
+    public bool IsSpiked => isSpiked;
+    private float spikeActiveTimer = 0f;
+    private float deflateCooldownTimer = 0f;
+    private SpriteRenderer cachedGfxSr;
+    private Vector3 gfxDefaultScale = Vector3.one;
+    private Coroutine spikeTransitionCoroutine;
+
+    [Header("Sick Fish Settings")]
+    [SerializeField] private bool isSickFish = false;
+    public bool IsSickFish => isSickFish;
+    [SerializeField] private Sprite sickFishSprite;
+    private bool defaultSickConfig = false;
 
     private Vector3 initialScale;
     private bool initialized = false;
@@ -238,6 +273,24 @@ public class Fish : MonoBehaviour
         }
     }
 
+    public void OnEatenByPlayer()
+    {
+        isEaten = true;
+        if (GroupSchool != null)
+        {
+            GroupSchool.OnFishEatenByPlayer(this, transform.position);
+        }
+    }
+
+    public void OnEatenByPredator()
+    {
+        isEaten = true;
+        if (GroupSchool != null)
+        {
+            GroupSchool.OnFishEatenByPredator(this);
+        }
+    }
+
     public void Die()
     {
         // Simple death logic
@@ -246,6 +299,12 @@ public class Fish : MonoBehaviour
     
     public void DespawnSelf()
     {
+        if (!isEaten && GroupSchool != null)
+        {
+            GroupSchool.OnFishDespawned(this);
+        }
+        isEaten = false;
+
         if (ObjectPoolManager.Instance != null)
         {
             ObjectPoolManager.Instance.Despawn(gameObject);
@@ -262,13 +321,21 @@ public class Fish : MonoBehaviour
         
         // Reset state for pooling
         school = null;
+        GroupSchool = null;
+        isEaten = false;
         formationOffset = Vector2.zero;
+        ResetHookState();
+        ResetSpikeState();
+        ResetSickState();
         // Don't reset 'initialized' as that tracks initialScale which is constant
     }
 
     private void OnDisable()
     {
         AllFish.Remove(this);
+        ResetHookState();
+        ResetSpikeState();
+        ResetSickState();
     }
 
     private void Start()
@@ -281,6 +348,19 @@ public class Fish : MonoBehaviour
             // But for Start, this is good.
             if (cachedGameManager.playerGameObject != null)
                 cachedPlayerTransform = cachedGameManager.playerGameObject.transform;
+        }
+
+        // Auto-configure pufferfish if level 4 or spikeSprite assigned
+        if (isPufferFish || level == 4 || spikeSprite != null)
+        {
+            isPufferFish = true;
+            if (cachedGfxSr == null && gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+            if (normalSprite == null && cachedGfxSr != null) normalSprite = cachedGfxSr.sprite;
+        }
+
+        if (isSickFish)
+        {
+            SetSickStatus(true);
         }
 
         // Ensure collider is set up and cache it immediately
@@ -524,6 +604,9 @@ public class Fish : MonoBehaviour
 
     private void Update()
     {
+        // When hooked by fishing rod, all autonomous logic is suspended
+        if (isHooked) return;
+
         // Bobbing Animation
         if (gfx != null && gfx != transform)
         {
@@ -554,6 +637,12 @@ public class Fish : MonoBehaviour
                 DespawnSelf();
                 return;
             }
+        }
+
+        // Pufferfish Threat Detection & State Update
+        if (isPufferFish && !isHooked)
+        {
+            UpdatePufferfishLogic();
         }
 
         // Manual Food Chain Check
@@ -587,14 +676,43 @@ public class Fish : MonoBehaviour
              Fish otherFish = col.GetComponent<Fish>();
              if (otherFish != null)
              {
-                 // I am bigger. I eat the smaller fish.
-                 if (this.level > otherFish.Level)
-                 {
-                     otherFish.Die();
-                     PlayEatEffect();
-                    var ai = GetComponent<FishAI>();
-                    if (ai != null) ai.OnAteFish(otherFish);
-                 }
+                 if (otherFish.IsHooked) continue;
+
+                  // Spiked Pufferfish Defense:
+                  // "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
+                  if (otherFish.IsSpiked)
+                  {
+                      if (this.level > otherFish.Level)
+                      {
+                          // This predator tried to eat the spiked pufferfish and dies on the spikes!
+                          this.OnEatenByPredator();
+                          this.Die();
+                          PlayEatEffect();
+                          return;
+                      }
+                  }
+
+                  if (this.IsSpiked)
+                  {
+                      if (otherFish.Level > this.level)
+                      {
+                          // Predator tried to eat me while I am spiked -> predator dies on my spikes!
+                          otherFish.OnEatenByPredator();
+                          otherFish.Die();
+                          PlayEatEffect();
+                          continue;
+                      }
+                  }
+
+                  // I am bigger. I eat the smaller fish.
+                  if (this.level > otherFish.Level)
+                  {
+                      otherFish.OnEatenByPredator();
+                      otherFish.Die();
+                      PlayEatEffect();
+                     var ai = GetComponent<FishAI>();
+                     if (ai != null) ai.OnAteFish(otherFish);
+                  }
              }
         }
     }
@@ -605,7 +723,13 @@ public class Fish : MonoBehaviour
         gfx = GetComponentInChildren<SpriteRenderer>()?.transform;
         if (gfx != null)
         {
-            image = gfx.GetComponent<SpriteRenderer>().sprite;
+            cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+            image = cachedGfxSr != null ? cachedGfxSr.sprite : null;
+            gfxDefaultScale = gfx.localScale;
+            if (normalSprite == null && cachedGfxSr != null)
+            {
+                normalSprite = cachedGfxSr.sprite;
+            }
         }
         else
         {
@@ -619,6 +743,7 @@ public class Fish : MonoBehaviour
             initialized = true;
         }
 
+        defaultSickConfig = isSickFish;
         EvaluateFish();
     }
 
@@ -785,6 +910,24 @@ public class Fish : MonoBehaviour
     {
         // Safety check
         if (collision == null) return;
+        if (isHooked) return;
+
+        // Check for Fishing Rod Hazard
+        Hazard hazard = collision.GetComponentInParent<Hazard>();
+        if (hazard != null)
+        {
+            // Level 1, Level 2, and Golden Fish are too small to bite -> NO collision / ignore
+            if (isGoldenFish || level < 3)
+            {
+                return;
+            }
+
+            if (!hazard.HasCatch)
+            {
+                OnHookedByHazard(hazard);
+                return;
+            }
+        }
 
         // Check if we collided with another Fish
         // We use GetComponent instead of Tag to be robust across different fish types
@@ -792,13 +935,40 @@ public class Fish : MonoBehaviour
         
         if (otherFish != null)
         {
-            // Self-collision check
-            if (otherFish == this) return;
+            // Self-collision check or ignore already hooked fish
+            if (otherFish == this || otherFish.IsHooked) return;
+
+            // Spiked Pufferfish Defense:
+            // "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
+            if (otherFish.IsSpiked)
+            {
+                if (this.level > otherFish.Level)
+                {
+                    // This predator tried to bite the spiked pufferfish and dies!
+                    this.OnEatenByPredator();
+                    this.Die();
+                    PlayEatEffect();
+                    return;
+                }
+            }
+
+            if (this.IsSpiked)
+            {
+                if (otherFish.Level > this.level)
+                {
+                    // Predator tried to bite me while I am spiked -> predator dies!
+                    otherFish.OnEatenByPredator();
+                    otherFish.Die();
+                    PlayEatEffect();
+                    return;
+                }
+            }
 
             // FOOD CHAIN LOGIC
             // I am bigger. I eat the smaller fish.
             if (this.level > otherFish.Level)
             {
+                otherFish.OnEatenByPredator();
                 otherFish.Die();
                 PlayEatEffect();
                 var ai = GetComponent<FishAI>();
@@ -807,5 +977,460 @@ public class Fish : MonoBehaviour
         }
     }
 
+    public void OnHookedByHazard(Hazard hazard)
+    {
+        if (isHooked || hazard == null) return;
+        // Level 1, Level 2, and Golden Fish cannot be hooked
+        if (isGoldenFish || level < 3) return;
+
+        // Confirm catch with hazard first before locking this fish down
+        if (!hazard.HookFish(this)) return;
+
+        // Note: Do NOT call ResetSpikeState() here so spiked pufferfish stays spiked while reeled up
+        isHooked = true;
+        caughtHazard = hazard;
+        hookElapsedTime = 0f;
+
+        // 0. Ensure graphics is facing right (scale.x > 0) so local 90 deg rotation is consistently Face-Up
+        Vector3 s = transform.localScale;
+        s.x = Mathf.Abs(s.x);
+        transform.localScale = s;
+        isFacingRight = true;
+
+        if (gfx != null)
+        {
+            gfx.localPosition = Vector3.zero;
+        }
+
+        // 1. Leave school
+        school = null;
+        formationOffset = Vector2.zero;
+
+        // 2. Disable AI & movement components
+        var ai = GetComponent<FishAI>();
+        if (ai != null) ai.enabled = false;
+
+        var movement = GetComponent<FishMovement>();
+        if (movement != null) movement.enabled = false;
+
+        Rigidbody2D rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.simulated = false;
+        }
+
+        // 3. Disable colliders so other fish/hazards don't interfere
+        Collider2D[] allCols = GetComponentsInChildren<Collider2D>();
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = false;
+        }
+
+        // 4. Play bite sound
+        AudioClip biteClip = eatSfxOverride;
+        if (biteClip == null)
+        {
+            PlayerController pc = FindFirstObjectByType<PlayerController>();
+            if (pc != null && pc.BiteSounds != null && pc.BiteSounds.Length > 0)
+            {
+                biteClip = pc.BiteSounds[Random.Range(0, pc.BiteSounds.Length)];
+            }
+        }
+        if (biteClip != null && AudioSettingsManager.IsSfxEnabled)
+        {
+            AudioSource.PlayClipAtPoint(biteClip, transform.position, 1.0f);
+        }
+
+        // 5. Disable animator if present
+        Animator anim = GetComponentInChildren<Animator>();
+        if (anim != null)
+        {
+            anim.enabled = false;
+        }
+
+        // 6. Record starting state for smooth interpolation
+        hookStartPos = transform.position;
+        float startAngle = (gfx != null) ? gfx.localEulerAngles.z : 0f;
+        if (startAngle > 180f) startAngle -= 360f;
+        hookCurrentAngle = startAngle;
+        hookAngleVelocity = 0f;
+    }
+
+    private void LateUpdate()
+    {
+        if (!isHooked) return;
+
+        // Safety check: if hazard is gone, inactive, or hook lasts abnormally long (> 12s), reel out and clean up
+        if (caughtHazard == null || !caughtHazard.gameObject.activeInHierarchy || hookElapsedTime > 12.0f)
+        {
+            OnReeledOutOfWater();
+            return;
+        }
+
+        if (GameManager.instance != null && GameManager.Paused) return;
+
+        hookElapsedTime += Time.deltaTime;
+
+        // Compute local mouth offset in gfx space
+        Vector3 localMouth = Vector3.zero;
+        SpriteRenderer sr = (gfx != null) ? gfx.GetComponent<SpriteRenderer>() : GetComponentInChildren<SpriteRenderer>();
+        if (sr != null && sr.sprite != null)
+        {
+            Bounds b = sr.sprite.bounds;
+            // Snout / mouth is at the front (+X) and vertical center
+            localMouth = new Vector3(b.max.x * 0.85f, b.center.y, 0f);
+        }
+
+        Vector3 baitPos = caughtHazard.GetBaitWorldPosition();
+
+        // ----------------------------------------------------
+        // Smoothly rotate to 90 degrees (Face-Up)
+        // ----------------------------------------------------
+        float targetAngle = 90f;
+        hookCurrentAngle = Mathf.SmoothDampAngle(hookCurrentAngle, targetAngle, ref hookAngleVelocity, 0.20f);
+
+        // Struggle wiggle around the Face-Up angle (reduced per user request)
+        float struggleWiggle = Mathf.Sin(Time.time * 20f) * 6.5f;
+        float displayAngle = hookCurrentAngle + struggleWiggle;
+
+        if (gfx != null)
+        {
+            gfx.localRotation = Quaternion.Euler(0f, 0f, displayAngle);
+        }
+
+        // ----------------------------------------------------
+        // Magnetism Snap & Position Pinning
+        // ----------------------------------------------------
+        Vector3 mouthWorld = (gfx != null) ? gfx.TransformPoint(localMouth) : transform.position;
+        Vector3 rootToMouth = mouthWorld - transform.position;
+        Vector3 targetRootPos = baitPos - rootToMouth;
+
+        float snapDuration = 0.15f;
+        if (hookElapsedTime < snapDuration)
+        {
+            float t = Mathf.Clamp01(hookElapsedTime / snapDuration);
+            float smoothT = Mathf.Sin(t * Mathf.PI * 0.5f);
+            transform.position = Vector3.Lerp(hookStartPos, targetRootPos, smoothT);
+        }
+        else
+        {
+            transform.position = targetRootPos;
+        }
+    }
+
+    public void OnReeledOutOfWater()
+    {
+        if (!isHooked) return;
+        ResetHookState();
+        Die();
+    }
+
+    public void ResetHookState()
+    {
+        isHooked = false;
+        caughtHazard = null;
+        hookElapsedTime = 0f;
+        hookCurrentAngle = 0f;
+        hookAngleVelocity = 0f;
+
+        var ai = GetComponent<FishAI>();
+        if (ai != null) ai.enabled = true;
+
+        var movement = GetComponent<FishMovement>();
+        if (movement != null) movement.enabled = false;
+
+        Rigidbody2D rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.bodyType = RigidbodyType2D.Dynamic;
+            rb.simulated = true;
+            rb.linearVelocity = Vector2.zero;
+            rb.gravityScale = 0f;
+            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+        }
+
+        Collider2D[] allCols = GetComponentsInChildren<Collider2D>(true);
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = true;
+        }
+
+        Animator anim = GetComponentInChildren<Animator>();
+        if (anim != null)
+        {
+            anim.enabled = true;
+        }
+
+        if (gfx != null)
+        {
+            gfx.localRotation = Quaternion.identity;
+            gfx.localPosition = new Vector3(gfx.localPosition.x, defaultYLocal, gfx.localPosition.z);
+        }
+
+        if (initialized)
+        {
+            transform.localScale = initialScale;
+        }
+        transform.rotation = Quaternion.identity;
+        ResetSpikeState();
+    }
+
+    #region Pufferfish Spike Logic
+
+    private void UpdatePufferfishLogic()
+    {
+        // Decrement recovery cooldown if recently deflated
+        if (deflateCooldownTimer > 0f)
+        {
+            deflateCooldownTimer -= Time.deltaTime;
+        }
+
+        if (isSpiked)
+        {
+            // Pufferfish can only hold its breath and stay spiked for a limited time (spikeDuration)
+            spikeActiveTimer -= Time.deltaTime;
+
+            // Time expired: pufferfish gets tired and MUST deflate!
+            if (spikeActiveTimer <= 0f)
+            {
+                SetSpikeMode(false);
+                deflateCooldownTimer = deflateCooldown; // Cannot re-inflate during this recovery window!
+            }
+            return;
+        }
+
+        // Currently in Normal Mode:
+        // If still in recovery cooldown, pufferfish is exhausted and CANNOT inflate!
+        // This is the player's window of opportunity to strike and eat it!
+        if (deflateCooldownTimer > 0f)
+        {
+            return;
+        }
+
+        bool threatDetected = false;
+        float detectRadiusSqr = spikeDetectRadius * spikeDetectRadius;
+
+        // Threat 1: Player (if alive, not hooked, and able to eat this pufferfish: PlayerLevel >= level)
+        if (cachedPlayerTransform == null && cachedGameManager != null)
+        {
+            if (cachedGameManager.playerGameObject != null)
+                cachedPlayerTransform = cachedGameManager.playerGameObject.transform;
+        }
+
+        if (cachedPlayerTransform != null)
+        {
+            PlayerController pc = cachedPlayerTransform.GetComponent<PlayerController>();
+            if (pc != null && pc.IsAlive && !pc.IsHooked && GameManager.PlayerLevel >= level)
+            {
+                float dSqr = ((Vector2)transform.position - (Vector2)cachedPlayerTransform.position).sqrMagnitude;
+                if (dSqr <= detectRadiusSqr)
+                {
+                    threatDetected = true;
+                }
+            }
+        }
+
+        // Threat 2: Predator AI Fish with Level > this.level (Level 5, 6, etc.)
+        if (!threatDetected)
+        {
+            for (int i = 0; i < AllFish.Count; i++)
+            {
+                Fish other = AllFish[i];
+                if (other == null || other == this || other.IsHooked) continue;
+                if (other.level > this.level)
+                {
+                    float dSqr = ((Vector2)transform.position - (Vector2)other.transform.position).sqrMagnitude;
+                    if (dSqr <= detectRadiusSqr)
+                    {
+                        threatDetected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (threatDetected)
+        {
+            spikeActiveTimer = spikeDuration;
+            SetSpikeMode(true);
+        }
+    }
+
+    public void SetSpikeMode(bool active)
+    {
+        if (isSpiked == active) return;
+        isSpiked = active;
+
+        if (spikeTransitionCoroutine != null)
+        {
+            StopCoroutine(spikeTransitionCoroutine);
+        }
+        spikeTransitionCoroutine = StartCoroutine(AnimateSpikeTransition(active));
+    }
+
+    private IEnumerator AnimateSpikeTransition(bool toSpiked)
+    {
+        if (cachedGfxSr == null && gfx != null)
+        {
+            cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+        }
+
+        Vector3 baseGfxScale = gfxDefaultScale;
+        if (baseGfxScale == Vector3.zero && gfx != null)
+        {
+            baseGfxScale = gfx.localScale;
+        }
+
+        Vector3 targetScale = toSpiked ? (baseGfxScale * spikeScaleMultiplier) : baseGfxScale;
+        float duration = 0.2f;
+        float elapsed = 0f;
+
+        if (toSpiked)
+        {
+            // Puff animation: squash slightly then expand outward
+            while (elapsed < duration * 0.45f)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / (duration * 0.45f);
+                float stretchX = Mathf.Lerp(1.0f, 1.15f, t);
+                float squashY = Mathf.Lerp(1.0f, 0.90f, t);
+                if (gfx != null)
+                {
+                    gfx.localScale = new Vector3(targetScale.x * stretchX, targetScale.y * squashY, targetScale.z);
+                }
+                yield return null;
+            }
+
+            // Swap sprite to spiked version (NO sound effect per user request)
+            if (cachedGfxSr != null && spikeSprite != null)
+            {
+                cachedGfxSr.sprite = spikeSprite;
+            }
+
+            // Quick puff pop settling to target scale
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = (elapsed - duration * 0.45f) / (duration * 0.55f);
+                float pop = Mathf.Lerp(1.15f, 1.0f, t);
+                if (gfx != null)
+                {
+                    gfx.localScale = new Vector3(targetScale.x * pop, targetScale.y * pop, targetScale.z);
+                }
+                yield return null;
+            }
+        }
+        else
+        {
+            // Deflate animation
+            while (elapsed < duration * 0.5f)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / (duration * 0.5f);
+                float shrink = Mathf.Lerp(1.0f, 0.88f, t);
+                if (gfx != null)
+                {
+                    gfx.localScale = new Vector3(baseGfxScale.x * shrink, baseGfxScale.y * shrink, baseGfxScale.z);
+                }
+                yield return null;
+            }
+
+            // Swap back to normal sprite
+            if (cachedGfxSr != null && normalSprite != null)
+            {
+                cachedGfxSr.sprite = normalSprite;
+            }
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = (elapsed - duration * 0.5f) / (duration * 0.5f);
+                float settle = Mathf.Lerp(0.88f, 1.0f, t);
+                if (gfx != null)
+                {
+                    gfx.localScale = new Vector3(baseGfxScale.x * settle, baseGfxScale.y * settle, baseGfxScale.z);
+                }
+                yield return null;
+            }
+        }
+
+        if (gfx != null)
+        {
+            gfx.localScale = targetScale;
+        }
+
+        // Re-fit CapsuleCollider2D to the new sprite shape
+        UpdateCollision();
+        spikeTransitionCoroutine = null;
+    }
+
+    public void ResetSpikeState()
+    {
+        if (spikeTransitionCoroutine != null)
+        {
+            StopCoroutine(spikeTransitionCoroutine);
+            spikeTransitionCoroutine = null;
+        }
+        isSpiked = false;
+        spikeActiveTimer = 0f;
+        deflateCooldownTimer = 0f;
+        if (cachedGfxSr == null && gfx != null)
+        {
+            cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+        }
+        if (cachedGfxSr != null)
+        {
+            cachedGfxSr.color = Color.white;
+            if (normalSprite != null)
+            {
+                cachedGfxSr.sprite = normalSprite;
+            }
+        }
+        if (gfx != null && gfxDefaultScale != Vector3.zero)
+        {
+            gfx.localScale = gfxDefaultScale;
+        }
+        UpdateCollision();
+    }
+
+    #endregion
+
+    #region Sick Fish Logic
+
+    public void SetSickStatus(bool sick)
+    {
+        isSickFish = sick;
+        if (cachedGfxSr == null && gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+        if (normalSprite == null && cachedGfxSr != null) normalSprite = cachedGfxSr.sprite;
+
+        if (cachedGfxSr != null)
+        {
+            if (sick && sickFishSprite != null)
+            {
+                cachedGfxSr.sprite = sickFishSprite;
+            }
+            else if (!sick && normalSprite != null)
+            {
+                cachedGfxSr.sprite = normalSprite;
+            }
+        }
+        UpdateCollision();
+    }
+
+    public void ResetSickState()
+    {
+        if (!defaultSickConfig)
+        {
+            SetSickStatus(false);
+        }
+        else
+        {
+            SetSickStatus(true);
+        }
+    }
+
+    #endregion
 }
 

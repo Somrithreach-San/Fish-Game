@@ -115,6 +115,21 @@ public class FishAI : MonoBehaviour
         wanderTarget = new Vector2(Mathf.Cos(theta), Mathf.Sin(theta)) * wanderRadius;
     }
 
+    void OnEnable()
+    {
+        player = GameManager.instance?.playerGameObject?.transform;
+        currentDirection = transform.right;
+        if (currentDirection == Vector2.zero) currentDirection = Vector2.right;
+        aiTickOffset = Random.Range(0, 5);
+        hunger = 0f;
+        postEatCooldownTimer = 0f;
+        currentChaseTimer = 0f;
+        currentCooldownTimer = 0f;
+        leaveTimer = 0f;
+        isLeaving = false;
+        currentState = State.Wander;
+    }
+
     void Start()
     {
         player = GameManager.instance?.playerGameObject?.transform;
@@ -191,7 +206,10 @@ public class FishAI : MonoBehaviour
                         targetDir = (player.position - transform.position).normalized;
                     break;
                 case State.Flee:
-                    if (player) targetDir = (transform.position - player.position).normalized;
+                    if (chaseTarget != null)
+                        targetDir = (transform.position - chaseTarget.position).normalized;
+                    else if (player != null)
+                        targetDir = (transform.position - player.position).normalized;
                     break;
             }
         }
@@ -255,7 +273,15 @@ public class FishAI : MonoBehaviour
         {
             // FIX: Use RotateTowards with actual turnSpeed to prevent snapping/jittering
             // "turn left right left right crazily" fix.
-            float activeTurnSpeed = (fishData != null && fishData.Level == 1 && currentState == State.Flee) ? 140f : turnSpeed;
+            float activeTurnSpeed = turnSpeed;
+            if (fishData != null && fishData.IsSpiked)
+            {
+                activeTurnSpeed = 60f; // Turn sluggishly while bloated with water
+            }
+            else if (fishData != null && fishData.Level == 1 && currentState == State.Flee)
+            {
+                activeTurnSpeed = 180f;
+            }
             float step = activeTurnSpeed * Mathf.Deg2Rad * Time.fixedDeltaTime;
             currentDirection = Vector3.RotateTowards(currentDirection, targetDir, step, 0f).normalized;
         }
@@ -263,27 +289,29 @@ public class FishAI : MonoBehaviour
         // Safety check
         if (currentDirection == Vector2.zero) currentDirection = transform.right;
 
-        // Level 1 minnows swim slower (2.4f) so the player can catch them easily
-        float baseSpeed = (fishData != null && fishData.Level == 1) ? 2.4f : moveSpeed;
+        // Level 1 fish speed increased back a bit for a fun group wipe out challenge
+        float baseSpeed = (fishData != null && fishData.Level == 1) ? 3.2f : moveSpeed;
         float targetSpeed = baseSpeed;
         if (currentState == State.Flee)
         {
-            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 2.0f : fleeRadius;
+            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 3.2f : fleeRadius;
             float proximity = Mathf.InverseLerp(activeFleeRadius, 0f, lastDistToPlayer);
             
-            // Level 1 fish flee calmly without sudden turbo boosts
-            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.0f : fleeSpeedMultiplier;
+            // Level 1 fish gain a flee burst when player closes in
+            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.2f : fleeSpeedMultiplier;
             float mult = Mathf.Lerp(1.0f, activeFleeMult, proximity);
             targetSpeed *= mult;
 
             if (fishData != null && fishData.Level == 1)
             {
-                // Cap fleeing speed of Level 1 fish to 2.4f so player (speed 5) easily catches them
-                targetSpeed = Mathf.Min(targetSpeed, 2.4f);
+                // Cap fleeing speed of Level 1 fish to 3.85f so player (speed 5.0f) has to actively chase
+                targetSpeed = Mathf.Min(targetSpeed, 3.85f);
             }
         }
         if (currentState == State.Chase) targetSpeed *= chaseSpeedMultiplier;
-        float activeMinSpeed = (fishData != null && fishData.Level == 1) ? 1.5f : minSpeed;
+        if (fishData != null && fishData.IsSpiked) targetSpeed *= 0.25f; // User request: swim and move a lot slower while spiked
+        if (fishData != null && fishData.IsSickFish) targetSpeed *= 0.7f; // User request: sick fish level 2 should swim a bit slower
+        float activeMinSpeed = (fishData != null && fishData.IsSpiked) ? 0.3f : ((fishData != null && fishData.Level == 1) ? 1.5f : (fishData != null && fishData.IsSickFish ? minSpeed * 0.7f : minSpeed));
         targetSpeed = Mathf.Clamp(targetSpeed, activeMinSpeed, maxSpeed);
         float rate = targetSpeed > currentSpeed ? accel : decel;
         currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.fixedDeltaTime);
@@ -373,10 +401,10 @@ public class FishAI : MonoBehaviour
         bool playerCanEatMe = playerLevel >= fishData.Level;
         float currentFleeRadius = fleeRadius;
         
-        // Smallest fish (Level 1 / grouped together): small flee radius so player can easily approach and eat them
+        // Smallest fish (Level 1 / grouped together): flee radius increased back a bit for wipe-out challenge
         if (fishData != null && fishData.Level == 1)
         {
-            currentFleeRadius = 2.0f;
+            currentFleeRadius = 3.2f;
         }
 
         if (distToPlayer < currentFleeRadius && playerCanEatMe)
@@ -385,8 +413,8 @@ public class FishAI : MonoBehaviour
             chaseTarget = null;
             currentChaseTimer = 0f;
 
-            // Only break formation when player gets very close so the school stays grouped initially
-            if (distToPlayer < 2.0f && fishData.school != null)
+            // Break formation when player closes in (within 3.0f) so the school scatters
+            if (distToPlayer < 3.0f && fishData.school != null)
             {
                 fishData.school = null;
                 fishData.formationOffset = Vector2.zero;
@@ -396,8 +424,26 @@ public class FishAI : MonoBehaviour
 
         // Player chase disabled
 
+        // 2. FLEE PREDATOR AI FISH (Priority: Survival)
+        for (int i = 0; i < Fish.AllFish.Count; i++)
+        {
+            Fish other = Fish.AllFish[i];
+            if (other == null || other == fishData || other.IsHooked) continue;
+            if (other.Level > fishData.Level)
+            {
+                float d = Vector2.Distance(transform.position, other.transform.position);
+                if (d < fleeRadius)
+                {
+                    currentState = State.Flee;
+                    chaseTarget = other.transform;
+                    currentChaseTimer = 0f;
+                    return;
+                }
+            }
+        }
+
         // 3. CHASE OTHER FISH (Priority: Hunger)
-        // If not interacting with player, look for food.
+        // If not interacting with player or fleeing predators, look for food.
         Fish nearestFood = null;
         float nearestDist = chaseRadius; // Only look within chase radius
 
@@ -409,6 +455,9 @@ public class FishAI : MonoBehaviour
             // Can I eat it?
             if (f.Level < fishData.Level)
             {
+                // Spiked fish cannot be eaten, so do not hunt them
+                if (f.IsSpiked) continue;
+
                 float d = Vector2.Distance(transform.position, f.transform.position);
                 if (d < nearestDist)
                 {

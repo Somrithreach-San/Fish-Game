@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace Rhinotap.Toolkit
 {
@@ -103,6 +103,13 @@ namespace Rhinotap.Toolkit
         [SerializeField]
         private ParallaxItem[] items;
 
+        [Header("Level Backgrounds")]
+        [Space(10)]
+        [SerializeField]
+        private Sprite oceanBackgroundSprite;
+        [SerializeField]
+        private Sprite lakeBackgroundSprite;
+
         #endregion
 
         #region internal variables
@@ -119,6 +126,174 @@ namespace Rhinotap.Toolkit
 
         //Empty game object to hold hidden originals
         private Transform hiddenFolder;
+
+        private static Sprite cachedLakeSprite;
+        private static Sprite cachedOceanSprite;
+        #endregion
+
+        #region Background Management
+        public static void ClearCache()
+        {
+            cachedLakeSprite = null;
+            cachedOceanSprite = null;
+        }
+
+        public Sprite GetLakeSprite()
+        {
+            if (lakeBackgroundSprite != null) return lakeBackgroundSprite;
+            if (cachedLakeSprite != null) return cachedLakeSprite;
+
+#if UNITY_EDITOR
+            // 1. In Editor, prioritize the source asset in Assets/Graphics/Backgrounds/
+            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_lake.png");
+            if (assets != null)
+            {
+                foreach (var a in assets)
+                {
+                    if (a is Sprite s)
+                    {
+                        cachedLakeSprite = s;
+                        break;
+                    }
+                }
+            }
+#endif
+
+            // 2. Resources.Load<Sprite>
+            if (cachedLakeSprite == null)
+            {
+                cachedLakeSprite = Resources.Load<Sprite>("Game_bg_lake");
+            }
+            if (cachedLakeSprite == null)
+            {
+                Sprite[] sprites = Resources.LoadAll<Sprite>("Game_bg_lake");
+                if (sprites != null && sprites.Length > 0)
+                {
+                    cachedLakeSprite = sprites[0];
+                }
+            }
+
+            // 3. Texture2D from Resources
+            if (cachedLakeSprite == null)
+            {
+                Texture2D tex = Resources.Load<Texture2D>("Game_bg_lake");
+                if (tex != null)
+                {
+                    cachedLakeSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
+                }
+            }
+
+            return cachedLakeSprite;
+        }
+
+        public Sprite GetOceanSprite()
+        {
+            if (oceanBackgroundSprite != null) return oceanBackgroundSprite;
+            if (cachedOceanSprite != null) return cachedOceanSprite;
+
+#if UNITY_EDITOR
+            // 1. In Editor, prioritize the source asset in Assets/Graphics/Backgrounds/
+            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
+            if (assets != null)
+            {
+                foreach (var a in assets)
+                {
+                    if (a is Sprite s)
+                    {
+                        cachedOceanSprite = s;
+                        break;
+                    }
+                }
+            }
+#endif
+
+            // 2. Resources.Load<Sprite>
+            if (cachedOceanSprite == null)
+            {
+                cachedOceanSprite = Resources.Load<Sprite>("Game_bg_ocean");
+            }
+            if (cachedOceanSprite == null)
+            {
+                Sprite[] sprites = Resources.LoadAll<Sprite>("Game_bg_ocean");
+                if (sprites != null && sprites.Length > 0)
+                {
+                    cachedOceanSprite = sprites[0];
+                }
+            }
+
+            // 3. Texture2D from Resources
+            if (cachedOceanSprite == null)
+            {
+                Texture2D tex = Resources.Load<Texture2D>("Game_bg_ocean");
+                if (tex != null)
+                {
+                    cachedOceanSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
+                }
+            }
+
+            // 4. Fallback to legacy game_bg if Game_bg_ocean is missing
+            if (cachedOceanSprite == null)
+            {
+                cachedOceanSprite = Resources.Load<Sprite>("game_bg");
+                if (cachedOceanSprite == null)
+                {
+                    Sprite[] sprites = Resources.LoadAll<Sprite>("game_bg");
+                    if (sprites != null && sprites.Length > 0)
+                    {
+                        cachedOceanSprite = sprites[0];
+                    }
+                }
+            }
+
+            return cachedOceanSprite;
+        }
+
+        public void ApplyLevelBackground()
+        {
+            ClearCache();
+
+            if (items == null || items.Length == 0) return;
+
+            bool isLake = LevelManager.IsCurrentLakeLevel;
+
+            for (int i = 0; i < items.Length; i++)
+            {
+                if (items[i] == null || items[i].Item == null) continue;
+                string itemName = items[i].Item.name.ToLower();
+
+                // Skip particle systems or foreground items
+                if (itemName.Contains("particle")) continue;
+
+                if (itemName.Contains("bg") || itemName.Contains("pixelated") || itemName.Contains("background") || i == 0)
+                {
+                    var sr = items[i].Item.GetComponent<SpriteRenderer>();
+
+                    Sprite targetSprite = isLake ? GetLakeSprite() : GetOceanSprite();
+                    if (targetSprite != null)
+                    {
+                        if (sr != null)
+                        {
+                            sr.sprite = targetSprite;
+                        }
+                        items[i].UpdateSprite(targetSprite);
+                        Debug.Log($"[Parallax] Applied {(isLake ? "Lake" : "Ocean")} background sprite ('{targetSprite.name}') for Level {LevelManager.CurrentLevel}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Parallax] Could not load {(isLake ? "Lake" : "Ocean")} background sprite for Level {LevelManager.CurrentLevel}");
+                    }
+                    break;
+                }
+            }
+        }
+
+        public static void RefreshBackground()
+        {
+            if (_instance != null)
+            {
+                _instance.ApplyLevelBackground();
+            }
+        }
         #endregion
 
         #region Mono Behaviour
@@ -171,6 +346,8 @@ namespace Rhinotap.Toolkit
                 Debug.LogError("Rhinotap Parallax Manager: Sorting Layer does not exist: \"" + layerForegroundItems + "\"");
                 layerBackgroundItems = "Default";
             }
+
+            ApplyLevelBackground();
 
             //Initialize each parallax item
             int i = 0;
@@ -247,6 +424,44 @@ namespace Rhinotap.Toolkit
         [SerializeField]
         [Header("Game Object with SpriteRenderer")]
         GameObject item;
+
+        public GameObject Item => item;
+
+        public void UpdateSprite(Sprite newSprite)
+        {
+            if (newSprite == null) return;
+            if (sprite != null)
+            {
+                sprite.sprite = newSprite;
+                width = sprite.bounds.size.x;
+                height = sprite.bounds.size.y;
+            }
+            else if (item != null)
+            {
+                var sr = item.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.sprite = newSprite;
+                    width = sr.bounds.size.x;
+                    height = sr.bounds.size.y;
+                }
+            }
+
+            if (items != null)
+            {
+                for (int i = 0; i < items.Length; i++)
+                {
+                    if (items[i] != null)
+                    {
+                        var sr = items[i].GetComponent<SpriteRenderer>();
+                        if (sr != null)
+                        {
+                            sr.sprite = newSprite;
+                        }
+                    }
+                }
+            }
+        }
 
         //Distance from the player
         [Header("Distance from player")]

@@ -12,9 +12,9 @@ public class Hazard : MonoBehaviour
     [SerializeField]
     private float retractSpeed = 8f; // Faster speed for pulling up
     [SerializeField]
-    private float minRoamTime = 3.0f; // Duration rod stays stationary in the water
+    private float minRoamTime = 3.5f; // Duration rod stays stationary in the water
     [SerializeField]
-    private float maxRoamTime = 4.0f;
+    private float maxRoamTime = 8.5f;
 
     [Header("Effects")]
     [SerializeField]
@@ -47,19 +47,135 @@ public class Hazard : MonoBehaviour
     private float lifeTimer = 0f;
     private float currentRoamDuration = 3f;
     private bool wasPaused = false;
+    private bool hasCustomTargetDepth = false;
 
     // Track particle system for toggling emission
     private ParticleSystem activeParticleSystem;
+    private static AnimationCurve s_HazardSizeCurve = null;
+    private static Gradient s_HazardColorGradient = null;
 
     [Header("Collider Settings")]
     [Tooltip("If true, the script will automatically resize the BoxCollider2D to the bottom of the sprite.")]
     [SerializeField]
     public bool autoConfigureCollider = false; // Default to false to allow manual collider setup in Prefabs
 
+    [Header("Caught Target State")]
+    private PlayerController hookedPlayer = null;
+    public bool HasHookedPlayer => hookedPlayer != null;
+    private Fish hookedFish = null;
+    public bool HasHookedFish => hookedFish != null;
+    public bool HasCatch => hookedPlayer != null || hookedFish != null;
+
+    public Vector3 GetBaitWorldPosition()
+    {
+        BoxCollider2D box = GetComponent<BoxCollider2D>();
+        if (box != null)
+        {
+            return transform.TransformPoint(box.offset);
+        }
+
+        Collider2D col = GetComponent<Collider2D>();
+        if (col != null)
+        {
+            return transform.TransformPoint(col.offset);
+        }
+
+        if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null && spriteRenderer.sprite != null)
+        {
+            float halfHeight = spriteRenderer.sprite.bounds.extents.y;
+            return transform.TransformPoint(new Vector3(0, -halfHeight + 0.3f, 0));
+        }
+
+        return transform.position;
+    }
+
+    public bool HookPlayer(PlayerController player)
+    {
+        if (HasCatch || player == null) return false;
+        hookedPlayer = player;
+
+        // Smooth reel up speed consistent with fish
+        retractSpeed = Mathf.Clamp(retractSpeed, 7.5f, 9.0f);
+
+        if (currentState != State.Retracting)
+        {
+            StartRetracting();
+        }
+        else
+        {
+            if (!retractSfxPlayed)
+            {
+                StartReelSound();
+                retractSfxPlayed = true;
+            }
+        }
+        return true;
+    }
+
+    public bool HookFish(Fish fish)
+    {
+        if (HasCatch || fish == null) return false;
+        hookedFish = fish;
+
+        // Smooth reel up speed consistent with fish
+        retractSpeed = Mathf.Clamp(retractSpeed, 7.5f, 9.0f);
+
+        if (currentState != State.Retracting)
+        {
+            StartRetracting();
+        }
+        else
+        {
+            if (!retractSfxPlayed)
+            {
+                StartReelSound();
+                retractSfxPlayed = true;
+            }
+        }
+        return true;
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        // One catch per hook
+        if (HasCatch) return;
+
+        // 1. Check Player
+        PlayerController pc = other.GetComponentInParent<PlayerController>();
+        if (pc != null)
+        {
+            pc.OnHookedByHazard(this);
+            return;
+        }
+
+        // 2. Check AI Fish
+        Fish fish = other.GetComponentInParent<Fish>();
+        if (fish != null)
+        {
+            // Level 1, Level 2, and Golden Fish are too small to bite -> NO collision / ignore
+            if (fish.IsGoldenFish || fish.Level < 3)
+            {
+                return;
+            }
+
+            // Big fish (Level 3+) bites the bait
+            fish.OnHookedByHazard(this);
+        }
+    }
+
+    public AudioClip MoveSound => moveSound;
+
     private void Awake()
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
-        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource.playOnAwake = false;
+        audioSource.loop = true;
+        audioSource.spatialBlend = 0f;
+        audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        audioSources = new AudioSource[] { audioSource };
     }
 
     private void Start()
@@ -67,92 +183,79 @@ public class Hazard : MonoBehaviour
         // Ensure collider is configured if needed (moved from Awake to allow property setting)
         ConfigureCollider();
 
-        // Setup Audio
-        if (audioSource == null)
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-        }
-        
-        audioSources = GetComponentsInChildren<AudioSource>(true);
-        if (audioSources == null || audioSources.Length == 0) audioSources = new AudioSource[] { audioSource };
-        for (int i = 0; i < audioSources.Length; i++)
-        {
-            var a = audioSources[i];
-            if (a == null) continue;
-            a.mute = !AudioSettingsManager.IsSfxEnabled;
-            a.volume = 0.5f;
-            a.spatialBlend = 0f;
-            a.playOnAwake = false;
-            a.loop = false;
-            a.clip = null;
-            a.Stop();
-        }
+        // Setup Audio listeners
+        AudioSettingsManager.OnSfxSettingChanged += OnSfxSettingChanged;
         
         // Randomize Speeds for realism (desync movement)
         fallSpeed = Random.Range(2.5f, 4.0f); // Default 3
         retractSpeed = Random.Range(7.0f, 10.0f); // Default 8
 
         retractSfxPlayed = false;
-        StartCoroutine(PlayDropSfxBurst());
         
-        // Setup Particles (Continuous Trail)
-        if (bubbleParticlesPrefab != null)
+        // Setup Particles (Continuous Trail) - reuse child if pooled
+        if (activeParticleSystem == null)
         {
-            // If user assigned a prefab, assume it's set up correctly, but ensure we parent it to the bait
-            GameObject p = Instantiate(bubbleParticlesPrefab, transform.position, Quaternion.identity, transform);
-            p.name = "HazardBubbles";
-            SetupParticlePosition(p);
-            
-            activeParticleSystem = p.GetComponent<ParticleSystem>();
-            if (activeParticleSystem != null)
+            Transform existing = transform.Find("HazardBubbles");
+            if (existing != null)
             {
-                 var main = activeParticleSystem.main;
-                 main.loop = false; // Burst
-                 main.playOnAwake = false;
-                 activeParticleSystem.Stop();
+                activeParticleSystem = existing.GetComponent<ParticleSystem>();
             }
         }
-        else
+
+        if (activeParticleSystem == null)
         {
-            // Create manually if no prefab
-            CreateTrailParticles();
+            if (bubbleParticlesPrefab != null)
+            {
+                // If user assigned a prefab, assume it's set up correctly, but ensure we parent it to the bait
+                GameObject p = Instantiate(bubbleParticlesPrefab, transform.position, Quaternion.identity, transform);
+                p.name = "HazardBubbles";
+                SetupParticlePosition(p);
+                
+                activeParticleSystem = p.GetComponent<ParticleSystem>();
+                if (activeParticleSystem != null)
+                {
+                     var main = activeParticleSystem.main;
+                     main.loop = false; // Burst
+                     main.playOnAwake = false;
+                     activeParticleSystem.Stop();
+                }
+            }
+            else
+            {
+                // Create manually if no prefab
+                CreateTrailParticles();
+            }
+        }
+
+        if (currentState == State.Dropping && activeParticleSystem != null)
+        {
+            ConfigureParticlesForDropping();
+            activeParticleSystem.Play();
         }
 
         // Fixed World Logic (Surface based)
-        // Spawn is at Y=22 (from GridController). 
-        // We want it to drop to a reasonable depth in the world.
-        // World Bounds are approx -14 to 14.
-        
-        // MODIFIED: User provided longer sprites, so we can go deeper.
-        // We randomize the target depth significantly now (-13 to 12).
-        targetY = Random.Range(-13f, 12f); 
-
-        // CRITICAL FIX: Ensure the hazard does NOT go beyond the bottom boundary.
-        // Even if we randomize deep, we must clamp it so the hook stays on screen.
-        ClampTargetDepth();
+        if (!hasCustomTargetDepth)
+        {
+            SetTargetHookDepth(Random.Range(-5f, 4f));
+        }
         
         ConfigureCollider();
     }
 
-    private void ClampTargetDepth()
+    public void SetTargetHookDepth(float targetHookWorldY)
     {
-        if (spriteRenderer == null) return;
-        
-        Camera cam = Camera.main;
-        if (cam == null) return;
+        hasCustomTargetDepth = true;
 
-        float camBottom = cam.transform.position.y - cam.orthographicSize;
-        float spriteHalfHeight = spriteRenderer.bounds.extents.y; // World space half-height
+        if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        float spriteHalfHeight = (spriteRenderer != null && spriteRenderer.bounds.size.y > 0.1f)
+            ? spriteRenderer.bounds.extents.y
+            : 15f;
 
-        // The lowest point the center (transform.position) can be 
-        // such that the bottom edge (center - halfHeight) is at camBottom.
-        // We add a small buffer (1.0f) to keep it clearly visible.
-        float minSafeY = camBottom + spriteHalfHeight + 1.0f;
+        // Clamp desired hook Y: safely above ocean floor (-13.5f) and safely below water surface (+13.5f)
+        float clampedHookY = Mathf.Clamp(targetHookWorldY, -13.5f, 13.5f);
 
-        if (targetY < minSafeY)
-        {
-            targetY = minSafeY;
-        }
+        // Transform center target such that the bottom (hook) arrives exactly at clampedHookY
+        targetY = clampedHookY + spriteHalfHeight;
     }
 
     private void SetupParticlePosition(GameObject particleObj)
@@ -200,17 +303,40 @@ public class Hazard : MonoBehaviour
         BoxCollider2D box = GetComponent<BoxCollider2D>();
         if (box == null) box = gameObject.AddComponent<BoxCollider2D>();
 
-        // Resize to bottom 8% of the sprite, and narrower width (30%) - Tighter fit per user request
-        float spriteHeight = sr.size.y;
-        float spriteWidth = sr.size.x;
+        float spriteHeight = (sr.sprite != null) ? sr.sprite.bounds.size.y : sr.size.y;
+        float spriteWidth = (sr.sprite != null) ? sr.sprite.bounds.size.x : sr.size.x;
 
-        box.size = new Vector2(spriteWidth * 0.3f, spriteHeight * 0.08f);
-        box.offset = new Vector2(0, -(spriteHeight / 2f) + (box.size.y / 2f));
+        box.size = new Vector2(Mathf.Min(spriteWidth, 2.7f), 0.8f);
+        box.offset = new Vector2(0f, -(spriteHeight / 2f) + (box.size.y / 2f) + 0.3f);
         
         box.isTrigger = true; // Ensure it's a trigger for OnTriggerEnter in Player
     }
 
 
+
+    private void OnDestroy()
+    {
+        AudioSettingsManager.OnSfxSettingChanged -= OnSfxSettingChanged;
+    }
+
+    private void OnSfxSettingChanged(bool enabled)
+    {
+        if (audioSource != null)
+        {
+            audioSource.mute = !enabled;
+            if (enabled && (currentState == State.Dropping || currentState == State.Retracting))
+            {
+                if (!audioSource.isPlaying && (GameManager.instance == null || !GameManager.Paused))
+                {
+                    StartReelSound();
+                }
+            }
+            else if (!enabled)
+            {
+                if (audioSource.isPlaying) audioSource.Stop();
+            }
+        }
+    }
 
     private void Update()
     {
@@ -222,25 +348,41 @@ public class Hazard : MonoBehaviour
             wasPaused = currentPaused;
             if (currentPaused)
             {
-                StopAllAudio();
+                if (audioSource != null && audioSource.isPlaying)
+                {
+                    audioSource.Pause();
+                }
             }
             else
             {
-                // Do not auto-resume one-shots
+                if (audioSource != null && (currentState == State.Dropping || currentState == State.Retracting))
+                {
+                    if (AudioSettingsManager.IsSfxEnabled)
+                    {
+                        audioSource.UnPause();
+                        if (!audioSource.isPlaying) StartReelSound();
+                    }
+                }
             }
         }
 
         if (currentPaused) return;
 
-        // Distance-based Volume Fading
+        // Dynamic distance attenuation & stereo panning based on true bait/hook world position
         if (audioSource != null && GameManager.instance != null && GameManager.instance.playerGameObject != null)
         {
-             float dist = Vector3.Distance(transform.position, GameManager.instance.playerGameObject.transform.position);
-             float maxDist = 20f; 
-             // Volume: 0.5f at 0 dist, 0f at 20 dist
-             float volume = Mathf.Clamp01(1f - (dist / maxDist)) * 0.5f; 
-             float minVolume = 0.2f;
-             audioSource.volume = Mathf.Max(minVolume, volume);
+            Vector3 baitPos = GetBaitWorldPosition();
+            Vector3 playerPos = GameManager.instance.playerGameObject.transform.position;
+            float dist = Vector2.Distance(baitPos, playerPos);
+            float maxDist = 22f; 
+            float normDist = Mathf.Clamp01(dist / maxDist);
+            // Smooth attenuation from 0.80f close up down to 0.12f far away
+            float volume = Mathf.Lerp(0.80f, 0.12f, normDist * normDist);
+            audioSource.volume = volume;
+
+            // Directional stereo panning based on horizontal offset relative to the player
+            float pan = Mathf.Clamp((baitPos.x - playerPos.x) / 12.0f, -0.80f, 0.80f);
+            audioSource.panStereo = pan;
         }
 
         if (currentState == State.Dropping)
@@ -283,6 +425,18 @@ public class Hazard : MonoBehaviour
             // Use dynamic calculation to ensure full sprite clearance
             if (transform.position.y >= GetRetractTargetY())
             {
+                if (hookedPlayer != null)
+                {
+                    hookedPlayer.OnReeledOutOfWater();
+                    hookedPlayer = null;
+                }
+
+                if (hookedFish != null)
+                {
+                    hookedFish.OnReeledOutOfWater();
+                    hookedFish = null;
+                }
+
                 if (linkedBoat != null)
                 {
                     linkedBoat.OnHazardRetracted(this);
@@ -308,23 +462,44 @@ public class Hazard : MonoBehaviour
 
         activeParticleSystem = bubbles.AddComponent<ParticleSystem>();
         
-        // Configure Particle System (Match Player Speed Boost)
         var main = activeParticleSystem.main;
         main.loop = true; 
         main.playOnAwake = false;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startSize = 0.15f;
-        main.startLifetime = 0.8f;
-        main.startSpeed = 0f;
-        main.gravityModifier = -0.2f; // Float up
 
-        var emission = activeParticleSystem.emission;
-        emission.rateOverTime = 8f; 
-        
-        var shape = activeParticleSystem.shape;
-        shape.shapeType = ParticleSystemShapeType.Circle;
-        shape.radius = 0.2f;
+        // Apply dropping parameters by default
+        ConfigureParticlesForDropping();
 
+        // Noise
+        var noise = activeParticleSystem.noise;
+        noise.enabled = true;
+        noise.strength = 0.25f;
+        noise.frequency = 0.5f;
+
+        // Size over Lifetime: Grow then pop
+        var sol = activeParticleSystem.sizeOverLifetime;
+        sol.enabled = true;
+        if (s_HazardSizeCurve == null)
+        {
+            s_HazardSizeCurve = new AnimationCurve();
+            s_HazardSizeCurve.AddKey(0.0f, 0.5f);
+            s_HazardSizeCurve.AddKey(0.8f, 1.0f);
+            s_HazardSizeCurve.AddKey(1.0f, 0.0f);
+        }
+        sol.size = new ParticleSystem.MinMaxCurve(1f, s_HazardSizeCurve);
+
+        // Color/Alpha: Fade out
+        var col = activeParticleSystem.colorOverLifetime;
+        col.enabled = true;
+        if (s_HazardColorGradient == null)
+        {
+            s_HazardColorGradient = new Gradient();
+            s_HazardColorGradient.SetKeys(
+                new GradientColorKey[] { new GradientColorKey(Color.white, 0.0f), new GradientColorKey(Color.white, 1.0f) },
+                new GradientAlphaKey[] { new GradientAlphaKey(0.80f, 0.0f), new GradientAlphaKey(0.60f, 0.7f), new GradientAlphaKey(0.0f, 1.0f) }
+            );
+        }
+        col.color = s_HazardColorGradient;
 
         // Assign Material
         var renderer = bubbles.GetComponent<ParticleSystemRenderer>();
@@ -358,24 +533,67 @@ public class Hazard : MonoBehaviour
         renderer.sortingOrder = 5;
     }
 
+    private void ConfigureParticlesForDropping()
+    {
+        if (activeParticleSystem == null) return;
+        activeParticleSystem.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f); // Pointing UP (trailing the sinking bait)
+
+        var main = activeParticleSystem.main;
+        main.loop = true;
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.4f, 1.2f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.8f, 1.4f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.10f, 0.26f);
+        main.gravityModifier = -0.15f; // Float gently upwards
+        main.maxParticles = 60;
+
+        var emission = activeParticleSystem.emission;
+        emission.rateOverTime = 12f;
+
+        var shape = activeParticleSystem.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle = 15f;
+        shape.radius = 0.15f;
+    }
+
+    private void ConfigureParticlesForRetracting()
+    {
+        if (activeParticleSystem == null) return;
+        activeParticleSystem.transform.localRotation = Quaternion.Euler(90f, 0f, 0f); // Pointing DOWN (trailing in wake below rising bait)
+
+        var main = activeParticleSystem.main;
+        main.loop = true;
+        main.startSpeed = new ParticleSystem.MinMaxCurve(1.5f, 3.5f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.6f, 1.2f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.14f, 0.35f);
+        main.gravityModifier = -0.08f; // Wake turbulence below the rising bait
+        main.maxParticles = 100;
+
+        var emission = activeParticleSystem.emission;
+        emission.rateOverTime = 28f; // Rapid bubble stream as bait is reeled up
+
+        var shape = activeParticleSystem.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle = 18f;
+        shape.radius = 0.22f;
+    }
+
     private void StartRoaming()
     {
         currentState = State.Roaming;
         lifeTimer = 0f;
-        StopAllAudio();
+        StopReelSound();
         
-        // Pick random duration
+        // Pick random duration so rods don't retract at the same time
         currentRoamDuration = Random.Range(minRoamTime, maxRoamTime);
+        retractSpeed = Random.Range(6.0f, 10.0f);
 
         // Pick random direction (Left or Right)
         roamDirection = (Random.value > 0.5f) ? 1 : -1;
 
-        // Do not forcibly stop one-shot SFX; allow it to finish naturally
-
-        // Start Particles (Roaming)
+        // User Request: Idling at the bottom NO need bubbles
         if (activeParticleSystem != null)
         {
-            activeParticleSystem.Play();
+            activeParticleSystem.Stop();
         }
     }
 
@@ -383,131 +601,121 @@ public class Hazard : MonoBehaviour
     {
         currentState = State.Retracting;
         
-        // Play Retract Sound (Reuse Move Sound)
-        if (!retractSfxPlayed && (GameManager.instance == null || !GameManager.Paused))
+        // Play Retract Sound (Smooth reel up audio)
+        if (!retractSfxPlayed)
         {
-            PlayMoveSound();
+            StartReelSound();
             retractSfxPlayed = true;
         }
 
-        // Stop Particles (Retracting)
+        // User Request: Pulling back up NEEDS bubbles trailing the bait
+        ConfigureParticlesForRetracting();
         if (activeParticleSystem != null)
         {
-            activeParticleSystem.Stop();
+            activeParticleSystem.Play();
         }
     }
     
     // Safety check for Retract Logic
     private float GetRetractTargetY()
     {
-        float camTop = 15f; // Fallback
-        Camera cam = Camera.main;
-        if (cam != null)
+        float surfaceY = (linkedBoat != null) ? linkedBoat.WaterSurfaceY : 15f;
+        float halfHeight = (spriteRenderer != null && spriteRenderer.sprite != null)
+            ? spriteRenderer.bounds.extents.y
+            : 15f;
+        return surfaceY + halfHeight + 2f;
+    }
+    
+    private void OnEnable()
+    {
+        ResetHazardState();
+    }
+
+    public void ResetHazardState()
+    {
+        currentState = State.Dropping;
+        lifeTimer = 0f;
+        hasCustomTargetDepth = false;
+        retractSfxPlayed = false;
+        hookedPlayer = null;
+        hookedFish = null;
+        fallSpeed = Random.Range(2.5f, 4.0f);
+        retractSpeed = Random.Range(7.0f, 10.0f);
+
+        Collider2D col = GetComponent<Collider2D>();
+        if (col != null) col.enabled = true;
+
+        ConfigureParticlesForDropping();
+        if (activeParticleSystem != null)
         {
-             float camHeight = 2f * cam.orthographicSize;
-             camTop = cam.transform.position.y + (camHeight / 2f);
+            activeParticleSystem.Play();
         }
 
-        if (spriteRenderer != null && spriteRenderer.sprite != null)
-        {
-             float halfHeight = spriteRenderer.bounds.extents.y;
-             return camTop + halfHeight + 2f; 
-        }
-        
-        return camTop + 5f;
+        StartReelSound();
     }
     
     private void OnDisable()
     {
+        hookedPlayer = null;
+        hookedFish = null;
         if (linkedBoat != null)
         {
             linkedBoat.OnHazardRetracted(this);
         }
 
-        if (audioSources == null || audioSources.Length == 0) audioSources = GetComponentsInChildren<AudioSource>(true);
-        for (int i = 0; i < audioSources.Length; i++)
+        Collider2D col = GetComponent<Collider2D>();
+        if (col != null) col.enabled = true;
+
+        StopReelSound();
+        if (activeParticleSystem != null && activeParticleSystem.isPlaying)
         {
-            var a = audioSources[i];
-            if (a == null) continue;
-            a.Stop();
-            a.clip = null;
-            a.loop = false;
-            a.playOnAwake = false;
+            activeParticleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         }
     }
     
     public void Initialize(AudioClip sound, GameObject particles, Material mat, Texture2D tex, float? overrideDepth = null, FishermanBoat boat = null)
     {
         if (boat != null) linkedBoat = boat;
-        if (moveSound == null) moveSound = sound;
+        if (moveSound == null && sound != null) moveSound = sound;
         if (bubbleParticlesPrefab == null) bubbleParticlesPrefab = particles;
         if (bubbleMaterial == null) bubbleMaterial = mat;
         if (bubbleTexture == null) bubbleTexture = tex;
+
+        // Ensure clean state when spawned from pool
+        ResetHazardState();
         
         if (overrideDepth.HasValue)
         {
-            targetY = overrideDepth.Value;
-            // Re-apply clamp to override value to ensure safety
-            ClampTargetDepth();
+            SetTargetHookDepth(overrideDepth.Value);
         }
     }
 
-    private void PlayMoveSound()
+    private void StartReelSound()
     {
-        if (!AudioSettingsManager.IsSfxEnabled) return;
-        if (GameManager.instance != null && GameManager.Paused) return;
-        if (audioSource != null && moveSound != null)
+        if (audioSource == null) return;
+        audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        if (moveSound != null)
         {
-            audioSource.loop = false;
-            audioSource.clip = null;
+            audioSource.clip = moveSound;
+            audioSource.loop = true;
+            if (!audioSource.isPlaying && AudioSettingsManager.IsSfxEnabled && (GameManager.instance == null || !GameManager.Paused))
+            {
+                audioSource.Play();
+            }
+        }
+    }
+
+    private void StopReelSound()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+        {
             audioSource.Stop();
-            audioSource.PlayOneShot(moveSound);
         }
-    }
-    
-    private IEnumerator PlayDropSfxBurst()
-    {
-        if (!AudioSettingsManager.IsSfxEnabled) yield break;
-        if (audioSource == null || moveSound == null) yield break;
-        if (GameManager.instance != null && GameManager.Paused) yield break;
-        audioSource.loop = false;
-        audioSource.clip = null;
-        audioSource.Stop();
-        audioSource.PlayOneShot(moveSound);
-        yield return new WaitForSeconds(0.15f);
-        if (!AudioSettingsManager.IsSfxEnabled) yield break;
-        if (GameManager.instance != null && GameManager.Paused) yield break;
-        audioSource.PlayOneShot(moveSound);
     }
 
-    private void KeepInBounds()
-    {
-        // Fixed World Bounds (consistent with FishSchool)
-        // Restricted further to ensure hook stays on screen
-        float leftBound = -8f;
-        float rightBound = 8f;
-
-        // Bounce logic
-        if (transform.position.x < leftBound && roamDirection < 0)
-        {
-            roamDirection = 1; // Turn Right
-        }
-        else if (transform.position.x > rightBound && roamDirection > 0)
-        {
-            roamDirection = -1; // Turn Left
-        }
-    }
-    
     private void StopAllAudio()
     {
-        if (audioSources == null || audioSources.Length == 0) audioSources = GetComponentsInChildren<AudioSource>(true);
-        for (int i = 0; i < audioSources.Length; i++)
-        {
-            var a = audioSources[i];
-            if (a == null) continue;
-            a.Stop();
-            a.clip = null;
-        }
+        StopReelSound();
     }
 
 }

@@ -2449,6 +2449,11 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
 
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.StopBackgroundMusic();
+        }
+
         // Find the main UI Canvas (the exact same one pausedBg lives in)
         Canvas mainCanvas = null;
         if (pausedBg != null) mainCanvas = pausedBg.GetComponentInParent<Canvas>();
@@ -2699,7 +2704,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
                 PositionButton(menuBtnObj, new Vector2(-180f * scaleFactor, buttonY));
                 SetupButton(menuBtnObj, () =>
                 {
-                    MainMenuManager.OpenLevelSelectOnLoad = true;
+                    MainMenuManager.OpenLevelSelectOnLoad = false;
                     Time.timeScale = 1f;
                     SceneManager.LoadScene("MainMenu");
                 });
@@ -2733,7 +2738,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
                 PositionButton(menuBtnObj, new Vector2(-110f * scaleFactor, buttonY));
                 SetupButton(menuBtnObj, () =>
                 {
-                    MainMenuManager.OpenLevelSelectOnLoad = true;
+                    MainMenuManager.OpenLevelSelectOnLoad = false;
                     Time.timeScale = 1f;
                     SceneManager.LoadScene("MainMenu");
                 });
@@ -2790,7 +2795,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
             PositionButton(menuBtnObj, new Vector2(120f * scaleFactor, -60f * scaleFactor));
             SetupButton(menuBtnObj, () =>
             {
-                MainMenuManager.OpenLevelSelectOnLoad = true;
+                MainMenuManager.OpenLevelSelectOnLoad = false;
                 Time.timeScale = 1f;
                 SceneManager.LoadScene("MainMenu");
             });

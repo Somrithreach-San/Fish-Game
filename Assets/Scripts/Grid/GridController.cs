@@ -28,6 +28,7 @@ public class GridController : MonoBehaviour
     private float spawnInterval = 0.7f;
     [SerializeField]
     private GameObject goldenFishPrefab; // Custom prefab for the rare golden fish
+    [SerializeField] private float sickFishChance = 0.25f; // Chance for Level 2 fish to spawn as sick
     private float spawnTimer = 0f;
 
     [Header("Hazard Settings")]
@@ -40,7 +41,7 @@ public class GridController : MonoBehaviour
     [SerializeField]
     private float hazardChance = 0.15f; // Reduced from 0.20f (User Request: "reduce spawn chance")
     [SerializeField]
-    private float hazardScale = 0.8f; // Scale modifier for sprite-spawned hazard
+    private float hazardScale = 0.8f; // Scale modifier for fishing rod hazard
 
     [Header("Hazard Effects")]
     [SerializeField]
@@ -51,6 +52,10 @@ public class GridController : MonoBehaviour
     [Header("Hazard Boat Settings")]
     [SerializeField]
     private Sprite boatSprite;
+    private static Sprite s_CachedBoatSprite = null;
+    [SerializeField]
+    private AudioClip boatEngineSound;
+    private static AudioClip s_CachedEngineClip = null;
     private List<GameObject> activeBoats = new List<GameObject>();
     private FishermanBoat currentBoat = null;
     
@@ -89,6 +94,16 @@ public class GridController : MonoBehaviour
     // Templates for Optimization
     private GameObject sharkTemplate;
     private GameObject hazardTemplate;
+    private GameObject boatTemplate;
+
+    // Cached references to prevent frame-rate stutter on spawn
+    private bool worldBoundsCached = false;
+    private float cachedWorldBgLeft = -25f;
+    private float cachedWorldBgRight = 25f;
+    private float cachedWorldSurfaceY = 15f;
+    private PlayerController cachedPlayerController = null;
+    private Material cachedBubbleMat = null;
+    private Texture2D cachedBubbleTex = null;
 
     #endregion
 
@@ -112,23 +127,51 @@ public class GridController : MonoBehaviour
         
         _camCacheFrame = -1;
 
-        if (boatSprite == null)
+        if (boatSprite != null && boatSprite.name.Contains("Fisherman_Boat"))
         {
-            boatSprite = Resources.Load<Sprite>("fisherman_hazard_boat");
-            #if UNITY_EDITOR
-            if (boatSprite == null)
-            {
-                Object[] subAssets = UnityEditor.AssetDatabase.LoadAllAssetRepresentationsAtPath("Assets/Graphics/Hazard/fisherman_hazard_boat.png");
-                foreach (var sa in subAssets)
-                {
-                    if (sa is Sprite s) { boatSprite = s; break; }
-                }
-                if (boatSprite == null)
-                {
-                    boatSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/fisherman_hazard_boat.png");
-                }
-            }
-            #endif
+            s_CachedBoatSprite = boatSprite;
+        }
+        else
+        {
+            EnsureCorrectBoatSprite();
+        }
+
+        #if UNITY_EDITOR
+        if (cachedBubbleMat == null)
+        {
+            cachedBubbleMat = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Graphics/bubbleParticleMat.mat");
+        }
+        #endif
+        if (cachedBubbleMat != null)
+        {
+            FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+        }
+
+        if (boatEngineSound != null)
+        {
+            s_CachedEngineClip = boatEngineSound;
+        }
+        #if UNITY_EDITOR
+        if (s_CachedEngineClip == null)
+        {
+            s_CachedEngineClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Boat_Engine_Drive.MP3");
+            if (boatEngineSound == null) boatEngineSound = s_CachedEngineClip;
+        }
+        #endif
+        if (s_CachedEngineClip == null)
+        {
+            s_CachedEngineClip = Resources.Load<AudioClip>("Boat_Engine_Drive");
+            if (boatEngineSound == null) boatEngineSound = s_CachedEngineClip;
+        }
+        if (s_CachedEngineClip != null)
+        {
+            FishermanBoat.SetGlobalEngineClip(s_CachedEngineClip);
+        }
+
+        if (hazardSound == null && hazardPrefab != null)
+        {
+            Hazard hz = hazardPrefab.GetComponent<Hazard>();
+            if (hz != null && hz.MoveSound != null) hazardSound = hz.MoveSound;
         }
 
         if (hazardPrefab != null && ObjectPoolManager.Instance != null)
@@ -139,7 +182,7 @@ public class GridController : MonoBehaviour
         {
             if (hazardTemplate == null)
             {
-                hazardTemplate = new GameObject("Hazard_Template");
+                hazardTemplate = new GameObject("Hazard_Hook");
                 hazardTemplate.transform.SetParent(transform);
                 hazardTemplate.SetActive(false);
                 SpriteRenderer sr = hazardTemplate.AddComponent<SpriteRenderer>();
@@ -188,13 +231,200 @@ public class GridController : MonoBehaviour
         EventManager.StartListening<GameObject>("PlayerSpawn", (spawnedObject) =>
         {
             if (spawnedObject != null)
+            {
                 player = spawnedObject;
+                cachedPlayerController = player.GetComponent<PlayerController>();
+                if (cachedPlayerController != null)
+                {
+                    cachedBubbleMat = cachedPlayerController.BubbleMaterial;
+                    cachedBubbleTex = cachedPlayerController.BubbleTexture;
+                    if (cachedBubbleMat != null)
+                    {
+                        FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+                    }
+                }
+                FishermanBoat.SetGlobalPlayer(player.transform);
+            }
         });
     }
 
     private void Start()
     {
-        // Ensure hazard chance is reasonable
+        EnsureWorldBoundsCached();
+        InitBoatTemplate();
+        StartCoroutine(PreWarmBoatGPURoutine());
+    }
+
+    private void EnsureWorldBoundsCached()
+    {
+        if (worldBoundsCached) return;
+
+        GameObject wbObj = GameObject.Find("WorldBounds");
+        if (wbObj != null)
+        {
+            PolygonCollider2D poly = wbObj.GetComponent<PolygonCollider2D>();
+            if (poly != null && poly.pathCount > 0)
+            {
+                Vector2[] pts = poly.GetPath(0);
+                float minX = float.MaxValue, maxX = float.MinValue;
+                float maxY = float.MinValue;
+                foreach (var p in pts)
+                {
+                    Vector2 wp = (Vector2)wbObj.transform.TransformPoint(p);
+                    if (wp.x < minX) minX = wp.x;
+                    if (wp.x > maxX) maxX = wp.x;
+                    if (wp.y > maxY) maxY = wp.y;
+                }
+                cachedWorldBgLeft = minX;
+                cachedWorldBgRight = maxX;
+                cachedWorldSurfaceY = maxY;
+                worldBoundsCached = true;
+                FishermanBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY);
+                return;
+            }
+        }
+
+        cachedWorldBgLeft = -25f;
+        cachedWorldBgRight = 25f;
+        cachedWorldSurfaceY = 15f;
+        worldBoundsCached = true;
+        FishermanBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY);
+    }
+
+    public static Sprite LoadFishermanBoatSprite()
+    {
+        if (s_CachedBoatSprite != null) return s_CachedBoatSprite;
+
+        Sprite s = null;
+        #if UNITY_EDITOR
+        Object[] subAssets = UnityEditor.AssetDatabase.LoadAllAssetRepresentationsAtPath("Assets/Graphics/Hazard/Fisherman_Boat.png");
+        foreach (var sa in subAssets)
+        {
+            if (sa is Sprite sp && sp.name.Contains("Fisherman_Boat"))
+            {
+                s = sp;
+                break;
+            }
+        }
+        if (s == null)
+        {
+            s = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/Fisherman_Boat.png");
+        }
+        #endif
+
+        if (s == null)
+        {
+            Sprite[] all = Resources.LoadAll<Sprite>("Fisherman_Boat");
+            if (all != null && all.Length > 0)
+            {
+                s = all[0];
+            }
+        }
+        s_CachedBoatSprite = s;
+        return s;
+    }
+
+    private void EnsureCorrectBoatSprite()
+    {
+        if (s_CachedBoatSprite != null)
+        {
+            if (boatSprite != s_CachedBoatSprite) boatSprite = s_CachedBoatSprite;
+            return;
+        }
+
+        if (boatSprite == null || !boatSprite.name.Contains("Fisherman_Boat"))
+        {
+            boatSprite = LoadFishermanBoatSprite();
+        }
+        if (boatSprite != null)
+        {
+            s_CachedBoatSprite = boatSprite;
+        }
+    }
+
+    private void OnValidate()
+    {
+        EnsureCorrectBoatSprite();
+    }
+
+    private void InitBoatTemplate()
+    {
+        EnsureCorrectBoatSprite();
+        if (boatTemplate != null || boatSprite == null) return;
+
+        EnsureWorldBoundsCached();
+
+        boatTemplate = new GameObject("FishermanBoat");
+        boatTemplate.transform.SetParent(transform);
+        boatTemplate.SetActive(false);
+
+        SpriteRenderer sr = boatTemplate.AddComponent<SpriteRenderer>();
+        sr.sprite = boatSprite;
+        sr.sortingOrder = 5;
+
+        FishermanBoat boatComp = boatTemplate.AddComponent<FishermanBoat>();
+
+        if (cachedPlayerController == null)
+        {
+            cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
+        }
+        if (cachedPlayerController != null)
+        {
+            if (cachedBubbleMat == null) cachedBubbleMat = cachedPlayerController.BubbleMaterial;
+            if (cachedBubbleTex == null) cachedBubbleTex = cachedPlayerController.BubbleTexture;
+        }
+
+        #if UNITY_EDITOR
+        if (cachedBubbleMat == null)
+        {
+            cachedBubbleMat = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Graphics/bubbleParticleMat.mat");
+        }
+        #endif
+        if (cachedBubbleMat != null)
+        {
+            FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+        }
+
+        boatComp.SetupWakeParticlesTemplate(cachedBubbleMat, cachedBubbleTex);
+        boatComp.SetupAudio(s_CachedEngineClip);
+
+        if (ObjectPoolManager.Instance != null)
+        {
+            ObjectPoolManager.Instance.PreWarm(boatTemplate, 2);
+        }
+    }
+
+    /// <summary>
+    /// Pre-warms the boat texture in GPU VRAM and pre-compiles particle shaders
+    /// during scene startup so the main thread never stalls when the hazard first triggers.
+    /// Places the boat inside the camera frustum behind the scene (Z = 50) for 1 frame
+    /// so Unity and the GPU driver compile shaders and upload textures into VRAM.
+    /// </summary>
+    private IEnumerator PreWarmBoatGPURoutine()
+    {
+        // Wait until end of first frame so ObjectPoolManager is fully ready
+        yield return null;
+
+        if (boatTemplate == null || ObjectPoolManager.Instance == null) yield break;
+
+        // Position within camera view but behind the scene (Z = 50f)
+        Camera cam = _cam != null ? _cam : Camera.main;
+        Vector3 warmPos = (cam != null) ? new Vector3(cam.transform.position.x, cam.transform.position.y, 50f) : new Vector3(0f, 0f, 50f);
+        GameObject tempBoat = ObjectPoolManager.Instance.Spawn(boatTemplate, warmPos, Quaternion.identity);
+        if (tempBoat != null)
+        {
+            FishermanBoat boatComp = tempBoat.GetComponent<FishermanBoat>();
+            if (boatComp != null)
+            {
+                boatComp.WarmUpParticles();
+            }
+
+            // Wait 1 frame so Unity submits the boat sprite texture & particle system to GPU VRAM
+            yield return null;
+
+            // Return to pool
+            ObjectPoolManager.Instance.Despawn(tempBoat);
+        }
     }
 
     private void Update()
@@ -433,10 +663,8 @@ public class GridController : MonoBehaviour
                     Debug.LogWarning($"Spawn Mismatch! Intended: {spawnLevel}, Prefab: {prefabToSpawn.name} has Level {prefabToSpawn.Level}");
                 }
 
-                // SCHOOLING LOGIC: Level 1 fish can form schools, but toned down so they don't drown the screen
-                float schoolChance = (playerLevel == 1) ? 0.25f : 0.35f;
-
-                if (spawnLevel == 1 && prefabToSpawn.name.Contains("level 1 fish") && Random.value < schoolChance)
+                // SCHOOLING LOGIC: Level 1 fish always spawn in groups of 3 to 5 (never spawn alone)
+                if (spawnLevel == 1)
                 {
                     // Create School
                     GameObject schoolObj = new GameObject("FishSchool");
@@ -444,13 +672,13 @@ public class GridController : MonoBehaviour
                     bool movingRight = (spawnX < 0); 
                     school.Initialize(movingRight);
                     
-                    // Reduced count at Level 1 to prevent instant level skipping (2-3 fish)
-                    int schoolSize = (playerLevel == 1) ? Random.Range(2, 4) : Random.Range(3, 5);
+                    // User Request: Smallest amount is 3, largest is 5 in a group (3 to 5 inclusive)
+                    int schoolSize = Random.Range(3, 6);
                     
                     for (int s = 0; s < schoolSize; s++)
                     {
                         // "Natural Formation": 
-                        // Use a slightly larger, irregular spread (0.5f to 1.5f radius)
+                        // Use a slightly larger, irregular spread (0.5f to 2.0f radius)
                         // This prevents them from being too perfectly circular or too tight
                         Vector2 schoolOffset = Random.insideUnitCircle * Random.Range(0.5f, 2.0f);
                         
@@ -468,16 +696,24 @@ public class GridController : MonoBehaviour
                         {
                             fish.school = school;
                             fish.formationOffset = schoolOffset;
-                        OrientFish(fish, finalPos, new Vector2(_camPos.x, finalPos.y));
+                            school.RegisterFish(fish);
+                            OrientFish(fish, finalPos, new Vector2(_camPos.x, finalPos.y));
                         }
                     }
                 }
                 else
                 {
-                    // Spawn Single (10% chance for L01-00, or 100% for others)
+                    // Spawn Single (Level 2+ predators)
                     // FIX: Don't override level. Respect Prefab settings.
                     Fish fish = enemyLibrary.SpawnSpecific(prefabToSpawn, spawnPos, 0f, 0f, -1);
-                    if (fish != null) OrientFish(fish, spawnPos, new Vector2(_camPos.x, spawnY));
+                    if (fish != null)
+                    {
+                        if (spawnLevel == 2 && Random.value < sickFishChance)
+                        {
+                            fish.SetSickStatus(true);
+                        }
+                        OrientFish(fish, spawnPos, new Vector2(_camPos.x, spawnY));
+                    }
                 }
             }
             
@@ -785,37 +1021,69 @@ public class GridController : MonoBehaviour
 
         // Requirement 2: Strictly 1 boat at a time
         activeHazards.RemoveAll(h => h == null || !h.activeSelf);
-        if (activeHazards.Count > 0 || currentBoat != null) 
+        if (activeHazards.Count > 0 || (currentBoat != null && currentBoat.gameObject.activeInHierarchy)) 
         {
             isSpawningHazards = false;
             yield break;
         }
 
-        Camera cam = Camera.main;
+        Camera cam = _cam != null ? _cam : Camera.main;
         if (cam == null)
         {
             isSpawningHazards = false;
             yield break;
         }
 
-        float camHeight = 2f * cam.orthographicSize;
-        float camWidth = camHeight * cam.aspect;
-        float halfWidth = camWidth / 2f;
-        float bgLimit = halfWidth * 0.45f;
-        float center = cam.transform.position.x;
-        float stopX = Random.Range(center - bgLimit, center + bgLimit);
+        EnsureWorldBoundsCached();
+
+        // Stop position: anywhere within the inner portion of the world background
+        // (not camera-relative so it's independent of player position).
+        // Inset 15% from each side so the boat doesn't stop right at the background edge
+        float bgWidth = cachedWorldBgRight - cachedWorldBgLeft;
+        float inset = bgWidth * 0.15f;
+        float stopX = Random.Range(cachedWorldBgLeft + inset, cachedWorldBgRight - inset);
+        EnsureCorrectBoatSprite();
 
         if (boatSprite != null)
         {
-            GameObject boatObj = new GameObject("FishermanBoat");
-            currentBoat = boatObj.AddComponent<FishermanBoat>();
+            if (cachedPlayerController == null)
+            {
+                cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
+            }
+            if (cachedPlayerController != null)
+            {
+                if (cachedBubbleMat == null) cachedBubbleMat = cachedPlayerController.BubbleMaterial;
+                if (cachedBubbleTex == null) cachedBubbleTex = cachedPlayerController.BubbleTexture;
+            }
 
-            PlayerController pc = (player != null) ? player.GetComponent<PlayerController>() : null;
-            if (pc == null) pc = FindFirstObjectByType<PlayerController>();
-            Material bMat = (pc != null) ? pc.BubbleMaterial : null;
-            Texture2D bTex = (pc != null) ? pc.BubbleTexture : null;
+            if (boatTemplate == null)
+            {
+                InitBoatTemplate();
+            }
 
-            currentBoat.Initialize(boatSprite, stopX, cruiseFromOffscreen: true, bMat, bTex);
+            bool startFromLeft = (Random.value > 0.5f);
+            Vector3 spawnPos;
+            FishermanBoat.CalculateSpawnPlacement(true, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft, out spawnPos);
+
+            GameObject boatObj = null;
+            if (boatTemplate != null && ObjectPoolManager.Instance != null)
+            {
+                boatObj = ObjectPoolManager.Instance.Spawn(boatTemplate, spawnPos, Quaternion.identity);
+            }
+            else if (boatTemplate != null)
+            {
+                boatObj = Instantiate(boatTemplate, spawnPos, Quaternion.identity);
+                boatObj.SetActive(true);
+            }
+            else
+            {
+                boatObj = new GameObject("FishermanBoat");
+                boatObj.transform.position = spawnPos;
+                boatObj.AddComponent<FishermanBoat>();
+            }
+
+            currentBoat = boatObj.GetComponent<FishermanBoat>();
+            currentBoat.Initialize(boatSprite, stopX, cruiseFromOffscreen: true, cachedBubbleMat, cachedBubbleTex, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft);
         }
         else
         {
@@ -831,20 +1099,24 @@ public class GridController : MonoBehaviour
     /// </summary>
     public Hazard SpawnFishingRodForBoat(FishermanBoat boat, float dropX, float depth)
     {
+        float surfaceY = (boat != null) ? boat.WaterSurfaceY : 15.0f;
+        float initialSpawnY = surfaceY + 15f + 1.5f;
+        Vector3 hookSpawnPos = new Vector3(dropX, initialSpawnY, 0f);
+
         GameObject hazardObj = null;
 
         if (hazardPrefab != null)
         {
             if (ObjectPoolManager.Instance != null)
-                hazardObj = ObjectPoolManager.Instance.Spawn(hazardPrefab, Vector3.zero, Quaternion.identity);
+                hazardObj = ObjectPoolManager.Instance.Spawn(hazardPrefab, hookSpawnPos, Quaternion.identity);
             else
-                hazardObj = Instantiate(hazardPrefab);
+                hazardObj = Instantiate(hazardPrefab, hookSpawnPos, Quaternion.identity);
         }
         else if (hazardSprite != null)
         {
             if (hazardTemplate == null)
             {
-                hazardTemplate = new GameObject("Hazard_Template");
+                hazardTemplate = new GameObject("Hazard_Hook");
                 hazardTemplate.transform.SetParent(transform);
                 hazardTemplate.SetActive(false);
                 
@@ -862,10 +1134,9 @@ public class GridController : MonoBehaviour
             }
 
             if (ObjectPoolManager.Instance != null)
-                hazardObj = ObjectPoolManager.Instance.Spawn(hazardTemplate, Vector3.zero, Quaternion.identity);
+                hazardObj = ObjectPoolManager.Instance.Spawn(hazardTemplate, hookSpawnPos, Quaternion.identity);
             else
-                hazardObj = Instantiate(hazardTemplate);
-            hazardObj.name = "Hazard_Hook";
+                hazardObj = Instantiate(hazardTemplate, hookSpawnPos, Quaternion.identity);
             hazardObj.SetActive(true);
 
             SpriteRenderer objSr = hazardObj.GetComponent<SpriteRenderer>();
@@ -894,9 +1165,19 @@ public class GridController : MonoBehaviour
             Renderer r = hazardObj.GetComponent<Renderer>();
             if (r != null) r.material.color = Color.red;
             hazardObj.transform.localScale = new Vector3(1.5f, 1.5f, 1f);
+            hazardObj.transform.position = hookSpawnPos;
         }
 
         if (hazardObj == null) return null;
+
+        // Apply sleeker fishing rod scale
+        hazardObj.transform.localScale = Vector3.one * hazardScale;
+
+        SpriteRenderer spawnedSr = hazardObj.GetComponent<SpriteRenderer>();
+        float halfExtents = (spawnedSr != null && spawnedSr.bounds.extents.y > 0.1f)
+            ? spawnedSr.bounds.extents.y
+            : (31.0f * hazardScale);
+        hazardObj.transform.position = new Vector3(dropX, surfaceY + halfExtents + 0.5f, 0f);
 
         activeHazards.Add(hazardObj);
 
@@ -918,17 +1199,11 @@ public class GridController : MonoBehaviour
             h.Initialize(hazardSound, hazardBubblePrefab, pMat, pTex, depth, boat);
         }
 
-        Camera cam = Camera.main;
-        float camHeight = (cam != null) ? (2f * cam.orthographicSize) : 16f;
-        float camTop = (cam != null) ? (cam.transform.position.y + camHeight / 2f) : 8.0f;
-        float spawnY = camTop + 6f;
         SpriteRenderer hSr = hazardObj.GetComponent<SpriteRenderer>();
-        if (hSr != null)
-        {
-            spawnY = camTop + hSr.bounds.extents.y + 2f;
-        }
+        float halfHeight = (hSr != null) ? hSr.bounds.extents.y : 15f;
+        float finalSpawnY = surfaceY + halfHeight + 1.5f;
 
-        hazardObj.transform.position = new Vector3(dropX, spawnY, 0);
+        hazardObj.transform.position = new Vector3(dropX, finalSpawnY, 0);
         return h;
     }
 

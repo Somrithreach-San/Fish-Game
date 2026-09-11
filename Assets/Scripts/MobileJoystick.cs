@@ -20,13 +20,18 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
 
     public Vector2 InputDirection { get; private set; }
 
-    private Sprite GetBubbleSprite()
+    private Sprite GetPlainCircleSprite()
     {
-        if (buttonShape != null) return buttonShape;
-        Sprite[] allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
-        foreach (Sprite s in allSprites)
+        // Use the plain circle asset (not the glass Bubble_Button)
+        // Try 512px first for best quality, then fallbacks
+        Sprite s = Resources.Load<Sprite>("circle512");
+        if (s != null) return s;
+
+        // Try to find in all loaded assets
+        Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
+        foreach (Sprite sp in all)
         {
-            if (s.name.Contains("Bubble_Button")) return s;
+            if (sp.name == "circle512" || sp.name == "circle256" || sp.name == "circle128") return sp;
         }
         return null;
     }
@@ -55,19 +60,21 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         if (background == null) background = GetComponent<RectTransform>();
         if (handle == null && transform.childCount > 0) handle = transform.GetChild(0).GetComponent<RectTransform>();
 
-        // 1. Outer Joystick: Glass Bubble Button
-        Sprite bubble = GetBubbleSprite();
+        // 1. Outer Joystick Ring: Plain circle with soft transparency (NOT glass)
         if (background != null)
         {
             Image bgImg = background.GetComponent<Image>();
             if (bgImg != null)
             {
-                if (bubble != null) bgImg.sprite = bubble;
-                bgImg.color = Color.white;
+                Sprite circle = GetPlainCircleSprite();
+                if (circle != null) bgImg.sprite = circle;
+                // Soft white with low opacity - classic transparent joystick look
+                bgImg.color = new Color(1f, 1f, 1f, 0.25f);
+                bgImg.type = Image.Type.Simple;
             }
         }
 
-        // 2. Inner Handle: Normal White Color Circle
+        // 2. Inner Handle: Slightly more visible white circle
         if (handle != null)
         {
             Image handleImg = handle.GetComponent<Image>();
@@ -75,7 +82,8 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
             {
                 Sprite circle = GetHandleSprite();
                 if (circle != null) handleImg.sprite = circle;
-                handleImg.color = Color.white;
+                // Inner knob is a bit more visible
+                handleImg.color = new Color(1f, 1f, 1f, 0.55f);
             }
         }
         

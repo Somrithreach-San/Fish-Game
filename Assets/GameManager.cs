@@ -50,11 +50,15 @@ public class GameManager : MonoBehaviour
         }
         // -------------------------------------------------
 
-        // Ensure level-up sound listener is registered early
-        EventManager.StartListening<int>("onLevelUp", (lvl) => {
-            if (audioSource != null && levelUpClip != null)
-                audioSource.PlayOneShot(levelUpClip);
-        });
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource != null)
+        {
+            AudioClip targetClip = LevelManager.IsCurrentLakeLevel ? GetRiverMusicClip() : GetOceanMusicClip();
+            if (targetClip != null)
+            {
+                audioSource.clip = targetClip;
+            }
+        }
     }
     #endregion
 
@@ -90,6 +94,12 @@ public class GameManager : MonoBehaviour
 
 
     private AudioSource audioSource;
+    [Header("Background Music")]
+    [SerializeField]
+    private AudioClip oceanMusicClip;
+    [SerializeField]
+    private AudioClip riverMusicClip;
+
     [Header("Sounds")]
     [SerializeField]
     private AudioClip levelUpClip;
@@ -105,6 +115,40 @@ public class GameManager : MonoBehaviour
     private AudioSource sfxSource;
     private float defaultBgmVolume = 1f;
     private float defaultAmbientVolume = 1f;
+
+    public AudioClip GetOceanMusicClip()
+    {
+        if (oceanMusicClip != null) return oceanMusicClip;
+        #if UNITY_EDITOR
+        oceanMusicClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/music_theme.mp3");
+        if (oceanMusicClip != null) return oceanMusicClip;
+        #endif
+        oceanMusicClip = Resources.Load<AudioClip>("music_theme");
+        return oceanMusicClip;
+    }
+
+    public AudioClip GetRiverMusicClip()
+    {
+        if (riverMusicClip != null) return riverMusicClip;
+        #if UNITY_EDITOR
+        riverMusicClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/river_music_bg.mp3");
+        if (riverMusicClip != null) return riverMusicClip;
+        #endif
+        riverMusicClip = Resources.Load<AudioClip>("river_music_bg");
+        return riverMusicClip;
+    }
+
+    public void StopBackgroundMusic()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+        {
+            audioSource.Stop();
+        }
+        if (ambientSource != null && ambientSource.isPlaying)
+        {
+            ambientSource.Stop();
+        }
+    }
 
 
 
@@ -184,6 +228,13 @@ public class GameManager : MonoBehaviour
         // FIX: Ensure Audio settings are correct for background music
         if (audioSource != null)
         {
+            AudioClip targetClip = LevelManager.IsCurrentLakeLevel ? GetRiverMusicClip() : GetOceanMusicClip();
+            if (targetClip != null && audioSource.clip != targetClip)
+            {
+                audioSource.Stop();
+                audioSource.clip = targetClip;
+            }
+
             defaultBgmVolume = audioSource.volume > 0f ? audioSource.volume : 1f;
             audioSource.loop = true;
             audioSource.playOnAwake = true;
@@ -249,7 +300,7 @@ public class GameManager : MonoBehaviour
         // FIX: Mobile/Web Autoplay Policy
         // Browsers often block audio until the first user interaction.
         // If audio should be playing but isn't, retry on any input.
-        if (!isPaused)
+        if (!isPaused && !IsGameOver)
         {
             bool inputDetected = false;
 
@@ -322,6 +373,7 @@ public class GameManager : MonoBehaviour
         }
 
         IsGameOver = true; // Flag Game Over to block pause
+        StopBackgroundMusic();
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
     }
@@ -338,6 +390,7 @@ public class GameManager : MonoBehaviour
         }
 
         IsGameOver = true; // Flag Game Over to block pause
+        StopBackgroundMusic();
         
         if (sfxSource != null && stageClearClip != null)
             sfxSource.PlayOneShot(stageClearClip);
@@ -352,7 +405,8 @@ public class GameManager : MonoBehaviour
     CinemachineBasicMultiChannelPerlin VcamNoise;
     Coroutine cameraShake;
     Coroutine cameraZoom;
-    float CameraDefaultSize = 8f; // Reverted to original 8f
+    [SerializeField]
+    private float CameraDefaultSize = 8.8f; // 10% zoomed out view (8f -> 8.8f)
     /// <summary>
     /// Shake the camera for a duration with given settings. Requires cinemachine Virtual Camera in the scene
     /// </summary>
@@ -460,14 +514,14 @@ public class GameManager : MonoBehaviour
             audioSource.mute = !enabled;
             audioSource.volume = enabled ? defaultBgmVolume : 0f;
             if (!enabled) audioSource.Pause();
-            else if (!audioSource.isPlaying) audioSource.Play();
+            else if (!audioSource.isPlaying && !IsGameOver) audioSource.Play();
         }
         if (ambientSource != null)
         {
             ambientSource.mute = !enabled;
             ambientSource.volume = enabled ? defaultAmbientVolume : 0f;
             if (!enabled) ambientSource.Pause();
-            else if (!ambientSource.isPlaying) ambientSource.Play();
+            else if (!ambientSource.isPlaying && !IsGameOver) ambientSource.Play();
         }
     }
 

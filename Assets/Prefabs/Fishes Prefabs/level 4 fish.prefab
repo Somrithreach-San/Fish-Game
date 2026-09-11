@@ -44,6 +44,38 @@ PrefabInstance:
       propertyPath: eatSfxOverride
       value: 
       objectReference: {fileID: 8300000, guid: bb5e674ed5bc212449d96a51edeecc0b, type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: isPufferFish
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: normalSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: bdbb4940ad1df9f488eff09305f1eff0,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: spikeSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: d4a72f019b88463bb9120612c85e2b4f,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: spikeDetectRadius
+      value: 5
+      objectReference: {fileID: 0}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: spikeDuration
+      value: 3.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: spikeScaleMultiplier
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329969, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
       propertyPath: m_Name
