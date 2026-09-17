@@ -13,14 +13,20 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
     public bool WasPressedThisFrame => lastPressedFrame == Time.frameCount;
 
     private Vector3 originalScale = Vector3.one;
+    private Image buttonImage;
+    private readonly Color defaultColor = new Color(1f, 1f, 1f, 0.25f);
+    private readonly Color pressedColor = new Color(1f, 1f, 1f, 0.50f);
 
-    private Sprite GetBubbleSprite()
+    private Sprite GetPlainCircleSprite()
     {
-        if (buttonShape != null) return buttonShape;
-        Sprite[] allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
-        foreach (Sprite s in allSprites)
+        if (buttonShape != null && !buttonShape.name.Contains("Bubble_Button")) return buttonShape;
+        Sprite s = Resources.Load<Sprite>("circle512");
+        if (s != null) return s;
+
+        Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
+        foreach (Sprite sp in all)
         {
-            if (s.name.Contains("Bubble_Button")) return s;
+            if (sp.name == "circle512" || sp.name == "circle256" || sp.name == "circle128") return sp;
         }
         return null;
     }
@@ -29,21 +35,22 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
     {
         Instance = this;
         originalScale = transform.localScale;
+        buttonImage = GetComponent<Image>();
     }
     
     private void Start()
     {
-        // Apply Glass Bubble Styling
-        Image img = GetComponent<Image>();
-        if (img != null)
+        // Apply Joystick-like styling (clean translucent circle instead of glossy glass bubble)
+        if (buttonImage == null) buttonImage = GetComponent<Image>();
+        if (buttonImage != null)
         {
-            Sprite bubble = GetBubbleSprite();
-            if (bubble != null)
+            Sprite circle = GetPlainCircleSprite();
+            if (circle != null)
             {
-                img.sprite = bubble;
-                img.type = Image.Type.Simple;
+                buttonImage.sprite = circle;
+                buttonImage.type = Image.Type.Simple;
             }
-            img.color = Color.white;
+            buttonImage.color = defaultColor;
         }
 
         // AUTO-FIX: Sync size with MobileJoystick if available, otherwise default to 250
@@ -62,7 +69,7 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
             Debug.Log($"MobileBoostButton: Auto-synced size to {targetSize}px.");
         }
 
-        // Scale and perfectly center the icon inside the glass bubble button
+        // Scale and perfectly center the icon inside the joystick-style button
         if (transform.childCount > 0)
         {
             RectTransform iconRt = transform.GetChild(0).GetComponent<RectTransform>();
@@ -71,11 +78,17 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
                 iconRt.anchorMin = new Vector2(0.5f, 0.5f);
                 iconRt.anchorMax = new Vector2(0.5f, 0.5f);
                 iconRt.pivot = new Vector2(0.5f, 0.5f);
-                iconRt.anchoredPosition = Vector2.zero; // Perfectly center in bubble
+                iconRt.anchoredPosition = Vector2.zero; // Perfectly center in button
                 
-                // Reduced icon size (32% of button size: ~80px for a 250px button)
-                float iconSize = targetSize * 0.32f;
+                // Sized proportionally like the joystick handle (40% of button size: 100px for a 250px button)
+                float iconSize = targetSize * 0.40f;
                 iconRt.sizeDelta = new Vector2(iconSize, iconSize);
+
+                Image iconImg = iconRt.GetComponent<Image>();
+                if (iconImg != null)
+                {
+                    iconImg.color = new Color(1f, 1f, 1f, 0.85f);
+                }
             }
         }
     }
@@ -84,17 +97,29 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
     {
         lastPressedFrame = Time.frameCount;
         transform.localScale = originalScale * 0.92f;
+        if (buttonImage != null)
+        {
+            buttonImage.color = pressedColor;
+        }
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
         transform.localScale = originalScale;
+        if (buttonImage != null)
+        {
+            buttonImage.color = defaultColor;
+        }
     }
     
     private void OnDisable()
     {
         lastPressedFrame = -1;
         transform.localScale = originalScale;
+        if (buttonImage != null)
+        {
+            buttonImage.color = defaultColor;
+        }
     }
     
     private void OnDestroy()

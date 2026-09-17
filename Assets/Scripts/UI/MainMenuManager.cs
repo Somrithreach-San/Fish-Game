@@ -648,96 +648,14 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedLevelSprite;
     public Sprite GetLevelBackgroundSprite()
     {
-        if (_cachedLevelSprite != null) return _cachedLevelSprite;
-        if (levelBackgroundSprite != null)
-        {
-            _cachedLevelSprite = levelBackgroundSprite;
-            return _cachedLevelSprite;
-        }
-        // 1. Try Resources
-        Sprite res = Resources.Load<Sprite>("Level_Page_BG");
-        if (res != null)
-        {
-            _cachedLevelSprite = res;
-            return _cachedLevelSprite;
-        }
-        // 2. Try finding loaded sprites in memory
-        Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
-        foreach (var s in all)
-        {
-            if (s != null && s.name.Contains("Level_Page_BG"))
-            {
-                _cachedLevelSprite = s;
-                return _cachedLevelSprite;
-            }
-        }
-        // 3. Direct disk loader fallback
-        try
-        {
-            string path = System.IO.Path.Combine(Application.dataPath, "Graphics", "Backgrounds", "Level_Page_BG.png");
-            if (System.IO.File.Exists(path))
-            {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
-                Texture2D tex = new Texture2D(2, 2, TextureFormat.RGB24, false);
-                if (tex.LoadImage(bytes))
-                {
-                    _cachedLevelSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-                    return _cachedLevelSprite;
-                }
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogWarning("Failed to load runtime Level_Page_BG: " + ex.Message);
-        }
+        // USER REQUEST: "Background_No_Text - for now just use this for the settng page and the level page"
         return GetNoTextBackgroundSprite();
     }
 
     private Sprite _cachedSettingSprite;
     public Sprite GetSettingBackgroundSprite()
     {
-        if (_cachedSettingSprite != null) return _cachedSettingSprite;
-        if (settingBackgroundSprite != null)
-        {
-            _cachedSettingSprite = settingBackgroundSprite;
-            return _cachedSettingSprite;
-        }
-        // 1. Try Resources
-        Sprite res = Resources.Load<Sprite>("Setting_Page_BG");
-        if (res != null)
-        {
-            _cachedSettingSprite = res;
-            return _cachedSettingSprite;
-        }
-        // 2. Try finding loaded sprites in memory
-        Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
-        foreach (var s in all)
-        {
-            if (s != null && s.name.Contains("Setting_Page_BG"))
-            {
-                _cachedSettingSprite = s;
-                return _cachedSettingSprite;
-            }
-        }
-        // 3. Direct disk loader fallback
-        try
-        {
-            string path = System.IO.Path.Combine(Application.dataPath, "Graphics", "Backgrounds", "Setting_Page_BG.png");
-            if (System.IO.File.Exists(path))
-            {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
-                Texture2D tex = new Texture2D(2, 2, TextureFormat.RGB24, false);
-                if (tex.LoadImage(bytes))
-                {
-                    _cachedSettingSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-                    return _cachedSettingSprite;
-                }
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogWarning("Failed to load runtime Setting_Page_BG: " + ex.Message);
-        }
+        // USER REQUEST: "Background_No_Text - for now just use this for the settng page and the level page"
         return GetNoTextBackgroundSprite();
     }
 
@@ -751,6 +669,16 @@ public class MainMenuManager : MonoBehaviour
             _cachedNoTextSprite = noTextBackgroundSprite;
             return _cachedNoTextSprite;
         }
+
+#if UNITY_EDITOR
+        Sprite editorSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Backgrounds/Background_No_Text.png");
+        if (editorSprite != null)
+        {
+            _cachedNoTextSprite = editorSprite;
+            return _cachedNoTextSprite;
+        }
+#endif
+
         // 1. Try Resources
         Sprite res = Resources.Load<Sprite>("Background_No_Text");
         if (res != null)
@@ -775,7 +703,7 @@ public class MainMenuManager : MonoBehaviour
             if (System.IO.File.Exists(path))
             {
                 byte[] bytes = System.IO.File.ReadAllBytes(path);
-                Texture2D tex = new Texture2D(2, 2, TextureFormat.RGB24, false);
+                Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (tex.LoadImage(bytes))
                 {
                     _cachedNoTextSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));

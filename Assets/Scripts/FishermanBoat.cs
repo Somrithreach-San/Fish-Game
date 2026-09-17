@@ -8,7 +8,7 @@ public class FishermanBoat : MonoBehaviour
     public enum BoatState { Arriving, StoppedWaiting, Fishing, DepartWaiting, Departing }
 
     [Header("Boat Appearance")]
-    [SerializeField] private float boatScale = 0.80f;
+    [SerializeField] private float boatScale = 0.92f;
     [Tooltip("How deep the lower hull dips below the top camera edge into the water")]
     [SerializeField] private float submergenceDepth = 1.85f;
     [SerializeField] private float bobFrequency = 2.2f;
@@ -21,7 +21,7 @@ public class FishermanBoat : MonoBehaviour
 
     [Header("Bubble Particle Settings")]
     [SerializeField] private float bubbleEmissionRate = 42f;
-    [SerializeField] private Vector2 bubbleSizeRange = new Vector2(0.20f, 0.55f);
+    [SerializeField] private Vector2 bubbleSizeRange = new Vector2(0.14f, 0.42f);
     [SerializeField] private Vector2 bubbleSpeedRange = new Vector2(1.5f, 3.5f);
     [SerializeField] private Vector2 bubbleLifetimeRange = new Vector2(1.0f, 1.8f);
     [SerializeField] private int bubbleMaxParticles = 120;
@@ -33,8 +33,12 @@ public class FishermanBoat : MonoBehaviour
     [SerializeField] private float stopPauseDurationMax = 3.0f;
 
     [Header("Fishing Rod Settings")]
-    [SerializeField] private int minRods = 1;
-    [SerializeField] private int maxRods = 3;
+    [SerializeField] private int minRods = 3;
+    [SerializeField] private int maxRods = 4;
+    [Tooltip("Number of fishing attempts/rounds the boat makes before departing (at least 2 tries)")]
+    [SerializeField] private int fishingRounds = 2;
+    [Tooltip("Pause between fishing rounds while boat stays in place before dropping rods again")]
+    [SerializeField] private float betweenRoundsPause = 2.5f;
 
     [Header("Fishing Rod Depth Tiers (World Y)")]
     [Tooltip("Deep hook target range (near ocean floor, e.g. -12.5 to -5.5)")]
@@ -374,10 +378,37 @@ public class FishermanBoat : MonoBehaviour
         return (surfaceY - submergenceDepth) + halfHeight;
     }
 
+    private bool isEventSubscribed = false;
+
     private void Start()
     {
-        EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+        if (!isEventSubscribed)
+        {
+            try
+            {
+                EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StartListening("playerDeath", StopEngineAudio);
+                EventManager.StartListening("GameLoss", StopEngineAudio);
+                EventManager.StartListening("GameWin", StopEngineAudio);
+                isEventSubscribed = true;
+            }
+            catch { }
+        }
         AudioSettingsManager.OnSfxSettingChanged += OnSfxSettingChanged;
+    }
+
+    /// <summary>
+    /// Immediately halts boat engine sound effect and resets volume to zero.
+    /// </summary>
+    public void StopEngineAudio()
+    {
+        if (engineAudioSource != null)
+        {
+            engineAudioSource.Stop();
+            engineAudioSource.volume = 0f;
+        }
+        currentAudioVolume = 0f;
+        targetAudioVolume = 0f;
     }
 
     private void OnDisable()
@@ -387,30 +418,57 @@ public class FishermanBoat : MonoBehaviour
             StopCoroutine(lifecycleCoroutine);
             lifecycleCoroutine = null;
         }
+        CleanupActiveRods();
         if (wakeParticleSystem != null && wakeParticleSystem.isPlaying)
         {
             wakeParticleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         }
-        if (engineAudioSource != null && engineAudioSource.isPlaying)
-        {
-            engineAudioSource.Stop();
-        }
-        currentAudioVolume = 0f;
-        targetAudioVolume = 0f;
-        activeRods.Clear();
+        StopEngineAudio();
     }
 
     private void OnDestroy()
     {
-        EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+        CleanupActiveRods();
+        if (isEventSubscribed)
+        {
+            try
+            {
+                EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StopListening("playerDeath", StopEngineAudio);
+                EventManager.StopListening("GameLoss", StopEngineAudio);
+                EventManager.StopListening("GameWin", StopEngineAudio);
+            }
+            catch { }
+            isEventSubscribed = false;
+        }
         AudioSettingsManager.OnSfxSettingChanged -= OnSfxSettingChanged;
         if (lifecycleCoroutine != null)
         {
             StopCoroutine(lifecycleCoroutine);
         }
-        if (engineAudioSource != null && engineAudioSource.isPlaying)
+        StopEngineAudio();
+    }
+
+    private void CleanupActiveRods()
+    {
+        if (activeRods != null && activeRods.Count > 0)
         {
-            engineAudioSource.Stop();
+            Hazard[] rodsToClean = activeRods.ToArray();
+            activeRods.Clear();
+            for (int i = 0; i < rodsToClean.Length; i++)
+            {
+                if (rodsToClean[i] != null && rodsToClean[i].gameObject != null)
+                {
+                    if (ObjectPoolManager.Instance != null)
+                    {
+                        ObjectPoolManager.Instance.Despawn(rodsToClean[i].gameObject);
+                    }
+                    else
+                    {
+                        Destroy(rodsToClean[i].gameObject);
+                    }
+                }
+            }
         }
     }
 
@@ -788,83 +846,106 @@ public class FishermanBoat : MonoBehaviour
             yield return null;
         }
 
-        // User Request: Rod count max is 3, randomize with variety (1, 2, or 3 rods)
-        currentState = BoatState.Fishing;
-        float rPick = Random.value;
-        int rodCount;
-        if (rPick < 0.20f) rodCount = 1;       // 20% chance: 1 rod
-        else if (rPick < 0.65f) rodCount = 2;  // 45% chance: 2 rods
-        else rodCount = 3;                     // 35% chance: 3 rods
+        // Ensure boat stays for at least 2 rounds of fishing before departing
+        int totalTries = Mathf.Max(2, fishingRounds);
 
-        rodCount = Mathf.Clamp(rodCount, minRods, maxRods);
-        activeRods.Clear();
+        for (int round = 0; round < totalTries; round++)
+        {
+            if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
 
-        float sign = facingRight ? -1f : 1f;
-        float[] offsets;
-        if (rodCount == 1)
-        {
-            offsets = new float[] { sign * Random.Range(2.5f, 4.5f) };
-        }
-        else if (rodCount == 2)
-        {
-            offsets = new float[] { sign * Random.Range(4.5f, 6.2f), sign * Random.Range(1.8f, 3.2f) };
-        }
-        else
-        {
-            offsets = new float[] { sign * Random.Range(5.0f, 6.5f), sign * Random.Range(3.4f, 4.6f), sign * Random.Range(1.6f, 2.6f) };
-        }
+            // Deploy a randomized 3-4 rod wall so the pattern is challenging but fair.
+            currentState = BoatState.Fishing;
+            int rodCount = Random.value < 0.5f ? 3 : 4;
+            rodCount = Mathf.Clamp(rodCount, minRods, maxRods);
+            activeRods.Clear();
 
-        // Generate distinct depth tiers spanning the full ocean (world Y: -15 to +15)
-        // Deep: near floor (-12.5 to -5.5), Mid: mid-waters (-5.0 to 1.0), Shallow: upper waters (1.0 to 7.5)
-        // Shallowest tier is now calibrated to descend significantly deeper into the active swimming space
-        List<float> depthPool = new List<float>
-        {
-            Random.Range(deepDepthRange.x, deepDepthRange.y),
-            Random.Range(midDepthRange.x, midDepthRange.y),
-            Random.Range(shallowDepthRange.x, shallowDepthRange.y)
-        };
-
-        // Shuffle depth pool so the deepest isn't always at the same position
-        for (int i = 0; i < depthPool.Count; i++)
-        {
-            int swapIdx = Random.Range(i, depthPool.Count);
-            float temp = depthPool[i];
-            depthPool[i] = depthPool[swapIdx];
-            depthPool[swapIdx] = temp;
-        }
-
-        for (int r = 0; r < offsets.Length; r++)
-        {
-            float dropX = transform.position.x + offsets[r];
-            float hookTargetY = depthPool[r];
-
-            if (GridController.Instance != null)
+            float sign = facingRight ? -1f : 1f;
+            float[] offsets;
+            if (rodCount == 3)
             {
-                Hazard hz = GridController.Instance.SpawnFishingRodForBoat(this, dropX, hookTargetY);
-                if (hz != null) activeRods.Add(hz);
+                offsets = new float[]
+                {
+                    sign * Random.Range(5.6f, 6.2f),
+                    sign * Random.Range(2.2f, 2.8f),
+                    sign * Random.Range(-0.8f, -0.2f)
+                };
+            }
+            else
+            {
+                offsets = new float[]
+                {
+                    sign * Random.Range(6.8f, 7.4f),
+                    sign * Random.Range(4.2f, 4.8f),
+                    sign * Random.Range(1.6f, 2.2f),
+                    sign * Random.Range(-1.0f, -0.4f)
+                };
             }
 
-            // User Request: Staggered drop delays so rods don't all drop at once
-            if (r < offsets.Length - 1)
+            // Stagger depths as a coordinated wall: adjacent rods cover different
+            // vertical bands, leaving navigation corridors.
+            float[] depthTargets = rodCount == 3
+                ? new float[] { 6.0f, -1.8f, -10.0f }
+                : new float[] { 7.0f, 1.8f, -4.2f, -10.5f };
+
+            for (int d = 0; d < depthTargets.Length; d++)
             {
-                float staggerDelay = Random.Range(0.9f, 2.0f);
-                float st = 0f;
-                while (st < staggerDelay)
+                float jitter = Random.Range(-0.75f, 0.75f);
+                if (d == 0) depthTargets[d] = Mathf.Clamp(depthTargets[d] + jitter, shallowDepthRange.x, shallowDepthRange.y);
+                else if (d == depthTargets.Length - 1) depthTargets[d] = Mathf.Clamp(depthTargets[d] + jitter, deepDepthRange.x, deepDepthRange.y);
+                else depthTargets[d] += jitter;
+            }
+
+            for (int r = 0; r < offsets.Length; r++)
+            {
+                float dropX = transform.position.x + offsets[r];
+                float hookTargetY = depthTargets[r];
+
+                if (GridController.Instance != null)
+                {
+                    Hazard hz = GridController.Instance.SpawnFishingRodForBoat(this, dropX, hookTargetY);
+                    if (hz != null) activeRods.Add(hz);
+                }
+
+                // User Request: Staggered drop delays so rods don't all drop at once
+                if (r < offsets.Length - 1)
+                {
+                    float staggerDelay = Random.Range(0.9f, 2.0f);
+                    float st = 0f;
+                    while (st < staggerDelay)
+                    {
+                        if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
+                        {
+                            st += Time.deltaTime;
+                        }
+                        yield return null;
+                    }
+                }
+            }
+
+            // Wait until all rods have retracted
+            while (activeRods.Count > 0)
+            {
+                activeRods.RemoveAll(h => h == null || !h.gameObject.activeInHierarchy);
+                yield return null;
+            }
+
+            // If game is over, stop further fishing rounds
+            if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
+
+            // If there is another round, stay in place and pause before dropping lines again
+            if (round < totalTries - 1)
+            {
+                currentState = BoatState.StoppedWaiting;
+                float betweenWait = 0f;
+                while (betweenWait < betweenRoundsPause)
                 {
                     if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
                     {
-                        st += Time.deltaTime;
+                        betweenWait += Time.deltaTime;
                     }
                     yield return null;
                 }
             }
-        }
-
-        // Wait until all rods have retracted
-        while (activeRods.Count > 0)
-        {
-            activeRods.RemoveAll(h => h == null || !h.gameObject.activeInHierarchy);
-            yield return null;
         }
 
         // Brief delay after lines are reeled in before departing
@@ -1018,11 +1099,19 @@ public class FishermanBoat : MonoBehaviour
     {
         if (engineAudioSource == null) return;
 
-        // Respect global SFX settings and game pause state
+        // Respect global SFX settings, game pause state, and game over state
         bool sfxEnabled = AudioSettingsManager.IsSfxEnabled;
-        if (!sfxEnabled || isPaused || (GameManager.instance != null && GameManager.Paused))
+        bool isGameOver = (GameManager.instance != null && GameManager.instance.IsGameOver);
+        if (!sfxEnabled || isPaused || (GameManager.instance != null && GameManager.Paused) || isGameOver)
         {
-            if (engineAudioSource.isPlaying) engineAudioSource.Pause();
+            if (engineAudioSource.isPlaying)
+            {
+                if (isGameOver) engineAudioSource.Stop();
+                else engineAudioSource.Pause();
+            }
+            targetAudioVolume = 0f;
+            currentAudioVolume = 0f;
+            engineAudioSource.volume = 0f;
             return;
         }
 

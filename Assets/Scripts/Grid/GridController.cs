@@ -23,12 +23,17 @@ public class GridController : MonoBehaviour
 
     [Header("Arena Spawning")]
     [SerializeField]
-    private int maxFishCount = 50;
+    private int maxFishCount = 28; // Reduced from 68 to prevent screen crowding
     [SerializeField]
-    private float spawnInterval = 0.7f;
+    private float spawnInterval = 1.3f; // Clean arrival interval
     [SerializeField]
     private GameObject goldenFishPrefab; // Custom prefab for the rare golden fish
     [SerializeField] private float sickFishChance = 0.25f; // Chance for Level 2 fish to spawn as sick
+    [Header("School Settings")]
+    [SerializeField] private int maxActiveSchools = 2; // Maximum concurrent schools across ocean/river
+    [SerializeField] private Vector2 schoolSizeRange = new Vector2(2f, 3f); // 2 to 3 fish per school
+    [SerializeField] private float schoolCooldownDuration = 6.5f; // Delay between school arrivals
+    private float schoolSpawnCooldownTimer = 0f;
     private float spawnTimer = 0f;
 
     [Header("Hazard Settings")]
@@ -41,7 +46,7 @@ public class GridController : MonoBehaviour
     [SerializeField]
     private float hazardChance = 0.15f; // Reduced from 0.20f (User Request: "reduce spawn chance")
     [SerializeField]
-    private float hazardScale = 0.8f; // Scale modifier for fishing rod hazard
+    private float hazardScale = 0.50f; // Scaled down for realistic, sleek fishing rod & bait proportion
 
     [Header("Hazard Effects")]
     [SerializeField]
@@ -58,7 +63,34 @@ public class GridController : MonoBehaviour
     private static AudioClip s_CachedEngineClip = null;
     private List<GameObject> activeBoats = new List<GameObject>();
     private FishermanBoat currentBoat = null;
+    private RiverBoat currentRiverBoat = null;
+
+    [Header("Ocean Harpoon Hazard Settings")]
+    [SerializeField] private GameObject riverBoatPrefab;
+    [SerializeField] private Sprite riverBoatSprite;
+    [SerializeField] private GameObject harpoonPrefab;
+    [SerializeField] private Sprite harpoonSprite;
+    [SerializeField] private AudioClip harpoonShootSound;
+    [SerializeField] private AudioClip harpoonReelSound;
+    [SerializeField] private AudioClip harpoonStabSound;
+    private GameObject riverBoatTemplate = null;
+    private GameObject harpoonTemplate = null;
+    private static Sprite s_CachedRiverBoatSprite = null;
     
+    [Header("Hazard Dynamic Timers")]
+    [Tooltip("Min and Max delay (seconds) before the first boat appears after level starts")]
+    [SerializeField] private Vector2 boatInitialDelayRange = new Vector2(6f, 18f);
+    [Tooltip("Min and Max cooldown (seconds) between boat departures and the next boat arrival")]
+    [SerializeField] private Vector2 boatCooldownRange = new Vector2(14f, 28f);
+
+    [Tooltip("Min and Max delay (seconds) before the first shark appears after level starts")]
+    [SerializeField] private Vector2 sharkInitialDelayRange = new Vector2(10f, 25f);
+    [Tooltip("Min and Max cooldown (seconds) between shark departures and the next shark arrival")]
+    [SerializeField] private Vector2 sharkCooldownRange = new Vector2(18f, 35f);
+
+    private float boatCooldownTimer = 0f;
+    private float sharkCooldownTimer = 0f;
+
     public static GridController Instance { get; private set; }
 
     // Track active hazard to limit to 1
@@ -101,6 +133,7 @@ public class GridController : MonoBehaviour
     private float cachedWorldBgLeft = -25f;
     private float cachedWorldBgRight = 25f;
     private float cachedWorldSurfaceY = 15f;
+    private float cachedWorldFloorY = -14f;
     private PlayerController cachedPlayerController = null;
     private Material cachedBubbleMat = null;
     private Texture2D cachedBubbleTex = null;
@@ -126,6 +159,7 @@ public class GridController : MonoBehaviour
         }
         
         _camCacheFrame = -1;
+        hazardScale = Mathf.Clamp(hazardScale, 0.40f, 0.60f);
 
         if (boatSprite != null && boatSprite.name.Contains("Fisherman_Boat"))
         {
@@ -145,6 +179,7 @@ public class GridController : MonoBehaviour
         if (cachedBubbleMat != null)
         {
             FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+            RiverBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
         }
 
         if (boatEngineSound != null)
@@ -166,6 +201,7 @@ public class GridController : MonoBehaviour
         if (s_CachedEngineClip != null)
         {
             FishermanBoat.SetGlobalEngineClip(s_CachedEngineClip);
+            RiverBoat.SetGlobalEngineClip(s_CachedEngineClip);
         }
 
         if (hazardSound == null && hazardPrefab != null)
@@ -241,9 +277,11 @@ public class GridController : MonoBehaviour
                     if (cachedBubbleMat != null)
                     {
                         FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+                        RiverBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
                     }
                 }
                 FishermanBoat.SetGlobalPlayer(player.transform);
+                RiverBoat.SetGlobalPlayer(player.transform);
             }
         });
     }
@@ -251,8 +289,24 @@ public class GridController : MonoBehaviour
     private void Start()
     {
         EnsureWorldBoundsCached();
-        InitBoatTemplate();
-        StartCoroutine(PreWarmBoatGPURoutine());
+        if (LevelManager.IsCurrentLakeLevel)
+        {
+            InitBoatTemplate();
+        }
+        else
+        {
+            InitRiverBoatTemplate();
+        }
+
+        // Initialize dynamic, randomized hazard delays
+        boatCooldownTimer = Random.Range(boatInitialDelayRange.x, boatInitialDelayRange.y);
+        sharkCooldownTimer = Random.Range(sharkInitialDelayRange.x, sharkInitialDelayRange.y);
+
+        if (maxFishCount > 32)
+        {
+            maxFishCount = 28;
+        }
+        schoolSpawnCooldownTimer = Random.Range(2f, 4f);
     }
 
     private void EnsureWorldBoundsCached()
@@ -267,19 +321,22 @@ public class GridController : MonoBehaviour
             {
                 Vector2[] pts = poly.GetPath(0);
                 float minX = float.MaxValue, maxX = float.MinValue;
-                float maxY = float.MinValue;
+                float maxY = float.MinValue, minY = float.MaxValue;
                 foreach (var p in pts)
                 {
                     Vector2 wp = (Vector2)wbObj.transform.TransformPoint(p);
                     if (wp.x < minX) minX = wp.x;
                     if (wp.x > maxX) maxX = wp.x;
                     if (wp.y > maxY) maxY = wp.y;
+                    if (wp.y < minY) minY = wp.y;
                 }
                 cachedWorldBgLeft = minX;
                 cachedWorldBgRight = maxX;
                 cachedWorldSurfaceY = maxY;
+                cachedWorldFloorY = minY;
                 worldBoundsCached = true;
                 FishermanBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY);
+                RiverBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, cachedWorldFloorY);
                 return;
             }
         }
@@ -287,8 +344,10 @@ public class GridController : MonoBehaviour
         cachedWorldBgLeft = -25f;
         cachedWorldBgRight = 25f;
         cachedWorldSurfaceY = 15f;
+        cachedWorldFloorY = -14f;
         worldBoundsCached = true;
         FishermanBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY);
+        RiverBoat.SetGlobalWorldBounds(cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, cachedWorldFloorY);
     }
 
     public static Sprite LoadFishermanBoatSprite()
@@ -324,6 +383,86 @@ public class GridController : MonoBehaviour
         return s;
     }
 
+    public static Sprite LoadRiverBoatSprite()
+    {
+        if (s_CachedRiverBoatSprite != null) return s_CachedRiverBoatSprite;
+
+        Sprite s = null;
+        #if UNITY_EDITOR
+        s = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/river_fisherman_hazard_boat.png");
+        #endif
+
+        if (s == null)
+        {
+            Sprite[] all = Resources.LoadAll<Sprite>("river_fisherman_hazard_boat");
+            if (all != null && all.Length > 0)
+            {
+                s = all[0];
+            }
+        }
+        s_CachedRiverBoatSprite = s;
+        return s;
+    }
+
+    private void EnsureCorrectRiverBoatSprite()
+    {
+        if (s_CachedRiverBoatSprite != null)
+        {
+            if (riverBoatSprite != s_CachedRiverBoatSprite) riverBoatSprite = s_CachedRiverBoatSprite;
+            return;
+        }
+
+        if (riverBoatSprite == null)
+        {
+            riverBoatSprite = LoadRiverBoatSprite();
+        }
+        if (riverBoatSprite != null)
+        {
+            s_CachedRiverBoatSprite = riverBoatSprite;
+        }
+    }
+
+    private static Sprite s_CachedHarpoonSprite = null;
+
+    public static Sprite LoadHarpoonSprite()
+    {
+        if (s_CachedHarpoonSprite != null) return s_CachedHarpoonSprite;
+
+        Sprite s = null;
+        #if UNITY_EDITOR
+        s = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/river_harpoon.png");
+        #endif
+
+        if (s == null)
+        {
+            Sprite[] all = Resources.LoadAll<Sprite>("river_harpoon");
+            if (all != null && all.Length > 0)
+            {
+                s = all[0];
+            }
+        }
+        s_CachedHarpoonSprite = s;
+        return s;
+    }
+
+    private void EnsureCorrectHarpoonSprite()
+    {
+        if (s_CachedHarpoonSprite != null)
+        {
+            if (harpoonSprite != s_CachedHarpoonSprite) harpoonSprite = s_CachedHarpoonSprite;
+            return;
+        }
+
+        if (harpoonSprite == null)
+        {
+            harpoonSprite = LoadHarpoonSprite();
+        }
+        if (harpoonSprite != null)
+        {
+            s_CachedHarpoonSprite = harpoonSprite;
+        }
+    }
+
     private void EnsureCorrectBoatSprite()
     {
         if (s_CachedBoatSprite != null)
@@ -345,6 +484,61 @@ public class GridController : MonoBehaviour
     private void OnValidate()
     {
         EnsureCorrectBoatSprite();
+        EnsureCorrectRiverBoatSprite();
+        EnsureCorrectHarpoonSprite();
+    }
+
+    private void InitRiverBoatTemplate()
+    {
+        EnsureCorrectRiverBoatSprite();
+        if (riverBoatTemplate != null || riverBoatSprite == null) return;
+
+        EnsureWorldBoundsCached();
+
+        riverBoatTemplate = new GameObject("RiverFishermanBoat");
+        riverBoatTemplate.transform.SetParent(transform);
+        riverBoatTemplate.SetActive(false);
+
+        SpriteRenderer sr = riverBoatTemplate.AddComponent<SpriteRenderer>();
+        sr.sprite = riverBoatSprite;
+        sr.sortingOrder = 3; // Below player fish (5) - RiverBoat.Awake() also enforces this
+
+        RiverBoat boatComp = riverBoatTemplate.AddComponent<RiverBoat>();
+
+        if (cachedPlayerController == null)
+        {
+            cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
+        }
+        if (cachedPlayerController != null)
+        {
+            if (cachedBubbleMat == null) cachedBubbleMat = cachedPlayerController.BubbleMaterial;
+            if (cachedBubbleTex == null) cachedBubbleTex = cachedPlayerController.BubbleTexture;
+        }
+
+        #if UNITY_EDITOR
+        if (cachedBubbleMat == null)
+        {
+            cachedBubbleMat = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Graphics/bubbleParticleMat.mat");
+        }
+        #endif
+        if (cachedBubbleMat != null)
+        {
+            FishermanBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
+        }
+
+        boatComp.SetupWakeParticlesTemplate(cachedBubbleMat, cachedBubbleTex);
+        boatComp.SetupAudio(s_CachedEngineClip);
+        boatComp.WarmUpParticles();
+
+        if (riverBoatSprite != null && riverBoatSprite.texture != null)
+        {
+            var _ = riverBoatSprite.texture.GetNativeTexturePtr();
+        }
+
+        if (ObjectPoolManager.Instance != null)
+        {
+            ObjectPoolManager.Instance.PreWarm(riverBoatTemplate, 2);
+        }
     }
 
     private void InitBoatTemplate()
@@ -387,43 +581,17 @@ public class GridController : MonoBehaviour
 
         boatComp.SetupWakeParticlesTemplate(cachedBubbleMat, cachedBubbleTex);
         boatComp.SetupAudio(s_CachedEngineClip);
+        boatComp.WarmUpParticles();
+
+        if (boatSprite != null && boatSprite.texture != null)
+        {
+            // Warm texture upload to GPU without displaying any sprite in front of the camera
+            var _ = boatSprite.texture.GetNativeTexturePtr();
+        }
 
         if (ObjectPoolManager.Instance != null)
         {
             ObjectPoolManager.Instance.PreWarm(boatTemplate, 2);
-        }
-    }
-
-    /// <summary>
-    /// Pre-warms the boat texture in GPU VRAM and pre-compiles particle shaders
-    /// during scene startup so the main thread never stalls when the hazard first triggers.
-    /// Places the boat inside the camera frustum behind the scene (Z = 50) for 1 frame
-    /// so Unity and the GPU driver compile shaders and upload textures into VRAM.
-    /// </summary>
-    private IEnumerator PreWarmBoatGPURoutine()
-    {
-        // Wait until end of first frame so ObjectPoolManager is fully ready
-        yield return null;
-
-        if (boatTemplate == null || ObjectPoolManager.Instance == null) yield break;
-
-        // Position within camera view but behind the scene (Z = 50f)
-        Camera cam = _cam != null ? _cam : Camera.main;
-        Vector3 warmPos = (cam != null) ? new Vector3(cam.transform.position.x, cam.transform.position.y, 50f) : new Vector3(0f, 0f, 50f);
-        GameObject tempBoat = ObjectPoolManager.Instance.Spawn(boatTemplate, warmPos, Quaternion.identity);
-        if (tempBoat != null)
-        {
-            FishermanBoat boatComp = tempBoat.GetComponent<FishermanBoat>();
-            if (boatComp != null)
-            {
-                boatComp.WarmUpParticles();
-            }
-
-            // Wait 1 frame so Unity submits the boat sprite texture & particle system to GPU VRAM
-            yield return null;
-
-            // Return to pool
-            ObjectPoolManager.Instance.Despawn(tempBoat);
         }
     }
 
@@ -442,6 +610,11 @@ public class GridController : MonoBehaviour
         
         UpdateCameraCache();
 
+        if (schoolSpawnCooldownTimer > 0f)
+        {
+            schoolSpawnCooldownTimer -= Time.deltaTime;
+        }
+
         // Clean inactive references for hazards and shark
         if (activeShark != null && !activeShark.activeSelf) activeShark = null;
         activeHazards.RemoveAll(h => h == null || !h.activeSelf);
@@ -454,69 +627,53 @@ public class GridController : MonoBehaviour
              CullObsoleteFish(GameManager.PlayerLevel);
         }
 
+        LevelConfig levelCfg = LevelManager.GetCurrentConfig();
+
+        // --- Dynamic Hazard Director: Boat Hazard ---
+        if (levelCfg.enableFishingRod)
+        {
+            bool isBoatActive = (currentBoat != null && currentBoat.gameObject.activeInHierarchy) ||
+                                (currentRiverBoat != null && currentRiverBoat.gameObject.activeInHierarchy) ||
+                                activeHazards.Count > 0 || isSpawningHazards;
+
+            if (!isBoatActive)
+            {
+                boatCooldownTimer -= Time.deltaTime;
+                if (boatCooldownTimer <= 0f)
+                {
+                    boatCooldownTimer = Random.Range(boatCooldownRange.x, boatCooldownRange.y);
+                    StartCoroutine(SpawnHazardsRoutine());
+                }
+            }
+        }
+
+        // --- Dynamic Hazard Director: Shark / Predator Hazard (Ocean only) ---
+        if (levelCfg.enableShark && !levelCfg.isLake)
+        {
+            bool isSharkActive = (activeShark != null && activeShark.activeSelf);
+            if (!isSharkActive)
+            {
+                sharkCooldownTimer -= Time.deltaTime;
+                if (sharkCooldownTimer <= 0f)
+                {
+                    sharkCooldownTimer = Random.Range(sharkCooldownRange.x, sharkCooldownRange.y);
+                    SpawnShark();
+                }
+            }
+        }
+
         spawnTimer += Time.deltaTime;
         if (spawnTimer >= spawnInterval)
         {
             spawnTimer = 0f;
 
-            // 1. Hazard Spawn Check (Priority over Fish)
-            // Allowed to spawn even if Fish count is maxed out
-            // User Request: "More frequent both of it" -> Boosted chances
-            // User Request: "increase the chanes of the hazrd hook more"
-            
-            // 1. Hazard Spawn Check (Priority over Fish)
-            LevelConfig levelCfg = LevelManager.GetCurrentConfig();
-
-            if (levelCfg.enableFishingRod && GameManager.PlayerLevel >= 2)
-            {
-                float effectiveHazardChance = Mathf.Max(hazardChance, 0.22f); // Reduced from 0.35f
-                
-                // Further boost for low levels since they don't have sharks
-                if (GameManager.PlayerLevel <= 2) 
-                {
-                    effectiveHazardChance = 0.30f; // Reduced from 0.5f
-                }
-
-                // Clean up nulls
-                activeHazards.RemoveAll(h => h == null);
-
-                // Requirement 2: Strictly 1 boat appear at a time
-                if (currentBoat == null && activeHazards.Count == 0 && !isSpawningHazards && Random.value < effectiveHazardChance)
-                {
-                    StartCoroutine(SpawnHazardsRoutine());
-                    return; 
-                }
-            }
-
-            // 1.5 Shark Spawn Check (Priority over Fish, Independent of Fisherman)
-            // Can happen alongside other things, but limit to 1 active shark
-            if (levelCfg.enableShark && GameManager.PlayerLevel >= 2)
-            {
-                // Shark appears more when user reaches higher levels
-                float effectiveSharkChance = Mathf.Max(sharkChance, 0.10f);
-                
-                if (GameManager.PlayerLevel >= 4)
-                {
-                    effectiveSharkChance = 0.30f;
-                }
-
-                if (activeShark == null && Random.value < effectiveSharkChance)
-                {
-                    SpawnShark();
-                    // If we spawn a shark, maybe skip fish spawning this frame to reduce chaos?
-                    return;
-                }
-            }
-
-            // 1.8 Parasite Hazard (Mind Control) - MOVED TO FISH INFECTION LOGIC
-            // We no longer spawn a separate flying bug. Instead, we infect random fish.
-
-            // 2. Fish Count Limit Check
+            // Fish Count Limit Check
             // OPTIMIZATION: Use static list from Fish class
             
             // Get player level early for culling check
             int playerLevel = GameManager.PlayerLevel;
 
+            Fish.AllFish.RemoveAll(f => f == null);
             if (Fish.AllFish.Count >= maxFishCount)
             {
                 // CULLING LOGIC:
@@ -534,163 +691,155 @@ public class GridController : MonoBehaviour
                 return;
             }
             
-            int predatorCount = 0;
-            int apexCount = 0;
+            int[] activeCounts = new int[7];
+            int totalActive = 0;
             for (int i = 0; i < Fish.AllFish.Count; i++)
             {
-                if (Fish.AllFish[i] == null) continue;
-                if (Fish.AllFish[i].Level > playerLevel) predatorCount++;
-                if (Fish.AllFish[i].Level >= playerLevel + 2) apexCount++;
+                Fish f = Fish.AllFish[i];
+                if (f == null || !f.gameObject.activeInHierarchy || f.IsDead) continue;
+                int lvl = Mathf.Clamp(f.Level, 1, 6);
+                activeCounts[lvl]++;
+                totalActive++;
             }
 
-            int predatorCap = (playerLevel <= 2) ? 2 : 3;
-            bool forceEatable = (predatorCount >= predatorCap);
-            // In early levels (playerLevel <= 2), cap large apex predators (Level >= playerLevel + 2) to at most 1 active
-            bool blockApex = (apexCount >= 1 && playerLevel <= 2);
-
-            SpawnArenaFish(playerLevel, forceEatable, blockApex);
+            SpawnArenaFish(playerLevel, activeCounts, totalActive);
         }
     }
 
-    private void SpawnArenaFish(int playerLevel, bool forceEatable, bool blockApex)
+    private void SpawnArenaFish(int playerLevel, int[] activeCounts, int totalActive)
     {
-        int count = 2;
-        if (playerLevel >= 6) count = 5;
-        else if (playerLevel >= 4) count = 3;
+        int count = 1;
+        if (Fish.AllFish.Count < 10) count = 2;
         
         // Calculate Camera View Boundaries
         if (_cam == null) return;
+        EnsureWorldBoundsCached();
         
-        // Spawn just outside the camera view (buffer of 2 units)
-        float buffer = 2f;
-        float rightEdge = _camPos.x + _halfWidth + buffer;
-        float leftEdge = _camPos.x - _halfWidth - buffer;
+        // Spawn strictly off-screen (buffer of ~3.5f units guarantees even large fish and entire schools spawn 100% off-screen).
+        float buffer = 3.5f;
+
+        float halfHeight = _camHeight / 2f;
+        float worldFloor = worldBoundsCached ? (cachedWorldFloorY + 1.2f) : -13.5f;
+        float worldSurface = worldBoundsCached ? (cachedWorldSurfaceY - 2.0f) : 13.5f;
 
         for (int i = 0; i < count; i++)
         {
-            // Randomly choose Left or Right side relative to Camera
-            float spawnX = (Random.value > 0.5f) ? rightEdge : leftEdge;
-            
-            // Random Y within world vertical bounds (-14 to 14)
-            // But also clamp to be near camera Y to ensure visibility? 
-            // Let's keep it within world bounds but maybe biased towards camera Y?
-            // For now, world bounds -14 to 14 is safe.
-            float spawnY = Random.Range(-14f, 14f); 
+            // Pick left or right, smartly preferring whichever side has open water inside world bounds
+            bool canSpawnRight = (_camPos.x + _halfWidth + buffer <= cachedWorldBgRight + 4.0f);
+            bool canSpawnLeft = (_camPos.x - _halfWidth - buffer >= cachedWorldBgLeft - 4.0f);
 
-            // Add slight randomness to X
-            spawnX += Random.Range(-1f, 1f);
+            bool spawnOnRight;
+            if (canSpawnRight && canSpawnLeft)
+                spawnOnRight = (Random.value > 0.5f);
+            else if (canSpawnRight)
+                spawnOnRight = true;
+            else if (canSpawnLeft)
+                spawnOnRight = false;
+            else
+                spawnOnRight = (Random.value > 0.5f);
 
+            float jitter = Random.Range(0.4f, 1.2f);
+            float spawnX;
+            if (spawnOnRight)
+            {
+                spawnX = _camPos.x + _halfWidth + buffer + jitter;
+                if (spawnX < _camPos.x + _halfWidth + 2.5f)
+                    spawnX = _camPos.x + _halfWidth + 2.5f;
+            }
+            else
+            {
+                spawnX = _camPos.x - _halfWidth - buffer - jitter;
+                if (spawnX > _camPos.x - _halfWidth - 2.5f)
+                    spawnX = _camPos.x - _halfWidth - 2.5f;
+            }
+
+            // Align Y spawn with camera's visible span clamped within actual water floor and surface
+            float minY = Mathf.Max(worldFloor, _camPos.y - halfHeight + 1.2f);
+            float maxY = Mathf.Min(worldSurface, _camPos.y + halfHeight - 1.2f);
+            if (minY >= maxY)
+            {
+                minY = worldFloor;
+                maxY = worldSurface;
+            }
+            float spawnY = Random.Range(minY, maxY);
             Vector2 spawnPos = new Vector2(spawnX, spawnY);
             
-            // Difficulty Logic:
-            
-            // SPECIAL: Check for Golden Fish Spawn (Rare!)
-            // Reduced spawn chances so golden fish feels rare and special
-            float goldenChance = 0.02f; // 2% at Early Game (Level 1-2)
-            if (playerLevel >= 5)
-            {
-                goldenChance = 0.10f; // 10% at End Game (Level 5+)
-            }
-            else if (playerLevel >= 4)
-            {
-                goldenChance = 0.07f; // 7% at Late Game (Level 4)
-            }
-            else if (playerLevel >= 3)
-            {
-                goldenChance = 0.04f; // 4% at Mid Game (Level 3)
-            }
+            // SPECIAL: Check for Golden Fish Spawn (Ocean only)
+            float goldenChance = 0.02f;
+            if (playerLevel >= 5) goldenChance = 0.08f;
+            else if (playerLevel >= 3) goldenChance = 0.05f;
 
-            if (Random.value < goldenChance)
+            LevelConfig currentCfg = LevelManager.GetCurrentConfig();
+
+            if (!currentCfg.isLake && Random.value < goldenChance)
             {
-                // Spawn Golden Fish!
                 Fish goldenPrefab = null;
-
-                // Priority 1: User assigned prefab
                 if (goldenFishPrefab != null)
                 {
                     goldenPrefab = goldenFishPrefab.GetComponent<Fish>();
                 }
                 
-                // Priority 2: Fallback to Level 1 Fish
                 if (goldenPrefab == null)
                 {
-                    string goldenBaseName = "level 1 fish"; // Base prefab
-                    goldenPrefab = enemyLibrary.GetPrefabByName(1, goldenBaseName);
-                    if (goldenPrefab == null) goldenPrefab = enemyLibrary.GetRandomPrefab(1);
+                    goldenPrefab = enemyLibrary.GetPrefabByName(1, "level 1 fish", false);
+                    if (goldenPrefab == null) goldenPrefab = enemyLibrary.GetRandomPrefab(1, false);
                 }
                 
                 if (goldenPrefab != null)
                 {
-                    // Spawn it
                     Fish golden = enemyLibrary.SpawnSpecific(goldenPrefab, spawnPos, 0f, 0f, -1);
                     if (golden != null)
                     {
-                        // Apply Golden Attributes
-                        // If it's the custom prefab, it might already handle this in Start(), 
-                        // but calling it again is safe due to our checks.
                         golden.SetGoldenStatus(true);
-                        
-                        // Force Level 1 so it can be eaten by Level 2+ enemy fish, Player, and Shark
                         golden.ForceLevel(1);
-
                         OrientFish(golden, spawnPos, new Vector2(_camPos.x, spawnPos.y));
-                        return; // Done for this cycle
+                        return;
                     }
                 }
             }
 
-            // Open-Ocean Natural Ecosystem:
-            // All fish inside this stage level can spawn, with apex tiers starting rare and scaling up with progress
-            LevelConfig currentCfg = LevelManager.GetCurrentConfig();
+            // Natural Balanced Ecosystem Spawning
             float levelProgress = GameManager.PlayerLevelProgress;
-            int spawnLevel = CalculateSpawnLevel(playerLevel, levelProgress, currentCfg.maxEnemyLevel, forceEatable, blockApex);
+            int spawnLevel = CalculateSpawnLevel(playerLevel, levelProgress, currentCfg.maxEnemyLevel, activeCounts, totalActive);
             
-            // Determine Prefab
-            string targetName = "level " + spawnLevel + " fish";
-            Fish prefabToSpawn = enemyLibrary.GetPrefabByName(spawnLevel, targetName);
+            // Determine Prefab (Support both ocean "level X fish" and river "river level X fish")
+            string targetName = (currentCfg.isLake ? "river level " : "level ") + spawnLevel + " fish";
+            Fish prefabToSpawn = enemyLibrary.GetPrefabByName(spawnLevel, targetName, currentCfg.isLake);
             
-            // Fallback if specific name not found (just in case)
             if (prefabToSpawn == null)
             {
-                prefabToSpawn = enemyLibrary.GetRandomPrefab(spawnLevel);
+                prefabToSpawn = enemyLibrary.GetRandomPrefab(spawnLevel, currentCfg.isLake);
             }
             
             if (prefabToSpawn != null)
             {
-                // Verification: Ensure the prefab's level matches our intended spawn level
                 if (prefabToSpawn.Level != spawnLevel)
                 {
                     Debug.LogWarning($"Spawn Mismatch! Intended: {spawnLevel}, Prefab: {prefabToSpawn.name} has Level {prefabToSpawn.Level}");
                 }
 
-                // SCHOOLING LOGIC: Level 1 fish always spawn in groups of 3 to 5 (never spawn alone)
+                // Level 1 fish (both Ocean and River) spawn in small schools
                 if (spawnLevel == 1)
                 {
-                    // Create School
-                    GameObject schoolObj = new GameObject("FishSchool");
-                    FishSchool school = schoolObj.AddComponent<FishSchool>();
-                    bool movingRight = (spawnX < 0); 
-                    school.Initialize(movingRight);
+                    // If minnows already exist in abundance (>= 4), spawn only 1-2 fish to prevent minnow swamping
+                    int schoolSize = (activeCounts != null && activeCounts[1] >= 4) ? Random.Range(1, 3) : Random.Range(2, 4);
                     
-                    // User Request: Smallest amount is 3, largest is 5 in a group (3 to 5 inclusive)
-                    int schoolSize = Random.Range(3, 6);
+                    GameObject schoolObj = new GameObject("FishSchool");
+                    schoolObj.transform.position = spawnPos;
+                    FishSchool school = schoolObj.AddComponent<FishSchool>();
+                    bool movingRight = (spawnX < _camPos.x); 
+                    school.Initialize(movingRight);
                     
                     for (int s = 0; s < schoolSize; s++)
                     {
-                        // "Natural Formation": 
-                        // Use a slightly larger, irregular spread (0.5f to 2.0f radius)
-                        // This prevents them from being too perfectly circular or too tight
-                        Vector2 schoolOffset = Random.insideUnitCircle * Random.Range(0.5f, 2.0f);
-                        
-                        // Stretch horizontally to look like they are swimming in a line/group
-                        schoolOffset.x *= 1.5f; 
+                        Vector2 schoolOffset = Random.insideUnitCircle * Random.Range(0.35f, 0.95f);
+                        schoolOffset.x *= 1.3f; 
+                        if (spawnOnRight) schoolOffset.x = Mathf.Abs(schoolOffset.x);
+                        else schoolOffset.x = -Mathf.Abs(schoolOffset.x);
 
                         Vector2 finalPos = spawnPos + schoolOffset;
-                        finalPos.y = Mathf.Clamp(finalPos.y, -14f, 14f);
+                        finalPos.y = Mathf.Clamp(finalPos.y, minY, maxY);
                         
-                        // FIX: Don't override the prefab's inherent level. 
-                        // The user has carefully set up prefabs with specific levels/sprites.
-                        // Passing '0' or '-1' as overrideLevel to respect the prefab's data.
                         Fish fish = enemyLibrary.SpawnSpecific(prefabToSpawn, finalPos, 0f, 0f, -1);
                         if (fish != null)
                         {
@@ -700,243 +849,176 @@ public class GridController : MonoBehaviour
                             OrientFish(fish, finalPos, new Vector2(_camPos.x, finalPos.y));
                         }
                     }
+                    if (activeCounts != null) activeCounts[1] += schoolSize;
                 }
                 else
                 {
-                    // Spawn Single (Level 2+ predators)
-                    // FIX: Don't override level. Respect Prefab settings.
+                    // Higher-level fish (Level >= 2) spawn individually
                     Fish fish = enemyLibrary.SpawnSpecific(prefabToSpawn, spawnPos, 0f, 0f, -1);
                     if (fish != null)
                     {
-                        if (spawnLevel == 2 && Random.value < sickFishChance)
+                        if (spawnLevel == 2 && !currentCfg.isLake && Random.value < sickFishChance)
                         {
                             fish.SetSickStatus(true);
+                            float deepMinY = worldFloor + 0.8f;
+                            float deepMaxY = worldFloor + (worldSurface - worldFloor) * 0.28f;
+                            float deepSpawnY = Random.Range(deepMinY, deepMaxY);
+                            Vector3 deepPos = fish.transform.position;
+                            deepPos.y = deepSpawnY;
+                            fish.transform.position = deepPos;
+                            OrientFish(fish, deepPos, new Vector2(_camPos.x, deepSpawnY));
                         }
-                        OrientFish(fish, spawnPos, new Vector2(_camPos.x, spawnY));
+                        else
+                        {
+                            OrientFish(fish, spawnPos, new Vector2(_camPos.x, spawnY));
+                        }
                     }
+                    if (activeCounts != null) activeCounts[spawnLevel]++;
                 }
             }
-            
-            // Note: We don't save these to GridBlocks because they are temporary "passers-by"
         }
     }
 
     //==============================| Helpers |========================//
 
-    private int CalculateSpawnLevel(int playerLevel, float levelProgress, int maxEnemyLevel, bool forceEatable, bool blockApex)
+    private int CalculateSpawnLevel(int playerLevel, float levelProgress, int maxEnemyLevel, int[] activeCounts, int totalActive)
     {
-        if (maxEnemyLevel <= 1) return 1;
-
-        // Clamping
-        if (playerLevel < 1) playerLevel = 1;
-        if (maxEnemyLevel > 6) maxEnemyLevel = 6;
-
-        // If forceEatable, only pick levels <= playerLevel
-        int effectiveMax = forceEatable ? Mathf.Min(playerLevel, maxEnemyLevel) : maxEnemyLevel;
+        int effectiveMax = Mathf.Clamp(maxEnemyLevel, 1, 5);
         if (effectiveMax <= 1) return 1;
+        if (playerLevel < 1) playerLevel = 1;
 
-        // Weights array for levels 1 to 6 (1-indexed, size 7)
         float[] weights = new float[7];
 
-        if (forceEatable)
+        // 1. Stage Baseline Distribution
+        if (effectiveMax == 2)
         {
-            // Biomass pyramid among eatable fish
             if (playerLevel == 1)
             {
-                weights[1] = 1.0f;
+                weights[1] = 0.42f;
+                weights[2] = 0.58f;
+            }
+            else // Lv 2+
+            {
+                weights[1] = 0.25f;
+                weights[2] = 0.75f;
+            }
+        }
+        else if (effectiveMax == 3)
+        {
+            if (playerLevel == 1)
+            {
+                weights[1] = 0.32f;
+                weights[2] = 0.40f;
+                weights[3] = 0.28f;
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.35f;
-                weights[2] = 0.65f;
+                weights[1] = 0.18f;
+                weights[2] = 0.44f;
+                weights[3] = 0.38f;
+            }
+            else // Lv 3+
+            {
+                weights[1] = 0.12f;
+                weights[2] = 0.36f;
+                weights[3] = 0.52f;
+            }
+        }
+        else if (effectiveMax == 4)
+        {
+            if (playerLevel == 1)
+            {
+                weights[1] = 0.25f;
+                weights[2] = 0.32f;
+                weights[3] = 0.26f;
+                weights[4] = 0.17f;
+            }
+            else if (playerLevel == 2)
+            {
+                weights[1] = 0.15f;
+                weights[2] = 0.34f;
+                weights[3] = 0.31f;
+                weights[4] = 0.20f;
             }
             else if (playerLevel == 3)
             {
-                weights[1] = 0.20f;
-                weights[2] = 0.35f;
-                weights[3] = 0.45f;
+                weights[1] = 0.10f;
+                weights[2] = 0.22f;
+                weights[3] = 0.40f;
+                weights[4] = 0.28f;
+            }
+            else // Lv 4+
+            {
+                weights[1] = 0.06f;
+                weights[2] = 0.16f;
+                weights[3] = 0.34f;
+                weights[4] = 0.44f;
+            }
+        }
+        else // effectiveMax >= 5
+        {
+            if (playerLevel == 1)
+            {
+                weights[1] = 0.22f;
+                weights[2] = 0.28f;
+                weights[3] = 0.24f;
+                weights[4] = 0.16f;
+                weights[5] = 0.10f;
+            }
+            else if (playerLevel == 2)
+            {
+                weights[1] = 0.14f;
+                weights[2] = 0.28f;
+                weights[3] = 0.28f;
+                weights[4] = 0.18f;
+                weights[5] = 0.12f;
+            }
+            else if (playerLevel == 3)
+            {
+                weights[1] = 0.08f;
+                weights[2] = 0.18f;
+                weights[3] = 0.34f;
+                weights[4] = 0.24f;
+                weights[5] = 0.16f;
             }
             else if (playerLevel == 4)
             {
-                weights[1] = 0.15f;
-                weights[2] = 0.20f;
-                weights[3] = 0.30f;
-                weights[4] = 0.35f;
+                weights[1] = 0.05f;
+                weights[2] = 0.12f;
+                weights[3] = 0.22f;
+                weights[4] = 0.36f;
+                weights[5] = 0.25f;
             }
-            else if (playerLevel == 5)
+            else // Lv 5+
             {
-                weights[1] = 0.10f;
-                weights[2] = 0.15f;
-                weights[3] = 0.20f;
-                weights[4] = 0.25f;
-                weights[5] = 0.30f;
-            }
-            else // 6+
-            {
-                weights[1] = 0.10f;
-                weights[2] = 0.10f;
-                weights[3] = 0.15f;
-                weights[4] = 0.20f;
-                weights[5] = 0.20f;
-                weights[6] = 0.25f;
-            }
-        }
-        else
-        {
-            // Open Ocean Ecosystem: all fish inside that level can spawn from the start!
-            // Profiles tailored per stage:
-            if (maxEnemyLevel == 2)
-            {
-                if (playerLevel == 1)
-                {
-                    float lastLevelWeight = Mathf.Lerp(0.16f, 0.24f, levelProgress);
-                    weights[2] = lastLevelWeight;
-                    weights[1] = 1.0f - lastLevelWeight;
-                }
-                else
-                {
-                    weights[1] = 0.40f;
-                    weights[2] = 0.60f;
-                }
-            }
-            else if (maxEnemyLevel == 3) // Stage 2
-            {
-                if (playerLevel == 1)
-                {
-                    // Initial Phase: very little of last level fish (starts ~5%, grows to ~8% with XP)
-                    float lastLevelWeight = blockApex ? 0f : Mathf.Lerp(0.05f, 0.08f, levelProgress);
-                    float midLevelWeight = Mathf.Lerp(0.22f, 0.26f, levelProgress);
-                    weights[3] = lastLevelWeight;
-                    weights[2] = midLevelWeight;
-                    weights[1] = 1.0f - (lastLevelWeight + midLevelWeight);
-                }
-                else if (playerLevel == 2)
-                {
-                    // Mid Phase: Level 2 is main food (52%), Level 3 increases to 18-25%
-                    float lastLevelWeight = Mathf.Lerp(0.18f, 0.25f, levelProgress);
-                    weights[3] = lastLevelWeight;
-                    weights[2] = 0.52f;
-                    weights[1] = 1.0f - (lastLevelWeight + 0.52f);
-                }
-                else // Level 3+
-                {
-                    weights[1] = 0.15f;
-                    weights[2] = 0.35f;
-                    weights[3] = 0.50f;
-                }
-            }
-            else if (maxEnemyLevel == 4) // Stage 3
-            {
-                if (playerLevel == 1)
-                {
-                    float l4 = blockApex ? 0f : Mathf.Lerp(0.03f, 0.05f, levelProgress);
-                    float l3 = blockApex ? 0f : Mathf.Lerp(0.07f, 0.10f, levelProgress);
-                    float l2 = Mathf.Lerp(0.20f, 0.23f, levelProgress);
-                    weights[4] = l4;
-                    weights[3] = l3;
-                    weights[2] = l2;
-                    weights[1] = 1.0f - (l4 + l3 + l2);
-                }
-                else if (playerLevel == 2)
-                {
-                    float l4 = blockApex ? 0f : Mathf.Lerp(0.06f, 0.09f, levelProgress);
-                    float l3 = Mathf.Lerp(0.16f, 0.22f, levelProgress);
-                    weights[4] = l4;
-                    weights[3] = l3;
-                    weights[2] = 0.46f;
-                    weights[1] = 1.0f - (l4 + l3 + 0.46f);
-                }
-                else if (playerLevel == 3)
-                {
-                    float l4 = Mathf.Lerp(0.18f, 0.26f, levelProgress);
-                    weights[4] = l4;
-                    weights[3] = 0.42f;
-                    weights[2] = 0.25f;
-                    weights[1] = 1.0f - (l4 + 0.42f + 0.25f);
-                }
-                else // Level 4+
-                {
-                    weights[1] = 0.12f;
-                    weights[2] = 0.20f;
-                    weights[3] = 0.30f;
-                    weights[4] = 0.38f;
-                }
-            }
-            else // Stage 4 (maxEnemyLevel == 5 or 6)
-            {
-                if (playerLevel == 1)
-                {
-                    float l6 = (maxEnemyLevel >= 6 && !blockApex) ? 0.008f : 0f;
-                    float l5 = (maxEnemyLevel >= 5 && !blockApex) ? 0.018f : 0f;
-                    float l4 = (!blockApex) ? 0.04f : 0f;
-                    float l3 = (!blockApex) ? 0.08f : 0f;
-                    float l2 = 0.20f;
-                    weights[6] = l6;
-                    weights[5] = l5;
-                    weights[4] = l4;
-                    weights[3] = l3;
-                    weights[2] = l2;
-                    weights[1] = 1.0f - (l6 + l5 + l4 + l3 + l2);
-                }
-                else if (playerLevel == 2)
-                {
-                    float l6 = (maxEnemyLevel >= 6 && !blockApex) ? 0.015f : 0f;
-                    float l5 = (maxEnemyLevel >= 5 && !blockApex) ? 0.035f : 0f;
-                    float l4 = (!blockApex) ? 0.08f : 0f;
-                    float l3 = 0.16f;
-                    weights[6] = l6;
-                    weights[5] = l5;
-                    weights[4] = l4;
-                    weights[3] = l3;
-                    weights[2] = 0.44f;
-                    weights[1] = 1.0f - (l6 + l5 + l4 + l3 + 0.44f);
-                }
-                else if (playerLevel == 3)
-                {
-                    float l6 = (maxEnemyLevel >= 6 && !blockApex) ? 0.03f : 0f;
-                    float l5 = (maxEnemyLevel >= 5 && !blockApex) ? 0.07f : 0f;
-                    float l4 = 0.18f;
-                    weights[6] = l6;
-                    weights[5] = l5;
-                    weights[4] = l4;
-                    weights[3] = 0.40f;
-                    weights[2] = 0.20f;
-                    weights[1] = 1.0f - (l6 + l5 + l4 + 0.40f + 0.20f);
-                }
-                else if (playerLevel == 4)
-                {
-                    float l6 = (maxEnemyLevel >= 6 && !blockApex) ? 0.06f : 0f;
-                    float l5 = (maxEnemyLevel >= 5) ? 0.18f : 0f;
-                    weights[6] = l6;
-                    weights[5] = l5;
-                    weights[4] = 0.38f;
-                    weights[3] = 0.22f;
-                    weights[2] = 0.10f;
-                    weights[1] = 1.0f - (l6 + l5 + 0.38f + 0.22f + 0.10f);
-                }
-                else if (playerLevel == 5)
-                {
-                    float l6 = (maxEnemyLevel >= 6) ? 0.22f : 0f;
-                    weights[6] = l6;
-                    weights[5] = 0.38f;
-                    weights[4] = 0.22f;
-                    weights[3] = 0.10f;
-                    weights[2] = 0.05f;
-                    weights[1] = 1.0f - (l6 + 0.38f + 0.22f + 0.10f + 0.05f);
-                }
-                else // Level 6+
-                {
-                    weights[6] = 0.35f;
-                    weights[5] = 0.25f;
-                    weights[4] = 0.18f;
-                    weights[3] = 0.12f;
-                    weights[2] = 0.06f;
-                    weights[1] = 0.04f;
-                }
+                weights[1] = 0.03f;
+                weights[2] = 0.08f;
+                weights[3] = 0.17f;
+                weights[4] = 0.32f;
+                weights[5] = 0.40f;
             }
         }
 
-        // Normalize weights up to effectiveMax
+        // 2. Active Diversity Compensation
+        if (activeCounts != null)
+        {
+            // If any level is missing from the water (0 active fish), strongly boost its weight (+80%)
+            for (int lvl = 1; lvl <= effectiveMax; lvl++)
+            {
+                if (activeCounts[lvl] == 0)
+                {
+                    weights[lvl] *= 1.80f;
+                }
+            }
+
+            // If minnows (Level 1) already account for >= 30% of population or >= 5 fish, throttle Level 1 down
+            if (activeCounts[1] >= 5 || (totalActive > 5 && activeCounts[1] >= totalActive * 0.30f))
+            {
+                weights[1] *= 0.25f;
+            }
+        }
+
+        // 3. Normalize & Roll
         float totalWeight = 0f;
         for (int i = 1; i <= effectiveMax; i++)
         {
@@ -962,30 +1044,42 @@ public class GridController : MonoBehaviour
         UpdateCameraCache();
         if (_cam == null) return false;
         
-        // Define a bounding box for the visible area + margin
-        // Fish outside this box are candidates for culling
         Bounds viewBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 5f, _camHeight + 5f, 100f));
-
-        // Define a larger bounding box for "Distant" culling (Cleanup)
-        // Any fish that wanders this far should be removed to free up memory/slots
         Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 30f, _camHeight + 30f, 100f));
 
-        // Find a candidate
-        foreach (var fish in Fish.AllFish)
+        // 1. Universal Cleanup: any fish that wandered far away outside distant bounds
+        for (int i = 0; i < Fish.AllFish.Count; i++)
         {
+            Fish fish = Fish.AllFish[i];
             if (fish == null) continue;
-
-            // Universal Cleanup: fish that has wandered far away outside distant bounds
             if (!distantBounds.Contains(fish.transform.position))
             {
                 fish.DespawnSelf();
                 return true; 
             }
+        }
 
-            // Population Full: recycle any fish that is currently off-screen (Feeding Frenzy style: don't target lower level fish specifically)
-            if (forceRecycle)
+        // 2. Population Full Recycle:
+        if (forceRecycle)
+        {
+            // First priority: recycle off-screen Level 1 fish if minnows are plentiful
+            for (int i = 0; i < Fish.AllFish.Count; i++)
             {
-                if (!viewBounds.Contains(fish.transform.position))
+                Fish fish = Fish.AllFish[i];
+                if (fish == null) continue;
+                if (fish.Level == 1 && Time.time - fish.SpawnTime >= 3.0f && !viewBounds.Contains(fish.transform.position))
+                {
+                    fish.DespawnSelf();
+                    return true;
+                }
+            }
+
+            // Second priority: recycle any eligible off-screen fish
+            for (int i = 0; i < Fish.AllFish.Count; i++)
+            {
+                Fish fish = Fish.AllFish[i];
+                if (fish == null) continue;
+                if (Time.time - fish.SpawnTime >= 3.5f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
@@ -1021,7 +1115,7 @@ public class GridController : MonoBehaviour
 
         // Requirement 2: Strictly 1 boat at a time
         activeHazards.RemoveAll(h => h == null || !h.activeSelf);
-        if (activeHazards.Count > 0 || (currentBoat != null && currentBoat.gameObject.activeInHierarchy)) 
+        if (activeHazards.Count > 0 || (currentBoat != null && currentBoat.gameObject.activeInHierarchy) || (currentRiverBoat != null && currentRiverBoat.gameObject.activeInHierarchy)) 
         {
             isSpawningHazards = false;
             yield break;
@@ -1042,53 +1136,96 @@ public class GridController : MonoBehaviour
         float bgWidth = cachedWorldBgRight - cachedWorldBgLeft;
         float inset = bgWidth * 0.15f;
         float stopX = Random.Range(cachedWorldBgLeft + inset, cachedWorldBgRight - inset);
-        EnsureCorrectBoatSprite();
 
-        if (boatSprite != null)
+        bool isRiver = LevelManager.IsCurrentLakeLevel;
+
+        if (cachedPlayerController == null)
         {
-            if (cachedPlayerController == null)
-            {
-                cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
-            }
-            if (cachedPlayerController != null)
-            {
-                if (cachedBubbleMat == null) cachedBubbleMat = cachedPlayerController.BubbleMaterial;
-                if (cachedBubbleTex == null) cachedBubbleTex = cachedPlayerController.BubbleTexture;
-            }
+            cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
+        }
+        if (cachedPlayerController != null)
+        {
+            if (cachedBubbleMat == null) cachedBubbleMat = cachedPlayerController.BubbleMaterial;
+            if (cachedBubbleTex == null) cachedBubbleTex = cachedPlayerController.BubbleTexture;
+        }
 
-            if (boatTemplate == null)
-            {
-                InitBoatTemplate();
-            }
+        if (isRiver)
+        {
+            // River/Lake now uses the fisherman boat with straight fishing rods.
+            EnsureCorrectBoatSprite();
 
-            bool startFromLeft = (Random.value > 0.5f);
-            Vector3 spawnPos;
-            FishermanBoat.CalculateSpawnPlacement(true, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft, out spawnPos);
+            if (boatSprite != null)
+            {
+                if (boatTemplate == null)
+                {
+                    InitBoatTemplate();
+                }
 
-            GameObject boatObj = null;
-            if (boatTemplate != null && ObjectPoolManager.Instance != null)
-            {
-                boatObj = ObjectPoolManager.Instance.Spawn(boatTemplate, spawnPos, Quaternion.identity);
-            }
-            else if (boatTemplate != null)
-            {
-                boatObj = Instantiate(boatTemplate, spawnPos, Quaternion.identity);
-                boatObj.SetActive(true);
+                bool startFromLeft = (Random.value > 0.5f);
+                Vector3 spawnPos;
+                FishermanBoat.CalculateSpawnPlacement(true, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft, out spawnPos);
+
+                GameObject boatObj = null;
+                if (boatTemplate != null && ObjectPoolManager.Instance != null)
+                {
+                    boatObj = ObjectPoolManager.Instance.Spawn(boatTemplate, spawnPos, Quaternion.identity);
+                }
+                else if (boatTemplate != null)
+                {
+                    boatObj = Instantiate(boatTemplate, spawnPos, Quaternion.identity);
+                    boatObj.SetActive(true);
+                }
+                else
+                {
+                    boatObj = new GameObject("FishermanBoat");
+                    boatObj.transform.position = spawnPos;
+                    boatObj.AddComponent<FishermanBoat>();
+                }
+
+                currentBoat = boatObj.GetComponent<FishermanBoat>();
+                currentBoat.Initialize(boatSprite, stopX, cruiseFromOffscreen: true, cachedBubbleMat, cachedBubbleTex, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft);
             }
             else
             {
-                boatObj = new GameObject("FishermanBoat");
-                boatObj.transform.position = spawnPos;
-                boatObj.AddComponent<FishermanBoat>();
+                // Fallback if no boat sprite: directly spawn 1 rod.
+                SpawnFishingRodForBoat(null, stopX, 0f);
             }
-
-            currentBoat = boatObj.GetComponent<FishermanBoat>();
-            currentBoat.Initialize(boatSprite, stopX, cruiseFromOffscreen: true, cachedBubbleMat, cachedBubbleTex, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft);
         }
         else
         {
-            // Fallback if no boat sprite: directly spawn 1 rod
-            SpawnFishingRodForBoat(null, stopX, 0f);
+            // Ocean now uses the lasering harpoon boat.
+            EnsureCorrectRiverBoatSprite();
+            if (riverBoatSprite != null)
+            {
+                if (riverBoatTemplate == null)
+                {
+                    InitRiverBoatTemplate();
+                }
+
+                bool startFromLeft = (Random.value > 0.5f);
+                Vector3 spawnPos;
+                RiverBoat.CalculateSpawnPlacement(true, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft, out spawnPos);
+
+                GameObject boatObj = null;
+                if (riverBoatTemplate != null && ObjectPoolManager.Instance != null)
+                {
+                    boatObj = ObjectPoolManager.Instance.Spawn(riverBoatTemplate, spawnPos, Quaternion.identity);
+                }
+                else if (riverBoatTemplate != null)
+                {
+                    boatObj = Instantiate(riverBoatTemplate, spawnPos, Quaternion.identity);
+                    boatObj.SetActive(true);
+                }
+                else
+                {
+                    boatObj = new GameObject("HarpoonBoat");
+                    boatObj.transform.position = spawnPos;
+                    boatObj.AddComponent<RiverBoat>();
+                }
+
+                currentRiverBoat = boatObj.GetComponent<RiverBoat>();
+                currentRiverBoat.Initialize(riverBoatSprite, stopX, cruiseFromOffscreen: true, cachedBubbleMat, cachedBubbleTex, cachedWorldBgLeft, cachedWorldBgRight, cachedWorldSurfaceY, startFromLeft);
+            }
         }
 
         isSpawningHazards = false;
@@ -1146,6 +1283,7 @@ public class GridController : MonoBehaviour
                     objSr.sprite = hazardSpriteVariant;
                 else
                     objSr.sprite = hazardSprite;
+
             }
         }
         else
@@ -1174,6 +1312,11 @@ public class GridController : MonoBehaviour
         hazardObj.transform.localScale = Vector3.one * hazardScale;
 
         SpriteRenderer spawnedSr = hazardObj.GetComponent<SpriteRenderer>();
+        if (spawnedSr != null)
+        {
+            // Vary bait direction so every fisherman drop does not look cloned.
+            spawnedSr.flipX = Random.value < 0.5f;
+        }
         float halfExtents = (spawnedSr != null && spawnedSr.bounds.extents.y > 0.1f)
             ? spawnedSr.bounds.extents.y
             : (31.0f * hazardScale);
@@ -1208,6 +1351,84 @@ public class GridController : MonoBehaviour
     }
 
     /// <summary>
+    /// Spawns a high-speed tilted HarpoonHazard instance launched from the River Fisherman Boat.
+    /// </summary>
+    public HarpoonHazard SpawnHarpoonForBoat(RiverBoat boat, Vector3 launchPos, float tiltAngleDeg, float targetBottomY)
+    {
+        EnsureCorrectHarpoonSprite();
+        GameObject harpoonObj = null;
+        if (harpoonPrefab != null)
+        {
+            if (ObjectPoolManager.Instance != null)
+                harpoonObj = ObjectPoolManager.Instance.Spawn(harpoonPrefab, launchPos, Quaternion.identity);
+            else
+                harpoonObj = Instantiate(harpoonPrefab, launchPos, Quaternion.identity);
+        }
+        else
+        {
+            if (harpoonTemplate == null)
+            {
+                harpoonTemplate = new GameObject("HarpoonHazard_Template");
+                harpoonTemplate.transform.SetParent(transform);
+                harpoonTemplate.SetActive(false);
+                harpoonTemplate.tag = "Enemy";
+
+                SpriteRenderer sr = harpoonTemplate.AddComponent<SpriteRenderer>();
+                sr.sprite = harpoonSprite;
+                sr.sortingOrder = 6;
+
+                BoxCollider2D box = harpoonTemplate.AddComponent<BoxCollider2D>();
+                box.isTrigger = true;
+                box.size = new Vector2(0.70f, 2.52f);
+
+                harpoonTemplate.transform.localScale = Vector3.one * 1.40f;
+                harpoonTemplate.AddComponent<HarpoonHazard>();
+            }
+
+            if (ObjectPoolManager.Instance != null)
+                harpoonObj = ObjectPoolManager.Instance.Spawn(harpoonTemplate, launchPos, Quaternion.identity);
+            else
+                harpoonObj = Instantiate(harpoonTemplate, launchPos, Quaternion.identity);
+        }
+
+        if (harpoonObj == null) return null;
+        harpoonObj.SetActive(true);
+
+        HarpoonHazard hazard = harpoonObj.GetComponent<HarpoonHazard>();
+        if (hazard != null)
+        {
+            if (cachedPlayerController == null)
+            {
+                cachedPlayerController = (player != null) ? player.GetComponent<PlayerController>() : FindFirstObjectByType<PlayerController>();
+            }
+            Material bMat = cachedBubbleMat;
+            Texture2D bTex = cachedBubbleTex;
+            if (cachedPlayerController != null)
+            {
+                if (bMat == null) bMat = cachedPlayerController.BubbleMaterial;
+                if (bTex == null) bTex = cachedPlayerController.BubbleTexture;
+            }
+
+            if (harpoonStabSound == null)
+            {
+#if UNITY_EDITOR
+                harpoonStabSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Stab.mp3");
+                if (harpoonStabSound == null)
+                {
+                    harpoonStabSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/harpoon_stab.wav");
+                }
+#endif
+                if (harpoonStabSound == null) harpoonStabSound = Resources.Load<AudioClip>("Harpoon_Stab");
+                if (harpoonStabSound == null) harpoonStabSound = Resources.Load<AudioClip>("harpoon_stab");
+            }
+
+            hazard.Initialize(boat, launchPos, tiltAngleDeg, targetBottomY, harpoonShootSound, harpoonReelSound, bMat, bTex, harpoonStabSound);
+        }
+
+        return hazard;
+    }
+
+    /// <summary>
     /// Called when the active boat has driven offscreen and is destroyed.
     /// </summary>
     public void OnBoatDeparted(FishermanBoat boat)
@@ -1216,6 +1437,16 @@ public class GridController : MonoBehaviour
         {
             currentBoat = null;
         }
+        boatCooldownTimer = Random.Range(boatCooldownRange.x, boatCooldownRange.y);
+    }
+
+    public void OnRiverBoatDeparted(RiverBoat boat)
+    {
+        if (currentRiverBoat == boat)
+        {
+            currentRiverBoat = null;
+        }
+        boatCooldownTimer = Random.Range(boatCooldownRange.x, boatCooldownRange.y);
     }
 
     private void SpawnShark()
@@ -1326,6 +1557,7 @@ public class GridController : MonoBehaviour
         if (sharkObj != null)
         {
             activeShark = sharkObj;
+            sharkCooldownTimer = Random.Range(sharkCooldownRange.x, sharkCooldownRange.y);
             
             SharkHazard shark = sharkObj.GetComponent<SharkHazard>();
             if (shark == null) shark = sharkObj.AddComponent<SharkHazard>();
@@ -1362,37 +1594,16 @@ public class GridController : MonoBehaviour
             }
         }
 
-        // Check if fish uses Rotation-based movement (FishAI or FishMovement)
-        bool usesRotation = fish.GetComponent<FishAI>() != null || fish.GetComponent<FishMovement>() != null;
+        Vector2 dir = (targetPos - spawnPos).normalized;
+        fish.transform.rotation = Quaternion.identity;
 
-        if (usesRotation)
+        FishAI ai = fish.GetComponent<FishAI>();
+        if (ai != null)
         {
-            Vector2 dir = (targetPos - spawnPos).normalized;
-            float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
-            fish.transform.rotation = Quaternion.Euler(0, 0, angle);
-
-            // Fix Upside Down if facing left
-            if (Mathf.Abs(angle) > 90f)
-            {
-                Vector3 s = fish.transform.localScale;
-                s.y = -Mathf.Abs(s.y);
-                fish.transform.localScale = s;
-            }
-            else
-            {
-                // Ensure Y is positive if facing right
-                Vector3 s = fish.transform.localScale;
-                s.y = Mathf.Abs(s.y);
-                fish.transform.localScale = s;
-            }
+            ai.SetInitialDirection(dir);
         }
         else
         {
-            // Use standard Flip (Scale X)
-            // Ensure rotation is zero
-            fish.transform.rotation = Quaternion.identity;
-            
-            // Flip towards target
             fish.FlipTowardsDestination(targetPos, false);
         }
     }

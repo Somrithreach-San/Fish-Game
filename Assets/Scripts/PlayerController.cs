@@ -29,6 +29,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private AudioClip deathSound;
     [SerializeField]
+    private AudioClip growSound;
+    [SerializeField]
     private AudioClip boostStartClip;
     [Range(0f, 1f)]
     [SerializeField]
@@ -86,6 +88,8 @@ public class PlayerController : MonoBehaviour
     private bool isHooked = false;
     public bool IsHooked => isHooked;
     private Hazard caughtHazard = null;
+    private HarpoonHazard caughtHarpoon = null;
+    public bool IsImpaledByHarpoon => caughtHarpoon != null;
     private float hookElapsedTime = 0f;
     private float hookCurrentAngle = 0f;
     private float hookAngleVelocity = 0f;
@@ -140,6 +144,58 @@ public class PlayerController : MonoBehaviour
     private float lastSpikeBounceTime = -1f;
     private float spikeBounceTimer = 0f;
     private Vector2 spikeBounceVelocity = Vector2.zero;
+
+    public Vector2 Velocity => rb != null ? rb.linearVelocity : Vector2.zero;
+
+    public void EatPearl(float pearlXp, Vector3 pearlWorldPos)
+    {
+        if (!isAlive || isPaused) return;
+
+        PlayEatEffect();
+
+        int finalXp = Mathf.RoundToInt(pearlXp * xpMultiplier);
+        currentXp += finalXp;
+        score += (finalXp * Level);
+
+        if (GuiManager.instance != null)
+        {
+            GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+            string prefix = "÷";
+            Color xpColor = (xpMultiplier > 1f) ? new Color(1f, 0.8f, 0f, 1f) : new Color(1f, 0.9f, 0.4f, 1f);
+            GuiManager.instance.ShowFloatingText(pearlWorldPos, prefix + finalXp + " BinÞú", xpColor);
+        }
+
+        if (audioSource != null && biteSounds != null && biteSounds.Length > 0 && AudioSettingsManager.IsSfxEnabled)
+        {
+            AudioClip clip = biteSounds[Random.Range(0, biteSounds.Length)];
+            if (clip != null) audioSource.PlayOneShot(clip, 1.0f);
+        }
+    }
+
+    public void OnHarpoonImpaled(HarpoonHazard harpoon)
+    {
+        if (!isAlive || isHooked) return;
+        isHooked = true;
+        caughtHarpoon = harpoon;
+        caughtHazard = null;
+        hookElapsedTime = 0f;
+        _moveInput = Vector2.zero;
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.simulated = false;
+        }
+        currentSpeedMultiplier = 1f;
+        boostTimer = 0f;
+        StopSpeedEffect();
+
+        hookStartPos = transform.position;
+        float startAngle = (playerGraphics != null) ? playerGraphics.localEulerAngles.z : 0f;
+        if (startAngle > 180f) startAngle -= 360f;
+        hookCurrentAngle = startAngle;
+        hookAngleVelocity = 0f;
+    }
     
     #endregion
 
@@ -223,6 +279,19 @@ public class PlayerController : MonoBehaviour
         if (playerGraphics != null)
         {
              spriteRenderer = playerGraphics.GetComponent<SpriteRenderer>();
+
+             if (LevelManager.IsCurrentLakeLevel)
+             {
+#if UNITY_EDITOR
+                 var closedAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_closed mouth.png");
+                 foreach (var a in closedAssets) { if (a is Sprite s) { idleSprite = s; break; } }
+                 var openAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_ open mouth.png");
+                 foreach (var a in openAssets) { if (a is Sprite s) { eatSprite = s; break; } }
+#endif
+                 if (idleSprite == null) idleSprite = Resources.Load<Sprite>("river player_fish_closed mouth");
+                 if (eatSprite == null) eatSprite = Resources.Load<Sprite>("river player_fish_ open mouth");
+             }
+
              if (spriteRenderer != null && idleSprite != null)
              {
                  spriteRenderer.sprite = idleSprite;
@@ -929,43 +998,6 @@ public class PlayerController : MonoBehaviour
             LevelUp();
         }
         //DebugCanvas.Set("Xp: " + currentXp.ToString() + " / " + currentLevelXp.ToString(), 2);
-
-        // Dev / Testing: Press 'L' to Level Up immediately
-        if (Keyboard.current != null && Keyboard.current.lKey.wasPressedThisFrame)
-        {
-            ForceLevelUp();
-        }
-    }
-
-    /// <summary>
-    /// Forces an immediate Level Up for testing purposes.
-    /// </summary>
-    public void ForceLevelUp()
-    {
-        if (!isAlive || isPaused) return;
-        currentXp = currentLevelXp;
-        LevelUp();
-    }
-
-    private void OnGUI()
-    {
-        if (!isAlive || isPaused) return;
-
-        // Level Up Button for Testing (Bottom-Right corner)
-        float btnWidth = 130f;
-        float btnHeight = 38f;
-        float x = Screen.width - btnWidth - 20f;
-        float y = Screen.height - btnHeight - 20f;
-
-        GUIStyle style = new GUIStyle(GUI.skin.button);
-        style.fontSize = 13;
-        style.fontStyle = FontStyle.Bold;
-        style.normal.textColor = Color.yellow;
-
-        if (GUI.Button(new Rect(x, y, btnWidth, btnHeight), "Level Up [L]", style))
-        {
-            ForceLevelUp();
-        }
     }
     #endregion
     //==============================| Controls |========================//
@@ -979,6 +1011,8 @@ public class PlayerController : MonoBehaviour
         if (!isAlive) return;
 
         isHooked = false;
+        caughtHazard = null;
+        caughtHarpoon = null;
         Animator[] allAnimators = GetComponentsInChildren<Animator>(true);
         for (int i = 0; i < allAnimators.Length; i++)
         {
@@ -999,7 +1033,7 @@ public class PlayerController : MonoBehaviour
         if(rb != null) rb.linearVelocity = Vector2.zero;
 
         playerGraphics.gameObject.SetActive(false);
-        Destroy(gameObject, 1f);
+        Destroy(gameObject, 2.5f);
 
     }
 
@@ -1016,6 +1050,7 @@ public class PlayerController : MonoBehaviour
 
         isHooked = true;
         caughtHazard = hazard;
+        caughtHarpoon = null;
         hookElapsedTime = 0f;
 
         // 1. Stop input, velocity, boost and physics simulation
@@ -1029,30 +1064,27 @@ public class PlayerController : MonoBehaviour
         boostTimer = 0f;
         StopSpeedEffect();
 
-        // 2. CRITICAL: Disable all Animators immediately so playerIdle animation clip cannot overwrite localRotation
-        Animator[] allAnimators = GetComponentsInChildren<Animator>(true);
-        for (int i = 0; i < allAnimators.Length; i++)
+        // 2. Disable animator flapping while hooked
+        Animator[] anims = GetComponentsInChildren<Animator>(true);
+        for (int i = 0; i < anims.Length; i++)
         {
-            if (allAnimators[i] != null) allAnimators[i].enabled = false;
+            if (anims[i] != null) anims[i].enabled = false;
         }
 
-        // Reset any local position offsets left behind by playerIdle animation clip
-        if (playerGraphics != null)
+        // 3. Play visual struggle effects
+        if (eatEffect != null)
         {
-            playerGraphics.localPosition = Vector3.zero;
+            eatEffect.Play();
         }
 
-        // 3. Disable colliders so other fish/hazards don't interfere
-        Collider2D[] allCols = GetComponentsInChildren<Collider2D>();
-        for (int i = 0; i < allCols.Length; i++)
+        // 4. Play hook bite / splash sound
+        if (audioSource != null && AudioSettingsManager.IsSfxEnabled)
         {
-            if (allCols[i] != null) allCols[i].enabled = false;
-        }
-
-        // 4. Play bite sound
-        if (audioSource != null && biteSounds != null && biteSounds.Length > 0)
-        {
-            AudioClip biteClip = biteSounds[Random.Range(0, biteSounds.Length)];
+            AudioClip biteClip = null;
+            if (biteSounds != null && biteSounds.Length > 0)
+            {
+                biteClip = biteSounds[Random.Range(0, biteSounds.Length)];
+            }
             if (biteClip != null) audioSource.PlayOneShot(biteClip, 1.0f);
         }
 
@@ -1074,70 +1106,98 @@ public class PlayerController : MonoBehaviour
     {
         if (!isHooked) return;
 
-        if (caughtHazard == null || !caughtHazard.gameObject.activeInHierarchy || hookElapsedTime > 12.0f)
+        if (caughtHazard != null)
         {
-            OnReeledOutOfWater();
-            return;
+            if (!caughtHazard.gameObject.activeInHierarchy || hookElapsedTime > 12.0f)
+            {
+                OnReeledOutOfWater();
+                return;
+            }
+
+            if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
+
+            hookElapsedTime += Time.deltaTime;
+
+            // Compute local mouth offset in playerGraphics space
+            Vector3 localMouth = Vector3.zero;
+            if (spriteRenderer != null && spriteRenderer.sprite != null)
+            {
+                Bounds b = spriteRenderer.sprite.bounds;
+                // Snout / mouth is at the front (+X) and vertical center
+                localMouth = new Vector3(b.max.x * 0.85f, b.center.y, 0f);
+            }
+
+            Vector3 baitPos = caughtHazard.GetBaitWorldPosition();
+
+            // ----------------------------------------------------
+            // Smoothly rotate to 90 degrees (Face-Up)
+            // ----------------------------------------------------
+            float targetAngle = 90f;
+            hookCurrentAngle = Mathf.SmoothDampAngle(hookCurrentAngle, targetAngle, ref hookAngleVelocity, 0.20f);
+
+            // Struggle wiggle around the Face-Up angle
+            float struggleWiggle = Mathf.Sin(Time.time * 20f) * 6.5f;
+            float displayAngle = hookCurrentAngle + struggleWiggle;
+
+            if (playerGraphics != null)
+            {
+                playerGraphics.localRotation = Quaternion.Euler(0f, 0f, displayAngle);
+            }
+
+            // ----------------------------------------------------
+            // Magnetism Snap & Position Pinning
+            // ----------------------------------------------------
+            Vector3 mouthWorld = (playerGraphics != null) ? playerGraphics.TransformPoint(localMouth) : transform.position;
+            Vector3 rootToMouth = mouthWorld - transform.position;
+            Vector3 targetRootPos = baitPos - rootToMouth;
+
+            float snapDuration = 0.15f;
+            if (hookElapsedTime < snapDuration)
+            {
+                float t = Mathf.Clamp01(hookElapsedTime / snapDuration);
+                float smoothT = Mathf.Sin(t * Mathf.PI * 0.5f);
+                transform.position = Vector3.Lerp(hookStartPos, targetRootPos, smoothT);
+            }
+            else
+            {
+                transform.position = targetRootPos;
+            }
         }
-
-        if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
-
-        hookElapsedTime += Time.deltaTime;
-
-        // Compute local mouth offset in playerGraphics space
-        Vector3 localMouth = Vector3.zero;
-        if (spriteRenderer != null && spriteRenderer.sprite != null)
+        else if (caughtHarpoon != null)
         {
-            Bounds b = spriteRenderer.sprite.bounds;
-            // Snout / mouth is at the front (+X) and vertical center
-            localMouth = new Vector3(b.max.x * 0.85f, b.center.y, 0f);
-        }
+            if (!caughtHarpoon.gameObject.activeInHierarchy || hookElapsedTime > 12.0f)
+            {
+                OnReeledOutOfWater();
+                return;
+            }
 
-        Vector3 baitPos = caughtHazard.GetBaitWorldPosition();
+            if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
 
-        // ----------------------------------------------------
-        // Smoothly rotate to 90 degrees (Face-Up)
-        // ----------------------------------------------------
-        float targetAngle = 90f;
-        hookCurrentAngle = Mathf.SmoothDampAngle(hookCurrentAngle, targetAngle, ref hookAngleVelocity, 0.20f);
+            hookElapsedTime += Time.deltaTime;
 
-        // Struggle wiggle around the Face-Up angle (reduced per user request)
-        float struggleWiggle = Mathf.Sin(Time.time * 20f) * 6.5f;
-        float displayAngle = hookCurrentAngle + struggleWiggle;
+            // Follow harpoon position directly in world space
+            transform.position = caughtHarpoon.transform.position;
 
-        if (playerGraphics != null)
-        {
-            playerGraphics.localRotation = Quaternion.Euler(0f, 0f, displayAngle);
-        }
-
-        // ----------------------------------------------------
-        // Magnetism Snap & Position Pinning
-        // ----------------------------------------------------
-        Vector3 mouthWorld = (playerGraphics != null) ? playerGraphics.TransformPoint(localMouth) : transform.position;
-        Vector3 rootToMouth = mouthWorld - transform.position;
-        Vector3 targetRootPos = baitPos - rootToMouth;
-
-        float snapDuration = 0.15f;
-        if (hookElapsedTime < snapDuration)
-        {
-            float t = Mathf.Clamp01(hookElapsedTime / snapDuration);
-            float smoothT = Mathf.Sin(t * Mathf.PI * 0.5f);
-            transform.position = Vector3.Lerp(hookStartPos, targetRootPos, smoothT);
-        }
-        else
-        {
-            transform.position = targetRootPos;
+            // Align player rotation with harpoon angle + struggle tremor
+            float harpoonAngle = caughtHarpoon.transform.eulerAngles.z;
+            float struggleWiggle = Mathf.Sin(Time.time * 24f) * 4.5f;
+            if (playerGraphics != null)
+            {
+                playerGraphics.localRotation = Quaternion.Euler(0f, 0f, harpoonAngle + struggleWiggle);
+            }
         }
     }
 
     /// <summary>
-    /// Called when the fishing rod pulls the player all the way out of the water.
+    /// Called when the fishing rod or harpoon pulls the player all the way out of the water.
     /// Completes the catch and triggers the Game Over sequence.
     /// </summary>
     public void OnReeledOutOfWater()
     {
         if (!isAlive) return;
         isHooked = false;
+        caughtHazard = null;
+        caughtHarpoon = null;
 
         // Complete the catch: trigger game over
         Death();
@@ -1204,8 +1264,6 @@ public class PlayerController : MonoBehaviour
         if (fish.IsGoldenFish)
         {
             ActivateXpMultiplier(2f, 10f); // 2x XP for 10 seconds
-            // Play Special Sound
-            if (audioSource != null && boostStartClip != null) audioSource.PlayOneShot(boostStartClip, 1.2f);
             
             // Show Special Text for Golden Fish (Khmer Font Mapping: RtImas)
             GuiManager.instance.ShowFloatingText(fish.transform.position, "RtImas", new Color(1f, 0.8f, 0f, 1f));
@@ -1251,11 +1309,6 @@ public class PlayerController : MonoBehaviour
             string text = "÷" + finalBonus;
             Color bonusColor = new Color(0.2f, 1f, 0.4f, 1f); // Vibrant light green
             GuiManager.instance.ShowFloatingText(position + Vector3.up * 0.9f, text, bonusColor);
-        }
-
-        if (audioSource != null && boostStartClip != null && AudioSettingsManager.IsSfxEnabled)
-        {
-            audioSource.PlayOneShot(boostStartClip, 1.1f);
         }
     }
 
@@ -1326,9 +1379,12 @@ public class PlayerController : MonoBehaviour
              transform.localScale = new Vector3(targetScale, targetScale, 1f);
              currentBaseScale = targetScale;
              
-             // Play sound for feedback
-             if (audioSource != null && boostStartClip != null) 
-                 audioSource.PlayOneShot(boostStartClip, 1.0f);
+             // Play growth sound for level up feedback
+             if (audioSource != null && AudioSettingsManager.IsSfxEnabled)
+             {
+                 AudioClip clip = (growSound != null) ? growSound : Resources.Load<AudioClip>("playerGrow");
+                 if (clip != null) audioSource.PlayOneShot(clip, 1.0f);
+             }
         }
         
         EventManager.Trigger<int>("onLevelUp", Level);
@@ -1407,7 +1463,14 @@ public class PlayerController : MonoBehaviour
                         // Golden fish is a bonus prey fish, NOT a predator, so it never kills the player.
                         return;
                     }
-                    Death();
+
+                    // Fair Predator Bite Check:
+                    // A predator fish eats with its mouth / front head.
+                    // If the player touches the predator from behind its tail, the predator doesn't bite!
+                    if (IsPredatorBiteContact(collidedFish, other))
+                    {
+                        Death();
+                    }
                 }
                 else
                 {
@@ -1417,6 +1480,29 @@ public class PlayerController : MonoBehaviour
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Checks if a predator fish made contact with its mouth/head facing towards the player.
+    /// Prevents unfair deaths when player brushes past a large predator's tail or rear fin.
+    /// </summary>
+    private bool IsPredatorBiteContact(Fish predator, GameObject other)
+    {
+        if (predator == null) return true;
+
+        // Facing direction of predator
+        float facingDir = predator.IsFacingRight ? 1f : -1f;
+        
+        // Find closest point of contact on predator's collider to the player's center
+        Collider2D predCol = other.GetComponent<Collider2D>();
+        Vector2 contactPoint = predCol != null ? predCol.ClosestPoint(transform.position) : (Vector2)predator.transform.position;
+        
+        // Relative horizontal offset from predator's center to contact point in facing direction
+        float relX = (contactPoint.x - predator.transform.position.x) * facingDir;
+        
+        // If the contact is at or ahead of the predator's center (head/mouth quadrant), it's a lethal bite!
+        // We allow a slight -0.2f margin for body overlap. Tail contact (relX < -0.3f) is safe.
+        return relX >= -0.25f;
     }
 
     /// <summary>
@@ -1446,12 +1532,6 @@ public class PlayerController : MonoBehaviour
         if (rb != null)
         {
             rb.linearVelocity = spikeBounceVelocity;
-        }
-
-        // Play feedback sound
-        if (audioSource != null && boostStartClip != null && AudioSettingsManager.IsSfxEnabled)
-        {
-            audioSource.PlayOneShot(boostStartClip, 0.9f);
         }
 
         // Emit bubble burst at contact point

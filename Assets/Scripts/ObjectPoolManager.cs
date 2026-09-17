@@ -57,11 +57,8 @@ public class ObjectPoolManager : MonoBehaviour
         // Set position and rotation
         objToSpawn.transform.position = position;
         objToSpawn.transform.rotation = rotation;
-        
-        // Activate
-        objToSpawn.SetActive(true);
 
-        // Track it so we know which pool it belongs to when despawning
+        // Track it so we know which pool it belongs to when despawning (registered before SetActive for safety)
         if (!activeObjects.ContainsKey(objToSpawn))
         {
             activeObjects.Add(objToSpawn, key);
@@ -70,6 +67,9 @@ public class ObjectPoolManager : MonoBehaviour
         {
             activeObjects[objToSpawn] = key;
         }
+        
+        // Activate
+        objToSpawn.SetActive(true);
 
         return objToSpawn;
     }
@@ -78,27 +78,41 @@ public class ObjectPoolManager : MonoBehaviour
     {
         if (obj == null) return;
 
-        // If we know which pool it belongs to
+        // If the object is already inactive, it has already been despawned / returned to pool
+        if (!obj.activeSelf) return;
+
+        string key = null;
         if (activeObjects.ContainsKey(obj))
         {
-            string key = activeObjects[obj];
-            
-            // Deactivate
+            key = activeObjects[obj];
+            activeObjects.Remove(obj);
+        }
+        else
+        {
+            // Fallback: check if the object's name matches an existing pool (e.g. spawned via fallback Instantiate)
+            string cleanKey = obj.name.Replace("(Clone)", "").Trim();
+            if (poolDictionary.ContainsKey(cleanKey))
+            {
+                key = cleanKey;
+            }
+        }
+
+        if (key != null)
+        {
+            // Deactivate and return to pool
             obj.SetActive(false);
 
-            // Add back to pool
             if (!poolDictionary.ContainsKey(key))
             {
                 poolDictionary.Add(key, new Queue<GameObject>());
             }
             
             poolDictionary[key].Enqueue(obj);
-            activeObjects.Remove(obj);
         }
         else
         {
-            // If it wasn't spawned via pool, just destroy it
-            Debug.LogWarning($"Object {obj.name} was not spawned via ObjectPoolManager. Destroying normally.");
+            // If it cannot be pooled, deactivate and destroy normally
+            obj.SetActive(false);
             Destroy(obj);
         }
     }

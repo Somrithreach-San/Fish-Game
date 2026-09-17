@@ -224,6 +224,7 @@ public class GameManager : MonoBehaviour
         });
 
         EventManager.Trigger("GameStart");
+        Parallax.RefreshBackground();
         
         // FIX: Ensure Audio settings are correct for background music
         if (audioSource != null)
@@ -407,6 +408,17 @@ public class GameManager : MonoBehaviour
     Coroutine cameraZoom;
     [SerializeField]
     private float CameraDefaultSize = 8.8f; // 10% zoomed out view (8f -> 8.8f)
+
+    public CinemachineVirtualCamera VirtualCamera => Vcam;
+
+    public void SetCameraFollow(Transform target)
+    {
+        GetVcamComponents();
+        if (Vcam != null)
+        {
+            Vcam.Follow = target;
+        }
+    }
     /// <summary>
     /// Shake the camera for a duration with given settings. Requires cinemachine Virtual Camera in the scene
     /// </summary>

@@ -2141,6 +2141,93 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
         return Mathf.Clamp01(normalized);
     }
 
+    private static Sprite[] s_OceanGrowthSprites = null;
+    private static Sprite[] s_RiverGrowthSprites = null;
+
+    private static Sprite LoadGrowthSpriteSafe(string resourceName, string assetPath)
+    {
+        Sprite s = null;
+#if UNITY_EDITOR
+        s = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+#endif
+        if (s == null)
+        {
+            s = Resources.Load<Sprite>(resourceName);
+            if (s == null)
+            {
+                Sprite[] all = Resources.LoadAll<Sprite>(resourceName);
+                if (all != null && all.Length > 0) s = all[0];
+            }
+        }
+        return s;
+    }
+
+    public static void EnsureGrowthSpritesLoaded()
+    {
+        if (s_OceanGrowthSprites == null || s_OceanGrowthSprites.Length < 6)
+        {
+            s_OceanGrowthSprites = new Sprite[6];
+            s_OceanGrowthSprites[0] = LoadGrowthSpriteSafe("level 1 fish", "Assets/Graphics/fish/level 1 fish.png");
+            s_OceanGrowthSprites[1] = LoadGrowthSpriteSafe("level 2 fish", "Assets/Graphics/fish/level 2 fish.png");
+            s_OceanGrowthSprites[2] = LoadGrowthSpriteSafe("level 3 fish", "Assets/Graphics/fish/level 3 fish.png");
+            s_OceanGrowthSprites[3] = LoadGrowthSpriteSafe("level 4 fish", "Assets/Graphics/fish/level 4 fish.png");
+            s_OceanGrowthSprites[4] = LoadGrowthSpriteSafe("level 5 fish", "Assets/Graphics/fish/level 5 fish.png");
+            s_OceanGrowthSprites[5] = LoadGrowthSpriteSafe("level 5 fish", "Assets/Graphics/fish/level 5 fish.png");
+        }
+
+        if (s_RiverGrowthSprites == null || s_RiverGrowthSprites.Length < 6)
+        {
+            s_RiverGrowthSprites = new Sprite[6];
+            s_RiverGrowthSprites[0] = LoadGrowthSpriteSafe("river level 1 fish", "Assets/Graphics/fish/river level 1 fish.png");
+            s_RiverGrowthSprites[1] = LoadGrowthSpriteSafe("river level 2 fish", "Assets/Graphics/fish/river level 2 fish.png");
+            s_RiverGrowthSprites[2] = LoadGrowthSpriteSafe("river level 3 fish", "Assets/Graphics/fish/river level 3 fish.png");
+            s_RiverGrowthSprites[3] = LoadGrowthSpriteSafe("river level 4 fish", "Assets/Graphics/fish/river level 4 fish.png");
+            if (s_RiverGrowthSprites[3] == null)
+            {
+                s_RiverGrowthSprites[3] = LoadGrowthSpriteSafe("river player_fish_closed mouth", "Assets/Graphics/fish/river player_fish_closed mouth.png");
+            }
+            if (s_RiverGrowthSprites[3] == null)
+            {
+                s_RiverGrowthSprites[3] = LoadGrowthSpriteSafe("new river player_fish", "Assets/Graphics/fish/new river player_fish.png");
+            }
+            if (s_RiverGrowthSprites[3] == null)
+            {
+                s_RiverGrowthSprites[3] = LoadGrowthSpriteSafe("river level 3 fish", "Assets/Graphics/fish/river level 3 fish.png");
+            }
+            s_RiverGrowthSprites[4] = LoadGrowthSpriteSafe("river level 5 fish", "Assets/Graphics/fish/river level 5 fish.png");
+            s_RiverGrowthSprites[5] = LoadGrowthSpriteSafe("river level 5 fish", "Assets/Graphics/fish/river level 5 fish.png");
+        }
+    }
+
+    public static Sprite GetGrowthSprite(int index, bool isLake)
+    {
+        EnsureGrowthSpritesLoaded();
+        Sprite[] target = isLake ? s_RiverGrowthSprites : s_OceanGrowthSprites;
+        if (target != null && index >= 0 && index < target.Length)
+        {
+            return target[index];
+        }
+        return null;
+    }
+
+    public void ApplyGrowthIconSprites(bool isLake)
+    {
+        EnsureGrowthIconsAssigned();
+        EnsureGrowthSpritesLoaded();
+
+        Sprite[] targetSprites = isLake ? s_RiverGrowthSprites : s_OceanGrowthSprites;
+        if (growthIcons != null && targetSprites != null)
+        {
+            for (int i = 0; i < growthIcons.Length; i++)
+            {
+                if (growthIcons[i] != null && i < targetSprites.Length && targetSprites[i] != null)
+                {
+                    growthIcons[i].sprite = targetSprites[i];
+                }
+            }
+        }
+    }
+
     public void EnsureGrowthIconsAssigned()
     {
         bool needsPopulation = (growthIcons == null || growthIcons.Length == 0);
@@ -2180,6 +2267,7 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
     public void UpdateGrowthIcons(int currentLevel, int maxLevel = -1)
     {
         EnsureGrowthIconsAssigned();
+        ApplyGrowthIconSprites(LevelManager.IsCurrentLakeLevel);
         if (growthIcons == null || growthIcons.Length == 0) return;
 
         if (maxLevel <= 0)
@@ -2407,15 +2495,32 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
     }
 
     private GameObject endLevelModalObj;
+    private Coroutine stageEndRoutine;
 
-    public void ShowStageClearModal()
+    public void ShowStageClearModal(float delay = 1.8f)
     {
-        CreateEndLevelModal(true);
+        if (stageEndRoutine != null) StopCoroutine(stageEndRoutine);
+        stageEndRoutine = StartCoroutine(DelayedEndLevelModal(true, delay));
     }
 
-    public void ShowGameOverModal()
+    public void ShowGameOverModal(float delay = 1.6f)
     {
-        CreateEndLevelModal(false);
+        if (stageEndRoutine != null) StopCoroutine(stageEndRoutine);
+        stageEndRoutine = StartCoroutine(DelayedEndLevelModal(false, delay));
+    }
+
+    private IEnumerator DelayedEndLevelModal(bool isVictory, float delay)
+    {
+        if (delay > 0f)
+        {
+            float timer = 0f;
+            while (timer < delay)
+            {
+                timer += (Time.timeScale > 0f) ? Time.deltaTime : Time.unscaledDeltaTime;
+                yield return null;
+            }
+        }
+        CreateEndLevelModal(isVictory);
     }
 
     private Font GetStandardFont()
@@ -2662,10 +2767,16 @@ private string victoryMessage = "GbGrsaTr Gñk)anrYcCIvitkñúgvKÁenH";
                 rtIcon.sizeDelta = new Vector2(70f * scaleFactor, 48f * scaleFactor);
 
                 Image iconImg = iconObj.AddComponent<Image>();
-                if (growthIcons != null && (i - 1) < growthIcons.Length && growthIcons[i - 1] != null)
+                Sprite fishSprite = null;
+                if (growthIcons != null && (i - 1) < growthIcons.Length && growthIcons[i - 1] != null && growthIcons[i - 1].sprite != null)
                 {
-                    iconImg.sprite = growthIcons[i - 1].sprite;
+                    fishSprite = growthIcons[i - 1].sprite;
                 }
+                if (fishSprite == null)
+                {
+                    fishSprite = GetGrowthSprite(i - 1, LevelManager.IsCurrentLakeLevel);
+                }
+                iconImg.sprite = fishSprite;
                 iconImg.preserveAspect = true;
 
                 // Fish Count Text (Right of column divider: pivot (0, 0.5), left edge at X = 0)

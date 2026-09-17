@@ -159,7 +159,7 @@ public static class LevelManager
                     targetPlayerLevel = 4,
                     maxEnemyLevel = 4,
                     enableFishingRod = false,
-                    enableShark = true,
+                    enableShark = false,
                     isLake = true
                 };
             case 8:
@@ -171,7 +171,7 @@ public static class LevelManager
                     targetPlayerLevel = 6,
                     maxEnemyLevel = 6,
                     enableFishingRod = true,
-                    enableShark = true,
+                    enableShark = false,
                     isLake = true
                 };
         }

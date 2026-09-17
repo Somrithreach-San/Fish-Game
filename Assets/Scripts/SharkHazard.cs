@@ -7,9 +7,11 @@ public class SharkHazard : MonoBehaviour
 {
     [Header("Shark Settings")]
     [SerializeField]
-    private float moveSpeed = 16f; // User request: Make shark faster (was 12f)
+    private float moveSpeed = 18f; // Slightly faster pass speed
     [SerializeField]
     private float lifeTimeAfterPass = 5.0f;
+    [SerializeField]
+    private float sharkScale = 0.85f; // User request: reduced hazard size
 
     [Header("Effects")]
     [SerializeField]
@@ -29,6 +31,14 @@ public class SharkHazard : MonoBehaviour
 
     [Header("Visuals")]
     public Transform graphicsTransform;
+    [SerializeField] private Sprite closedSprite;
+    [SerializeField] private Sprite halfBiteSprite;
+    [SerializeField] private Sprite openSprite;
+
+    private SpriteRenderer cachedSr;
+    private bool isBiting = false;
+    private float biteTimer = 0f;
+    private const float BITE_DURATION = 0.35f;
 
     // Dependencies
     private GameObject warningIcon; // Kept for reference, but might point to shared icon
@@ -56,38 +66,140 @@ public class SharkHazard : MonoBehaviour
     private static RectTransform _sharedIconRect;
     private static GameObject _sharedCanvasObj;
 
+    private void Awake()
+    {
+        CacheVisualComponents();
+    }
+
+    private void CacheVisualComponents()
+    {
+        if (graphicsTransform == null)
+            graphicsTransform = transform.Find("SharkGraphics") ?? transform.Find("Gfx") ?? transform;
+
+        if (cachedSr == null && graphicsTransform != null)
+            cachedSr = graphicsTransform.GetComponent<SpriteRenderer>();
+        if (cachedSr == null)
+            cachedSr = GetComponentInChildren<SpriteRenderer>();
+
+#if UNITY_EDITOR
+        if (closedSprite == null)
+            closedSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/predator_hazard.png");
+        if (openSprite == null)
+            openSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/predator_hazard_mouth open.png");
+#endif
+
+        if (cachedSr != null && closedSprite != null)
+        {
+            cachedSr.sprite = closedSprite;
+        }
+    }
+
+    private bool isEventSubscribed = false;
+
+    private void OnEnable()
+    {
+        hasPassedScreen = false;
+        isCharging = false;
+        isBiting = false;
+        biteTimer = 0f;
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        if (!isEventSubscribed)
+        {
+            try
+            {
+                EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StartListening("playerDeath", StopAudioForGameEnd);
+                EventManager.StartListening("GameLoss", StopAudioForGameEnd);
+                EventManager.StartListening("GameWin", StopAudioForGameEnd);
+                isEventSubscribed = true;
+            }
+            catch { }
+        }
+    }
+
     private void Start()
     {
-        // Listen for Pause
-        EventManager.StartListening<bool>("gamePaused", OnGamePaused);
-        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        CacheVisualComponents();
+        if (!isEventSubscribed)
+        {
+            try
+            {
+                EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StartListening("playerDeath", StopAudioForGameEnd);
+                EventManager.StartListening("GameLoss", StopAudioForGameEnd);
+                EventManager.StartListening("GameWin", StopAudioForGameEnd);
+                isEventSubscribed = true;
+            }
+            catch { }
+        }
     }
 
     private void OnDestroy()
     {
-        EventManager.StopListening<bool>("gamePaused", OnGamePaused);
-        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
-        
-        // Ensure shared canvas is hidden when shark is destroyed
-        // This handles cases where shark is destroyed during warning phase (e.g. game over/restart)
-        if (_sharedCanvasObj != null && _sharedCanvasObj.activeSelf)
+        if (isEventSubscribed)
         {
-            _sharedCanvasObj.SetActive(false);
+            try
+            {
+                EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StopListening("playerDeath", StopAudioForGameEnd);
+                EventManager.StopListening("GameLoss", StopAudioForGameEnd);
+                EventManager.StopListening("GameWin", StopAudioForGameEnd);
+            }
+            catch { }
+            isEventSubscribed = false;
         }
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
     }
 
     private void HandleSfxSettingChanged(bool enabled)
     {
-        if (audioSource != null) audioSource.mute = !enabled;
-        if (swimSource != null) swimSource.mute = !enabled;
+        if (audioSource != null)
+        {
+            audioSource.mute = !enabled;
+            if (!enabled && audioSource.isPlaying)
+            {
+                audioSource.Stop();
+            }
+        }
+        if (swimSource != null)
+        {
+            swimSource.mute = !enabled;
+            if (!enabled && swimSource.isPlaying)
+            {
+                swimSource.Stop();
+            }
+        }
     }
-    
+
     private void OnDisable()
     {
-        EventManager.StopListening<bool>("gamePaused", OnGamePaused);
-        if (_sharedCanvasObj != null && _sharedCanvasObj.activeSelf)
+        if (isEventSubscribed)
+        {
+            try
+            {
+                EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+                EventManager.StopListening("playerDeath", StopAudioForGameEnd);
+                EventManager.StopListening("GameLoss", StopAudioForGameEnd);
+                EventManager.StopListening("GameWin", StopAudioForGameEnd);
+                isEventSubscribed = false;
+            }
+            catch { }
+        }
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        
+        // Hide warning icon on disable
+        if (_sharedCanvasObj != null)
         {
             _sharedCanvasObj.SetActive(false);
+        }
+        if (swimSource != null && swimSource.isPlaying)
+        {
+            swimSource.Stop();
+        }
+        if (audioSource != null && audioSource.isPlaying)
+        {
+            audioSource.Stop();
         }
     }
 
@@ -122,8 +234,13 @@ public class SharkHazard : MonoBehaviour
         }
 
         // Setup Visuals
-        if (graphicsTransform == null)
-            graphicsTransform = transform.Find("SharkGraphics") ?? transform.Find("Gfx") ?? transform;
+        CacheVisualComponents();
+        isBiting = false;
+        biteTimer = 0f;
+        if (cachedSr != null && closedSprite != null)
+        {
+            cachedSr.sprite = closedSprite;
+        }
 
         // Setup Audio
         audioSource = GetComponent<AudioSource>();
@@ -131,24 +248,24 @@ public class SharkHazard : MonoBehaviour
         
         // FIX: Warning sound should be 2D (Global) so it's always heard regardless of shark distance
         audioSource.spatialBlend = 0.0f; // 2D Sound
-        // audioSource.minDistance = 5.0f;  // Irrelevant for 2D
-        // audioSource.maxDistance = 25.0f; // Irrelevant for 2D
         audioSource.rolloffMode = AudioRolloffMode.Linear;
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
 
         // Setup Swim Source
-        swimSource = gameObject.AddComponent<AudioSource>();
-        swimSource.spatialBlend = 1.0f; // 3D Sound (Swim sound stays 3D)
-        swimSource.minDistance = 5.0f;
-        swimSource.maxDistance = 25.0f;
-        swimSource.rolloffMode = AudioRolloffMode.Linear;
-        swimSource.loop = true;
-        swimSource.playOnAwake = false;
-        swimSource.volume = 0.9f;
+        if (swimSource == null)
+        {
+            swimSource = gameObject.AddComponent<AudioSource>();
+            swimSource.spatialBlend = 1.0f; // 3D Sound (Swim sound stays 3D)
+            swimSource.minDistance = 5.0f;
+            swimSource.maxDistance = 25.0f;
+            swimSource.rolloffMode = AudioRolloffMode.Linear;
+            swimSource.loop = true;
+            swimSource.playOnAwake = false;
+            swimSource.volume = 0.9f;
+        }
         swimSource.mute = !AudioSettingsManager.IsSfxEnabled;
         
         // Setup Eat Particles
-        // Optimization: Only create if null. The heavy allocation is here.
         if (eatEffect == null)
         {
              CreateEatParticles();
@@ -171,7 +288,7 @@ public class SharkHazard : MonoBehaviour
         if (col != null)
         {
             // Get original sprite size if possible
-            SpriteRenderer sr = GetComponent<SpriteRenderer>();
+            SpriteRenderer sr = cachedSr != null ? cachedSr : GetComponentInChildren<SpriteRenderer>();
             if (sr != null && sr.sprite != null)
             {
                  // Target: 90% Width, 40% Height (Body only, ignore fins/empty space)
@@ -190,30 +307,12 @@ public class SharkHazard : MonoBehaviour
 
         cam = Camera.main;
 
-        // Flip Sprite if moving Left
-        // AUTO-FIX: Increase shark size by 30% (User Request)
-        float sizeMultiplier = 1.3f;
-        Vector3 currentScale = transform.localScale;
+        hasPassedScreen = false;
+        isCharging = false;
 
-        if (direction < 0)
-        {
-            currentScale.x = -Mathf.Abs(currentScale.x);
-        }
-        else
-        {
-            currentScale.x = Mathf.Abs(currentScale.x);
-        }
-        
-        // Apply multiplier (Ensure we don't apply it if it's already large? No, assume fresh spawn)
-        // Check if already scaled (just in case) - heuristic check
-        if (Mathf.Abs(currentScale.x) < 2.0f) // If it's huge, don't scale again
-        {
-            currentScale.x *= sizeMultiplier;
-            currentScale.y *= sizeMultiplier;
-            currentScale.z *= sizeMultiplier;
-        }
-
-        transform.localScale = currentScale;
+        // Flip Sprite if moving Left with clean base scale
+        float dirSign = (direction < 0) ? -1f : 1f;
+        transform.localScale = new Vector3(dirSign * sharkScale, sharkScale, 1f);
 
         // Create Warning Icon
         if ((iconPrefab != null || iconSprite != null) && cam != null)
@@ -301,6 +400,11 @@ public class SharkHazard : MonoBehaviour
             audioSource.Play();
         }
 
+        // HIDE THE SHARK during the warning phase so the player cannot see it
+        // parked off-screen. Move it to a guaranteed invisible world position.
+        if (cachedSr != null) cachedSr.enabled = false;
+        transform.position = new Vector3(transform.position.x, -9999f, 0f);
+
         // WAIT FOR WARNING (4 Seconds)
         // User Request: Warning should last exactly 4 seconds before shark enters.
         // During this time, shark is stationary off-screen.
@@ -386,23 +490,30 @@ public class SharkHazard : MonoBehaviour
             audioSource.Stop();
         }
 
-        // 2. Teleport Shark to "Just Outside Screen" to ensure immediate entry
+        // 2. Teleport Shark to "Just Outside Screen" — make it visible right as it enters
         if (cam != null)
         {
             float camHeight = 2f * cam.orthographicSize;
             float camWidth = camHeight * cam.aspect;
             float halfWidth = camWidth / 2f;
             
-            // Buffer to spawn just outside
-            float entryBuffer = 2.0f; 
+            float halfSharkWidth = 12f;
+            if (cachedSr != null && cachedSr.sprite != null)
+            {
+                halfSharkWidth = cachedSr.sprite.bounds.extents.x * Mathf.Abs(transform.localScale.x);
+            }
+            float entryBuffer = halfSharkWidth + 1.5f; 
             float entryX = (direction > 0) ? -(halfWidth + entryBuffer) : (halfWidth + entryBuffer);
             
             // Add Camera X in case it moved
             entryX += cam.transform.position.x;
             
-            // Fix: Use spawnY (World Y) instead of chargeY (which might be 0)
+            // Place at the correct Y and just outside horizontal screen edge
             transform.position = new Vector3(entryX, spawnY, 0f);
         }
+
+        // Re-enable the sprite NOW that the shark is safely just off-screen
+        if (cachedSr != null) cachedSr.enabled = true;
 
         // 3. Start Moving
         StartCharging();
@@ -413,20 +524,14 @@ public class SharkHazard : MonoBehaviour
             swimSource.clip = swimSound;
             swimSource.Play();
         }
-
-        // Play Attack Sound (Removed per user request)
-        /*
-        if (audioSource != null && attackSound != null)
-        {
-            audioSource.PlayOneShot(attackSound);
-        }
-        */
     }
 
     private void StartCharging()
     {
         isCharging = true;
         chargeY = transform.position.y;
+        // Always ensure the shark is visible when it starts charging
+        if (cachedSr != null) cachedSr.enabled = true;
         if (trailEffect != null) trailEffect.Play();
         if (swimSource != null && swimSound != null && !swimSource.isPlaying)
         {
@@ -437,8 +542,22 @@ public class SharkHazard : MonoBehaviour
 
     private void Update()
     {
+        UpdateBiteAnimation();
+
         if (!isCharging) return;
         if (GameManager.instance != null && GameManager.Paused) return;
+
+        // Proactively consume any prey touching the lethal mouth area
+        Vector2 headPos = GetHeadWorldPosition();
+        float overlapRadius = 2.4f * (sharkScale / 0.85f);
+        Collider2D[] preyAhead = Physics2D.OverlapCircleAll(headPos, overlapRadius);
+        for (int i = 0; i < preyAhead.Length; i++)
+        {
+            if (TryConsumeTarget(preyAhead[i]))
+            {
+                TriggerBite();
+            }
+        }
 
         // Move across screen (Strictly Horizontal)
         float newX = transform.position.x + (direction * moveSpeed * Time.deltaTime);
@@ -451,7 +570,12 @@ public class SharkHazard : MonoBehaviour
             float camWidth = camHeight * cam.aspect;
             float halfWidth = camWidth / 2f;
             
-            float buffer = 5f;
+            float halfSharkWidth = 12f;
+            if (cachedSr != null && cachedSr.sprite != null)
+            {
+                halfSharkWidth = cachedSr.sprite.bounds.extents.x * Mathf.Abs(transform.localScale.x);
+            }
+            float buffer = halfSharkWidth + 3f;
             float rightEdge = cam.transform.position.x + halfWidth + buffer;
             float leftEdge = cam.transform.position.x - halfWidth - buffer;
 
@@ -460,6 +584,162 @@ public class SharkHazard : MonoBehaviour
             {
                 hasPassedScreen = true;
                 StartCoroutine(DespawnAfterDelay(lifeTimeAfterPass));
+            }
+        }
+    }
+
+    public void TriggerBite()
+    {
+        isBiting = true;
+        biteTimer = 0f;
+        if (attackSound != null && audioSource != null && AudioSettingsManager.IsSfxEnabled)
+        {
+            audioSource.PlayOneShot(attackSound, 0.9f);
+        }
+    }
+
+    private void StopAudioForGameEnd()
+    {
+        if (audioSource != null) audioSource.Stop();
+        if (swimSource != null) swimSource.Stop();
+        if (trailEffect != null) trailEffect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+    }
+
+    private Vector2 GetHeadWorldPosition()
+    {
+        if (cachedSr != null && cachedSr.sprite != null)
+        {
+            Bounds bounds = cachedSr.bounds;
+            // The lethal snout is positioned toward the front edge of the shark in travel direction
+            return (Vector2)bounds.center + Vector2.right * (direction * bounds.extents.x * 0.70f);
+        }
+
+        return (Vector2)transform.position + Vector2.right * (direction * 1.5f);
+    }
+
+    private bool IsInLethalZone(Collider2D other)
+    {
+        if (other == null) return false;
+
+        Vector2 headPosition = GetHeadWorldPosition();
+        Vector2 closestPoint = other.ClosestPoint(headPosition);
+        
+        // Tight bite circle focused specifically on the open jaws
+        float biteRadius = 1.35f * (sharkScale / 0.85f);
+        if (Vector2.Distance(headPosition, closestPoint) <= biteRadius)
+            return true;
+
+        // Also check if the prey's contact point is in the front mouth/head zone
+        if (cachedSr != null && cachedSr.sprite != null)
+        {
+            Bounds bounds = cachedSr.bounds;
+            float centerDistX = (closestPoint.x - bounds.center.x) * direction;
+            float minMouthX = bounds.extents.x * 0.55f; // Only front 45% (snout & jaws)
+            float maxForwardX = bounds.extents.x + 0.3f;
+            float maxHalfHeight = bounds.extents.y * 0.55f; // Jaws vertical opening height
+            
+            if (centerDistX >= minMouthX && centerDistX <= maxForwardX && Mathf.Abs(closestPoint.y - bounds.center.y) <= maxHalfHeight)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryConsumeTarget(Collider2D other)
+    {
+        if (other == null || other.transform.IsChildOf(transform) || other.gameObject == gameObject)
+            return false;
+
+        // Fish colliders are commonly tagged Enemy, so do not reject that tag here.
+        if (
+            other.GetComponentInParent<Hazard>() != null ||
+            other.GetComponentInParent<HarpoonHazard>() != null ||
+            other.GetComponentInParent<FishermanBoat>() != null ||
+            other.GetComponentInParent<RiverBoat>() != null)
+        {
+            return false;
+        }
+
+        if (!IsInLethalZone(other)) return false;
+
+        PlayerController pc = other.GetComponent<PlayerController>() ?? other.GetComponentInParent<PlayerController>();
+        if (pc != null)
+        {
+            if (pc.IsAlive && !pc.IsHooked)
+            {
+                pc.Death();
+                PlayEatEffect();
+                return true;
+            }
+            return false;
+        }
+
+        Fish fish = other.GetComponent<Fish>() ?? other.GetComponentInParent<Fish>();
+        if (fish != null && !fish.IsDead && !fish.IsHooked && fish.gameObject.activeInHierarchy)
+        {
+            fish.OnEatenByPredator();
+            fish.Die();
+            PlayEatEffect();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateBiteAnimation()
+    {
+        if (!isBiting) return;
+
+        if (cachedSr == null)
+        {
+            if (graphicsTransform != null) cachedSr = graphicsTransform.GetComponent<SpriteRenderer>();
+            if (cachedSr == null) cachedSr = GetComponentInChildren<SpriteRenderer>();
+            if (cachedSr == null) return;
+        }
+
+        biteTimer += Time.deltaTime;
+        float t = Mathf.Clamp01(biteTimer / BITE_DURATION);
+
+        if (halfBiteSprite != null && openSprite != null)
+        {
+            // 3-Frame Chomp Sequence:
+            // 0% - 22%: Half-open anticipation / jaw parting
+            // 22% - 60%: Full wide predatory chomp
+            // 60% - 100%: Snapped shut clamped tight
+            if (t < 0.22f)
+            {
+                cachedSr.sprite = halfBiteSprite;
+            }
+            else if (t < 0.60f)
+            {
+                cachedSr.sprite = openSprite;
+            }
+            else
+            {
+                cachedSr.sprite = closedSprite != null ? closedSprite : cachedSr.sprite;
+            }
+        }
+        else if (openSprite != null)
+        {
+            // 2-Frame Chomp
+            if (t < 0.60f)
+            {
+                cachedSr.sprite = openSprite;
+            }
+            else
+            {
+                cachedSr.sprite = closedSprite != null ? closedSprite : cachedSr.sprite;
+            }
+        }
+
+        if (t >= 1f)
+        {
+            isBiting = false;
+            if (closedSprite != null)
+            {
+                cachedSr.sprite = closedSprite;
             }
         }
     }
@@ -479,23 +759,14 @@ public class SharkHazard : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.CompareTag("Player"))
-        {
-            if (other.TryGetComponent<PlayerController>(out var pc))
-            {
-                pc.Death();
-            }
-        }
-        else
-        {
-            Fish fish = other.GetComponent<Fish>();
-            if (fish == null) fish = other.GetComponentInParent<Fish>();
-            if (fish != null)
-            {
-                fish.Die(); 
-                PlayEatEffect();
-            }
-        }
+        if (TryConsumeTarget(other)) TriggerBite();
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        // The shark collider covers the body, so keep checking while overlapping
+        // and only consume once the prey reaches the lethal head zone.
+        if (TryConsumeTarget(other)) TriggerBite();
     }
 
     private void SetupTrailParticles()
@@ -504,8 +775,15 @@ public class SharkHazard : MonoBehaviour
 
         GameObject bubbles = new GameObject("SharkTrailBubbles");
         bubbles.transform.SetParent(transform, false);
-        // Offset for tail. Moved further back to align with tail.
-        bubbles.transform.localPosition = new Vector3(-4.8f, -0.3f, 0f);
+        // Offset for tail: Align with the caudal tail fin
+        float tailX = -10.5f;
+        float tailY = 0.8f;
+        if (cachedSr != null && cachedSr.sprite != null)
+        {
+            tailX = -cachedSr.sprite.bounds.extents.x * 0.96f;
+            tailY = cachedSr.sprite.bounds.extents.y * 0.28f;
+        }
+        bubbles.transform.localPosition = new Vector3(tailX, tailY, 0f);
 
         trailEffect = bubbles.AddComponent<ParticleSystem>();
         var renderer = bubbles.GetComponent<ParticleSystemRenderer>();
@@ -543,17 +821,12 @@ public class SharkHazard : MonoBehaviour
         // Velocity over Lifetime: Add turbulence
         var vel = trailEffect.velocityOverLifetime;
         vel.enabled = true;
-        // FIX: Ensure all curves use the same mode (Constant, Curve, RandomBetweenTwoConstants, etc.)
-        // When setting individual axes (x, y, z), if one uses RandomBetweenTwoConstants, others must too.
-        // Or we can just set them all to be "Random Between Two Constants".
-        
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 0f); // Random Between Constants
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f); // Random Between Constants
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);   // Explicitly set Z to match mode!
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Size over Lifetime: Bubbles shrink or pop? Or grow?
-        // Usually bubbles grow slightly as pressure decreases, then pop.
         var sol = trailEffect.sizeOverLifetime;
         sol.enabled = true;
         AnimationCurve curve = new AnimationCurve();
@@ -604,7 +877,6 @@ public class SharkHazard : MonoBehaviour
 
     private void CreateEatParticles()
     {
-        // Optimizing allocation: Check again
         if (eatEffect != null) return;
 
         GameObject bubbles = new GameObject("SharkEatBubbles");

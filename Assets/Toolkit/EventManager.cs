@@ -17,21 +17,23 @@ namespace Rhinotap.Toolkit
         {
             get
             {
-                if(_instance == null)
+                if (_instance == null)
                 {
-                _instance = GameObject.FindAnyObjectByType<EventManager>();//find the instance of EventManager on the scene.
-                    //If the instance is not in the scene, throw error
+                    _instance = GameObject.FindAnyObjectByType<EventManager>(FindObjectsInactive.Include);
                     if (_instance == null)
-                        Debug.LogError("Rhinotap Events: EventManager object is not in the scene.");
-                    else
-                        _instance.Initialize();//Object has been found. Run init
+                    {
+                        GameObject go = new GameObject("EventManager");
+                        _instance = go.AddComponent<EventManager>();
+                        if (Application.isPlaying)
+                        {
+                            DontDestroyOnLoad(go);
+                        }
+                    }
+                    _instance.Initialize();
                 }
                 return _instance;
-
             }
         }
-        
-
 
         public static bool HasInstance
         {
@@ -40,11 +42,27 @@ namespace Rhinotap.Toolkit
 
         private EventDictionary events;
         private Dictionary<string, Action> voidEvents;
+
+        private void Awake()
+        {
+            if (_instance == null)
+            {
+                _instance = this;
+                Initialize();
+            }
+            else if (_instance != this)
+            {
+                Destroy(gameObject);
+            }
+        }
+
         //Initialization
         private void Initialize()
         {
-            events = new EventDictionary();
-            voidEvents = new Dictionary<string, Action>();
+            if (events == null)
+                events = new EventDictionary();
+            if (voidEvents == null)
+                voidEvents = new Dictionary<string, Action>();
         }
         #endregion
 

@@ -1,4 +1,5 @@
 using UnityEngine;
+using Rhinotap.Toolkit;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -22,13 +23,24 @@ public class Hazard : MonoBehaviour
     [SerializeField]
     private GameObject bubbleParticlesPrefab;
 
+    [Header("Fishing Cable")]
+    [SerializeField]
+    private Material cableMaterial;
+    [SerializeField]
+    private float cableWidth = 0.06f;
+    [Tooltip("Normalized position of the bait's rear cable eyelet within the sprite bounds.")]
+    [SerializeField]
+    private Vector2 cableAttachmentNormalized = new Vector2(0.59f, 0.75f);
+
     private Material bubbleMaterial;
     private Texture2D bubbleTexture;
 
     private AudioSource audioSource;
     private AudioSource[] audioSources;
     private SpriteRenderer spriteRenderer; // Cached reference
+    private LineRenderer cableLine;
     private bool retractSfxPlayed = false;
+    private bool endAudioEventsSubscribed = false;
 
     private enum State { Dropping, Roaming, Retracting }
     private State currentState = State.Dropping;
@@ -169,6 +181,7 @@ public class Hazard : MonoBehaviour
     private void Awake()
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
+        EnsureCableLine();
         if (audioSource == null) audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.playOnAwake = false;
@@ -180,11 +193,14 @@ public class Hazard : MonoBehaviour
 
     private void Start()
     {
+        EnsureCableLine();
+
         // Ensure collider is configured if needed (moved from Awake to allow property setting)
         ConfigureCollider();
 
         // Setup Audio listeners
         AudioSettingsManager.OnSfxSettingChanged += OnSfxSettingChanged;
+        SubscribeToEndAudioEvents();
         
         // Randomize Speeds for realism (desync movement)
         fallSpeed = Random.Range(2.5f, 4.0f); // Default 3
@@ -240,6 +256,85 @@ public class Hazard : MonoBehaviour
         }
         
         ConfigureCollider();
+        UpdateCableLine();
+    }
+
+    private void EnsureCableLine()
+    {
+        // Cable is visual-only. Remove any legacy runtime cable collider so it
+        // can never hook or damage fish/player objects.
+        EdgeCollider2D legacyCableCollider = GetComponent<EdgeCollider2D>();
+        if (legacyCableCollider != null)
+        {
+            Destroy(legacyCableCollider);
+        }
+
+        if (cableLine == null) cableLine = GetComponent<LineRenderer>();
+        if (cableLine == null) cableLine = gameObject.AddComponent<LineRenderer>();
+
+        cableLine.useWorldSpace = true;
+        cableLine.positionCount = 2;
+        cableLine.startWidth = cableWidth;
+        cableLine.endWidth = cableWidth;
+        cableLine.numCapVertices = 4;
+        cableLine.numCornerVertices = 4;
+        cableLine.textureMode = LineTextureMode.Stretch;
+        cableLine.startColor = Color.white;
+        cableLine.endColor = Color.white;
+        cableLine.sortingOrder = 7;
+
+        if (cableMaterial != null)
+        {
+            cableLine.sharedMaterial = cableMaterial;
+        }
+        else if (cableLine.sharedMaterial == null)
+        {
+            Shader shader = Shader.Find("Sprites/Default");
+            if (shader != null)
+            {
+                cableLine.sharedMaterial = new Material(shader) { name = "FishingCableRuntimeMat" };
+            }
+        }
+    }
+
+    private void UpdateCableLine()
+    {
+        if (cableLine == null) return;
+
+        float surfaceY = linkedBoat != null ? linkedBoat.WaterSurfaceY : 15f;
+        Vector3 attachmentPosition = GetCableAttachmentWorldPosition();
+        Vector3 launcherPosition = new Vector3(
+            attachmentPosition.x,
+            surfaceY + 0.45f,
+            attachmentPosition.z - 0.02f);
+
+        cableLine.SetPosition(0, launcherPosition);
+        cableLine.SetPosition(1, attachmentPosition);
+        cableLine.enabled = gameObject.activeInHierarchy;
+    }
+
+    private Vector3 GetCableAttachmentWorldPosition()
+    {
+        if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null && spriteRenderer.sprite != null)
+        {
+            Bounds bounds = spriteRenderer.sprite.bounds;
+            float attachmentX = spriteRenderer.flipX
+                ? 1f - cableAttachmentNormalized.x
+                : cableAttachmentNormalized.x;
+            Vector3 localPosition = new Vector3(
+                Mathf.Lerp(bounds.min.x, bounds.max.x, attachmentX),
+                Mathf.Lerp(bounds.min.y, bounds.max.y, cableAttachmentNormalized.y),
+                0f);
+            return transform.TransformPoint(localPosition);
+        }
+
+        return GetBaitWorldPosition();
+    }
+
+    private void LateUpdate()
+    {
+        UpdateCableLine();
     }
 
     public void SetTargetHookDepth(float targetHookWorldY)
@@ -317,6 +412,25 @@ public class Hazard : MonoBehaviour
     private void OnDestroy()
     {
         AudioSettingsManager.OnSfxSettingChanged -= OnSfxSettingChanged;
+        UnsubscribeFromEndAudioEvents();
+    }
+
+    private void SubscribeToEndAudioEvents()
+    {
+        if (endAudioEventsSubscribed) return;
+        EventManager.StartListening("playerDeath", StopReelSound);
+        EventManager.StartListening("GameLoss", StopReelSound);
+        EventManager.StartListening("GameWin", StopReelSound);
+        endAudioEventsSubscribed = true;
+    }
+
+    private void UnsubscribeFromEndAudioEvents()
+    {
+        if (!endAudioEventsSubscribed) return;
+        EventManager.StopListening("playerDeath", StopReelSound);
+        EventManager.StopListening("GameLoss", StopReelSound);
+        EventManager.StopListening("GameWin", StopReelSound);
+        endAudioEventsSubscribed = false;
     }
 
     private void OnSfxSettingChanged(bool enabled)
@@ -693,6 +807,7 @@ public class Hazard : MonoBehaviour
     private void StartReelSound()
     {
         if (audioSource == null) return;
+        if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
         if (moveSound != null)
         {

@@ -238,15 +238,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.25}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
-    type: 3}
+  m_Sprite: {fileID: 21300000, guid: 328bd90bc04f47a3b9b491159d672e36, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -268,7 +267,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b26997170d0f6f4a99e074bd072d896, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MobileBoostButton
-  buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe, type: 3}
+  buttonShape: {fileID: 21300000, guid: 328bd90bc04f47a3b9b491159d672e36, type: 3}
 --- !u!1 &8876976642533524754
 GameObject:
   m_ObjectHideFlags: 0
@@ -329,15 +328,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.25}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
-    type: 3}
+  m_Sprite: {fileID: 21300000, guid: 328bd90bc04f47a3b9b491159d672e36, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -363,7 +361,7 @@ MonoBehaviour:
   hideOnDesktop: 1
   background: {fileID: 3157200328709839517}
   handle: {fileID: 9139689761123665219}
-  buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe, type: 3}
+  buttonShape: {fileID: 21300000, guid: 328bd90bc04f47a3b9b491159d672e36, type: 3}
 --- !u!1 &9095276176399262293
 GameObject:
   m_ObjectHideFlags: 0

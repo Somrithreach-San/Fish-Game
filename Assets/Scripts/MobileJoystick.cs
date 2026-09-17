@@ -133,8 +133,6 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
                 
                 // Improve responsiveness: Reduce travel distance
                 handleRange = 0.5f; 
-                
-                Debug.Log("MobileJoystick: Auto-upgraded size and responsiveness settings to 250px.");
             }
         }
     }

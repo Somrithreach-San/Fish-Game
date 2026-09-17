@@ -33,15 +33,77 @@ public class PlayerSpawn : MonoBehaviour
 
 
     private GameObject player;
+    private bool hasSpawned = false;
+    private Coroutine activeDropCoroutine = null;
+
+    private void Awake()
+    {
+        EventManager.StartListening("GameStart", OnGameStartEvent);
+        EventManager.StartListening("playerDeath", OnPlayerDeathEvent);
+    }
+
+    private void OnDestroy()
+    {
+        EventManager.StopListening("GameStart", OnGameStartEvent);
+        EventManager.StopListening("playerDeath", OnPlayerDeathEvent);
+    }
+
+    private void OnPlayerDeathEvent()
+    {
+        hasSpawned = false;
+        if (activeDropCoroutine != null)
+        {
+            StopCoroutine(activeDropCoroutine);
+            activeDropCoroutine = null;
+        }
+    }
+
+    private void OnGameStartEvent()
+    {
+        if (hasSpawned) return;
+        SpawnPlayer();
+    }
 
     private void Start()
     {
-        EventManager.StartListening("GameStart", SpawnPlayer);
-        
+        // Fallback: only spawn if GameStart event was not already triggered
+        if (!hasSpawned && player == null)
+        {
+            SpawnPlayer();
+        }
     }
 
     public void SpawnPlayer()
     {
+        // Prevent duplicate execution if player is already spawned and active
+        if (hasSpawned && player != null && player.activeInHierarchy)
+        {
+            return;
+        }
+
+        hasSpawned = true;
+
+        if (activeDropCoroutine != null)
+        {
+            StopCoroutine(activeDropCoroutine);
+            activeDropCoroutine = null;
+        }
+
+        // Prevent duplicate player instances
+        PlayerController[] existingPlayers = Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        if (existingPlayers != null && existingPlayers.Length > 0)
+        {
+            player = existingPlayers[0].gameObject;
+            // Clean up any extra player fish if somehow duplicated
+            for (int i = 1; i < existingPlayers.Length; i++)
+            {
+                if (existingPlayers[i] != null)
+                {
+                    Destroy(existingPlayers[i].gameObject);
+                }
+            }
+        }
+
         // Determine spawn target (center of the viewport)
         Camera cam = Camera.main;
         Vector3 targetPos = transform.position;
@@ -65,33 +127,31 @@ public class PlayerSpawn : MonoBehaviour
         if (player == null)
         {
             player = Instantiate(PlayerPrefab, spawnPos, Quaternion.identity);
-            // trigger spawn so other systems (camera) can follow immediately
-            EventManager.Trigger<GameObject>("PlayerSpawn", player);
-            PlaySpawnSound(player);
-            PlayBubble(player);
-            
-            // Enable speed particles during drop
-            PlayerController pc = player.GetComponent<PlayerController>();
-            if (pc != null) pc.PlaySpeedEffect();
-
-            // animate drop
-            StartCoroutine(DropToPosition(player, targetPos, dropDuration));
         }
         else
         {
             // reuse existing player: enable, reposition above screen, then drop
             player.SetActive(true);
+            Transform gfx = player.transform.Find("PlayerGraphics");
+            if (gfx != null) gfx.gameObject.SetActive(true);
             player.transform.position = spawnPos;
-            EventManager.Trigger<GameObject>("PlayerSpawn", player);
-            PlaySpawnSound(player);
-            PlayBubble(player);
-
-            // Enable speed particles during drop
-            PlayerController pc = player.GetComponent<PlayerController>();
-            if (pc != null) pc.PlaySpeedEffect();
-
-            StartCoroutine(DropToPosition(player, targetPos, dropDuration));
         }
+
+        // trigger spawn so other systems (camera) can follow immediately
+        EventManager.Trigger<GameObject>("PlayerSpawn", player);
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.SetCameraFollow(player.transform);
+        }
+        PlaySpawnSound(player);
+        PlayBubble(player);
+        
+        // Enable speed particles during drop
+        PlayerController pc = player.GetComponent<PlayerController>();
+        if (pc != null) pc.PlaySpeedEffect();
+
+        // animate drop
+        activeDropCoroutine = StartCoroutine(DropToPosition(player, targetPos, dropDuration));
     }
 
     private void PlaySpawnSound(GameObject p)
@@ -132,6 +192,7 @@ public class PlayerSpawn : MonoBehaviour
         Vector3 start = obj.transform.position;
         while (elapsed < duration)
         {
+            if (obj == null) yield break;
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
             // smoothstep easing for nicer drop
@@ -139,11 +200,15 @@ public class PlayerSpawn : MonoBehaviour
             obj.transform.position = Vector3.Lerp(start, target, ease);
             yield return null;
         }
-        obj.transform.position = target;
-        
-        // Stop speed particles after drop
-        PlayerController pc = obj.GetComponent<PlayerController>();
-        if (pc != null) pc.StopSpeedEffect();
+        if (obj != null)
+        {
+            obj.transform.position = target;
+            
+            // Stop speed particles after drop
+            PlayerController pc = obj.GetComponent<PlayerController>();
+            if (pc != null) pc.StopSpeedEffect();
+        }
+        activeDropCoroutine = null;
     }
 
 }

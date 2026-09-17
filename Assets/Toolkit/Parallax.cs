@@ -144,8 +144,8 @@ namespace Rhinotap.Toolkit
             if (cachedLakeSprite != null) return cachedLakeSprite;
 
 #if UNITY_EDITOR
-            // 1. In Editor, prioritize the source asset in Assets/Graphics/Backgrounds/
-            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_lake.png");
+            // 1. In Editor, prioritize river_background.png
+            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/river_background.png");
             if (assets != null)
             {
                 foreach (var a in assets)
@@ -157,9 +157,36 @@ namespace Rhinotap.Toolkit
                     }
                 }
             }
+            if (cachedLakeSprite == null)
+            {
+                assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_lake.png");
+                if (assets != null)
+                {
+                    foreach (var a in assets)
+                    {
+                        if (a is Sprite s)
+                        {
+                            cachedLakeSprite = s;
+                            break;
+                        }
+                    }
+                }
+            }
 #endif
 
             // 2. Resources.Load<Sprite>
+            if (cachedLakeSprite == null)
+            {
+                cachedLakeSprite = Resources.Load<Sprite>("river_background");
+            }
+            if (cachedLakeSprite == null)
+            {
+                Sprite[] sprites = Resources.LoadAll<Sprite>("river_background");
+                if (sprites != null && sprites.Length > 0)
+                {
+                    cachedLakeSprite = sprites[0];
+                }
+            }
             if (cachedLakeSprite == null)
             {
                 cachedLakeSprite = Resources.Load<Sprite>("Game_bg_lake");
@@ -176,7 +203,8 @@ namespace Rhinotap.Toolkit
             // 3. Texture2D from Resources
             if (cachedLakeSprite == null)
             {
-                Texture2D tex = Resources.Load<Texture2D>("Game_bg_lake");
+                Texture2D tex = Resources.Load<Texture2D>("river_background");
+                if (tex == null) tex = Resources.Load<Texture2D>("Game_bg_lake");
                 if (tex != null)
                 {
                     cachedLakeSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
@@ -192,8 +220,8 @@ namespace Rhinotap.Toolkit
             if (cachedOceanSprite != null) return cachedOceanSprite;
 
 #if UNITY_EDITOR
-            // 1. In Editor, prioritize the source asset in Assets/Graphics/Backgrounds/
-            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
+            // 1. In Editor, prioritize ocean_background.png
+            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/ocean_background.png");
             if (assets != null)
             {
                 foreach (var a in assets)
@@ -205,9 +233,36 @@ namespace Rhinotap.Toolkit
                     }
                 }
             }
+            if (cachedOceanSprite == null)
+            {
+                assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
+                if (assets != null)
+                {
+                    foreach (var a in assets)
+                    {
+                        if (a is Sprite s)
+                        {
+                            cachedOceanSprite = s;
+                            break;
+                        }
+                    }
+                }
+            }
 #endif
 
             // 2. Resources.Load<Sprite>
+            if (cachedOceanSprite == null)
+            {
+                cachedOceanSprite = Resources.Load<Sprite>("ocean_background");
+            }
+            if (cachedOceanSprite == null)
+            {
+                Sprite[] sprites = Resources.LoadAll<Sprite>("ocean_background");
+                if (sprites != null && sprites.Length > 0)
+                {
+                    cachedOceanSprite = sprites[0];
+                }
+            }
             if (cachedOceanSprite == null)
             {
                 cachedOceanSprite = Resources.Load<Sprite>("Game_bg_ocean");
@@ -224,14 +279,15 @@ namespace Rhinotap.Toolkit
             // 3. Texture2D from Resources
             if (cachedOceanSprite == null)
             {
-                Texture2D tex = Resources.Load<Texture2D>("Game_bg_ocean");
+                Texture2D tex = Resources.Load<Texture2D>("ocean_background");
+                if (tex == null) tex = Resources.Load<Texture2D>("Game_bg_ocean");
                 if (tex != null)
                 {
                     cachedOceanSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
                 }
             }
 
-            // 4. Fallback to legacy game_bg if Game_bg_ocean is missing
+            // 4. Fallback to legacy game_bg if ocean_background is missing
             if (cachedOceanSprite == null)
             {
                 cachedOceanSprite = Resources.Load<Sprite>("game_bg");
@@ -252,37 +308,83 @@ namespace Rhinotap.Toolkit
         {
             ClearCache();
 
-            if (items == null || items.Length == 0) return;
-
             bool isLake = LevelManager.IsCurrentLakeLevel;
 
-            for (int i = 0; i < items.Length; i++)
+            if (items != null && items.Length > 0)
             {
-                if (items[i] == null || items[i].Item == null) continue;
-                string itemName = items[i].Item.name.ToLower();
-
-                // Skip particle systems or foreground items
-                if (itemName.Contains("particle")) continue;
-
-                if (itemName.Contains("bg") || itemName.Contains("pixelated") || itemName.Contains("background") || i == 0)
+                for (int i = 0; i < items.Length; i++)
                 {
-                    var sr = items[i].Item.GetComponent<SpriteRenderer>();
+                    if (items[i] == null || items[i].Item == null) continue;
+                    string itemName = items[i].Item.name.ToLower();
 
-                    Sprite targetSprite = isLake ? GetLakeSprite() : GetOceanSprite();
-                    if (targetSprite != null)
+                    // Skip particle systems
+                    if (itemName.Contains("particle")) continue;
+
+                    if (itemName.Contains("bg") || itemName.Contains("pixelated") || itemName.Contains("background") || i == 0)
                     {
-                        if (sr != null)
+                        var sr = items[i].Item.GetComponent<SpriteRenderer>();
+
+                        Sprite targetSprite = isLake ? GetLakeSprite() : GetOceanSprite();
+                        if (targetSprite != null)
                         {
-                            sr.sprite = targetSprite;
+                            if (sr != null)
+                            {
+                                sr.sprite = targetSprite;
+                            }
+                            items[i].UpdateSprite(targetSprite);
+                            Debug.Log($"[Parallax] Applied {(isLake ? "Lake" : "Ocean")} background sprite ('{targetSprite.name}') for Level {LevelManager.CurrentLevel}");
                         }
-                        items[i].UpdateSprite(targetSprite);
-                        Debug.Log($"[Parallax] Applied {(isLake ? "Lake" : "Ocean")} background sprite ('{targetSprite.name}') for Level {LevelManager.CurrentLevel}");
+                        else
+                        {
+                            Debug.LogWarning($"[Parallax] Could not load {(isLake ? "Lake" : "Ocean")} background sprite for Level {LevelManager.CurrentLevel}");
+                        }
                     }
-                    else
+                }
+            }
+
+            // Remove/hide ocean reef elements from river levels and enable river elements
+            SetOceanReefElementsActive(!isLake);
+            SetRiverElementsActive(isLake);
+        }
+
+        public static void SetOceanReefElementsActive(bool active)
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (scene.isLoaded)
+            {
+                var roots = scene.GetRootGameObjects();
+                foreach (var root in roots)
+                {
+                    if (root.name.Contains("OceanEnvironment"))
                     {
-                        Debug.LogWarning($"[Parallax] Could not load {(isLake ? "Lake" : "Ocean")} background sprite for Level {LevelManager.CurrentLevel}");
+                        // Extra procedural rocks removed; ocean strictly uses Ocean_reef_element_1, Ocean_reef_element_3 and Clam
+                        root.SetActive(false);
                     }
-                    break;
+                    else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_"))
+                    {
+                        root.SetActive(active);
+                    }
+                }
+            }
+        }
+
+        public static void SetRiverElementsActive(bool active)
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (scene.isLoaded)
+            {
+                var roots = scene.GetRootGameObjects();
+                foreach (var root in roots)
+                {
+                    Transform[] allTransforms = root.GetComponentsInChildren<Transform>(true);
+                    foreach (var t in allTransforms)
+                    {
+                        if (t.name.Contains("RiverEnvironment") || t.name.Contains("RiverElement") || t.name.StartsWith("River_") || t.name.Equals("River_Element1"))
+                        {
+                            // Elements in the river removed per user request (clean river background only)
+                            t.gameObject.SetActive(false);
+                        }
+                    }
                 }
             }
         }
@@ -347,8 +449,6 @@ namespace Rhinotap.Toolkit
                 layerBackgroundItems = "Default";
             }
 
-            ApplyLevelBackground();
-
             //Initialize each parallax item
             int i = 0;
             foreach (ParallaxItem item in items)
@@ -356,8 +456,8 @@ namespace Rhinotap.Toolkit
                 item.Initialize(camStartPos, i);
                 i++;
             }
-            
 
+            ApplyLevelBackground();
         }
 
         private void Start()
@@ -613,13 +713,14 @@ namespace Rhinotap.Toolkit
         public void Disable()
         {
             isActive = false;
-            parent.SetActive(false);
-
+            if (parent != null) parent.SetActive(false);
+            if (item != null) item.SetActive(false);
         }
         public void Enable()
         {
             isActive = true;
-            parent.SetActive(true);
+            if (parent != null) parent.SetActive(true);
+            if (item != null) item.SetActive(true);
         }
         #endregion
 

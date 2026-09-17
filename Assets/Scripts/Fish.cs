@@ -42,7 +42,7 @@ public class Fish : MonoBehaviour
 
     [SerializeField]
     private bool isFacingRight = true;
-    public bool IsFacingRight => isFacingRight;
+    public bool IsFacingRight { get => isFacingRight; set => isFacingRight = value; }
 
     [SerializeField]
     private float speed = 1f;
@@ -57,6 +57,7 @@ public class Fish : MonoBehaviour
     private bool isHooked = false;
     public bool IsHooked => isHooked;
     private Hazard caughtHazard = null;
+    private HarpoonHazard caughtHarpoon = null;
     private Vector3 hookStartPos;
     private float hookCurrentAngle = 0f;
     private float hookAngleVelocity = 0f;
@@ -71,6 +72,16 @@ public class Fish : MonoBehaviour
     public Vector2 formationOffset;
     public FishSchool GroupSchool { get; set; }
     private bool isEaten = false;
+    public float SpawnTime { get; private set; }
+    public bool IsDead { get; private set; } = false;
+
+    [Header("Mouth Bite Animation")]
+    [SerializeField] private Sprite closedSprite;
+    [SerializeField] private Sprite openSprite;
+    public bool HasBiteSprites => openSprite != null;
+    private bool isBiting = false;
+    private float biteTimer = 0f;
+    private float biteDuration = 0.30f;
 
     [Header("Bobbing Animation")]
     [SerializeField] private float bobSpeed = 2f;
@@ -293,12 +304,13 @@ public class Fish : MonoBehaviour
 
     public void Die()
     {
-        // Simple death logic
         DespawnSelf();
     }
     
     public void DespawnSelf()
     {
+        if (IsDead) return;
+        IsDead = true;
         if (!isEaten && GroupSchool != null)
         {
             GroupSchool.OnFishDespawned(this);
@@ -317,7 +329,9 @@ public class Fish : MonoBehaviour
 
     private void OnEnable()
     {
+        IsDead = false;
         AllFish.Add(this);
+        SpawnTime = Time.time;
         
         // Reset state for pooling
         school = null;
@@ -327,6 +341,9 @@ public class Fish : MonoBehaviour
         ResetHookState();
         ResetSpikeState();
         ResetSickState();
+        ResetBiteState();
+        ConfigureAiFishRendering();
+        ConfigurePufferfish();
         // Don't reset 'initialized' as that tracks initialScale which is constant
     }
 
@@ -336,6 +353,7 @@ public class Fish : MonoBehaviour
         ResetHookState();
         ResetSpikeState();
         ResetSickState();
+        ResetBiteState();
     }
 
     private void Start()
@@ -350,13 +368,7 @@ public class Fish : MonoBehaviour
                 cachedPlayerTransform = cachedGameManager.playerGameObject.transform;
         }
 
-        // Auto-configure pufferfish if level 4 or spikeSprite assigned
-        if (isPufferFish || level == 4 || spikeSprite != null)
-        {
-            isPufferFish = true;
-            if (cachedGfxSr == null && gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
-            if (normalSprite == null && cachedGfxSr != null) normalSprite = cachedGfxSr.sprite;
-        }
+        ConfigurePufferfish();
 
         if (isSickFish)
         {
@@ -530,15 +542,52 @@ public class Fish : MonoBehaviour
         return cachedCircleTexture;
     }
 
+    private static void GetTightVisualAspect(Sprite sprite, out float widthRatio, out float heightRatio, out Vector2 centerOffsetNorm)
+    {
+        widthRatio = 1f;
+        heightRatio = 1f;
+        centerOffsetNorm = Vector2.zero;
+        if (sprite == null) return;
+
+        string spriteName = sprite.name.ToLower();
+        
+        // Custom tight ratios for sprites with transparent canvas padding:
+        if (spriteName.Contains("river level 3"))
+        {
+            widthRatio = 0.95f;
+            heightRatio = 0.365f;
+            centerOffsetNorm = new Vector2(0.001f, 0.012f);
+        }
+        else if (spriteName.Contains("level 5") && !spriteName.Contains("river"))
+        {
+            widthRatio = 0.95f;
+            heightRatio = 0.57f;
+            centerOffsetNorm = new Vector2(-0.006f, 0.012f);
+        }
+        else if (spriteName.Contains("level 4") || spriteName.Contains("river level 4"))
+        {
+            widthRatio = 0.98f;
+            heightRatio = 0.90f;
+            centerOffsetNorm = Vector2.zero;
+        }
+        else if (spriteName.Contains("x2 xp") || spriteName.Contains("golden"))
+        {
+            widthRatio = 0.98f;
+            heightRatio = 0.98f;
+            centerOffsetNorm = Vector2.zero;
+        }
+    }
+
     private void UpdateCollision()
     {
         if (gfx == null) return;
         SpriteRenderer sr = gfx.GetComponent<SpriteRenderer>();
         if (sr == null || sr.sprite == null) return;
 
-        // "Game Style" / "Feeding Frenzy" Collision
-        // 1. Fit shape to sprite (Capsule is best for fish)
-        // 2. Reduce size slightly (0.85f) for forgiveness
+        // "Game Style" / "Feeding Frenzy" Fair Collision
+        // 1. Fit shape to visual sprite body (Capsule is best for fish)
+        // 2. Adjust for transparent canvas padding on custom sprites
+        // 3. Keep danger hitboxes strictly inside the visible scales (0.78f forgiveness)
 
         // Optimization: Use cached buffer to avoid GC allocation
         if (collisionBuffer == null) collisionBuffer = new List<Collider2D>();
@@ -572,25 +621,25 @@ public class Fish : MonoBehaviour
         // Calculate Bounds
         Bounds b = sr.sprite.bounds;
         Vector2 spriteSize = b.size;
-        Vector2 spriteCenter = b.center;
+        Vector3 spriteCenter = b.center;
 
         // Adjust for gfx scale relative to root
-        // Note: We use Abs because collider size must be positive.
-        // We assume gfx is a child of this transform (or the same).
         float scaleX = Mathf.Abs(gfx.localScale.x);
         float scaleY = Mathf.Abs(gfx.localScale.y);
 
-        Vector2 finalSize = new Vector2(spriteSize.x * scaleX, spriteSize.y * scaleY);
+        // Get tight visual aspect ratio to eliminate transparent padding
+        GetTightVisualAspect(sr.sprite, out float wRatio, out float hRatio, out Vector2 offsetNorm);
+
+        Vector2 finalSize = new Vector2(spriteSize.x * scaleX * wRatio, spriteSize.y * scaleY * hRatio);
         
         // Calculate Center Offset in Root Local Space
-        // We use TransformPoint to get World Center, then InverseTransformPoint to get Root Local Center
-        // This accounts for any offset of the graphics child.
-        Vector3 worldCenter = gfx.TransformPoint(spriteCenter);
+        Vector3 worldCenter = gfx.TransformPoint(spriteCenter + new Vector3(spriteSize.x * offsetNorm.x, spriteSize.y * offsetNorm.y, 0f));
         Vector3 localCenter = transform.InverseTransformPoint(worldCenter);
 
-        // Apply Forgiveness - Feeding Frenzy feel.
-        // Level 1 fish get a generous bite box (1.15f) so they are easy to scoop up and eat
-        float forgiveness = (level == 1) ? 1.15f : 0.85f;
+        // Apply Forgiveness - Feeding Frenzy feel:
+        // Level 1 minnows get a friendly 1.0f box so they are easy to scoop up.
+        // Higher level predator/danger fish use 0.78f so their hitboxes stay strictly inside their visual body.
+        float forgiveness = (level == 1) ? 1.0f : (isGoldenFish ? 0.95f : 0.78f);
         
         capsule.size = finalSize * forgiveness;
         capsule.offset = localCenter;
@@ -607,8 +656,11 @@ public class Fish : MonoBehaviour
         // When hooked by fishing rod, all autonomous logic is suspended
         if (isHooked) return;
 
-        // Bobbing Animation
-        if (gfx != null && gfx != transform)
+        // Mouth bite animation update
+        UpdateBiteAnimation();
+
+        // Bobbing Animation (only fallback if no Animator is controlling Gfx)
+        if (gfx != null && gfx != transform && GetComponent<Animator>() == null)
         {
             float newY = defaultYLocal + Mathf.Sin(Time.time * bobSpeed + randomBobOffset) * bobAmount;
             gfx.localPosition = new Vector3(gfx.localPosition.x, newY, gfx.localPosition.z);
@@ -657,6 +709,7 @@ public class Fish : MonoBehaviour
 
     private void CheckFoodChain()
     {
+        if (IsDead || !gameObject.activeInHierarchy) return;
         if (myCollider == null) 
         {
              // Try to recover collider if lost
@@ -664,9 +717,8 @@ public class Fish : MonoBehaviour
              if (myCollider == null) return;
         }
 
-        // OverlapCollider finds anything touching 'myCollider' regardless of Physics Matrix (if configured right)
-        // It uses the actual collider shape (Capsule) which is better than OverlapCircle.
-        int count = Physics2D.OverlapCollider(myCollider, contactFilter, collisionBuffer);
+        // Use cached contact filter to eliminate garbage collection
+        int count = myCollider.Overlap(contactFilter, collisionBuffer);
         
         for (int i = 0; i < count; i++)
         {
@@ -676,7 +728,7 @@ public class Fish : MonoBehaviour
              Fish otherFish = col.GetComponent<Fish>();
              if (otherFish != null)
              {
-                 if (otherFish.IsHooked) continue;
+                 if (otherFish.IsDead || !otherFish.gameObject.activeInHierarchy || otherFish.IsHooked) continue;
 
                   // Spiked Pufferfish Defense:
                   // "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
@@ -710,6 +762,7 @@ public class Fish : MonoBehaviour
                       otherFish.OnEatenByPredator();
                       otherFish.Die();
                       PlayEatEffect();
+                      TriggerBite();
                      var ai = GetComponent<FishAI>();
                      if (ai != null) ai.OnAteFish(otherFish);
                   }
@@ -725,10 +778,19 @@ public class Fish : MonoBehaviour
         {
             cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
             image = cachedGfxSr != null ? cachedGfxSr.sprite : null;
+            ConfigureAiFishRendering();
             gfxDefaultScale = gfx.localScale;
             if (normalSprite == null && cachedGfxSr != null)
             {
                 normalSprite = cachedGfxSr.sprite;
+            }
+            if (closedSprite == null && normalSprite != null)
+            {
+                closedSprite = normalSprite;
+            }
+            if (closedSprite != null && cachedGfxSr != null && !isSpiked && !isSickFish)
+            {
+                cachedGfxSr.sprite = closedSprite;
             }
         }
         else
@@ -910,6 +972,7 @@ public class Fish : MonoBehaviour
     {
         // Safety check
         if (collision == null) return;
+        if (IsDead || !gameObject.activeInHierarchy) return;
         if (isHooked) return;
 
         // Check for Fishing Rod Hazard
@@ -935,8 +998,8 @@ public class Fish : MonoBehaviour
         
         if (otherFish != null)
         {
-            // Self-collision check or ignore already hooked fish
-            if (otherFish == this || otherFish.IsHooked) return;
+            // Self-collision check or ignore already dead / hooked fish
+            if (otherFish == this || otherFish.IsDead || !otherFish.gameObject.activeInHierarchy || otherFish.IsHooked) return;
 
             // Spiked Pufferfish Defense:
             // "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
@@ -968,12 +1031,63 @@ public class Fish : MonoBehaviour
             // I am bigger. I eat the smaller fish.
             if (this.level > otherFish.Level)
             {
+                // SICK FISH REFUSES FOOD:
+                // Sick fish refuse food and will not eat anything.
+                if (this.isSickFish)
+                {
+                    return;
+                }
+
                 otherFish.OnEatenByPredator();
                 otherFish.Die();
                 PlayEatEffect();
+                TriggerBite();
                 var ai = GetComponent<FishAI>();
                 if (ai != null) ai.OnAteFish(otherFish);
             }
+        }
+    }
+
+    /// <summary>
+    /// Called when the fish is struck and impaled by a RiverBoat HarpoonHazard.
+    /// Locks down movement, physics, and autonomous updates while preserving exact scale.
+    /// </summary>
+    public void OnHarpoonImpaled(HarpoonHazard harpoon = null)
+    {
+        isHooked = true;
+        caughtHarpoon = harpoon;
+        caughtHazard = null;
+
+        // Leave school
+        school = null;
+        formationOffset = Vector2.zero;
+
+        // Disable AI & movement components
+        var ai = GetComponent<FishAI>();
+        if (ai != null) ai.enabled = false;
+
+        var movement = GetComponent<FishMovement>();
+        if (movement != null) movement.enabled = false;
+
+        Rigidbody2D rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.simulated = false;
+        }
+
+        // Disable colliders so other fish/hazards don't interact
+        Collider2D[] allCols = GetComponentsInChildren<Collider2D>();
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = false;
+        }
+
+        Animator anim = GetComponentInChildren<Animator>();
+        if (anim != null)
+        {
+            anim.enabled = false;
         }
     }
 
@@ -1062,6 +1176,19 @@ public class Fish : MonoBehaviour
     {
         if (!isHooked) return;
 
+        // Harpoon handling (RiverBoat)
+        if (caughtHarpoon != null)
+        {
+            if (!caughtHarpoon.gameObject.activeInHierarchy ||
+                caughtHarpoon.State == HarpoonHazard.HarpoonState.Completed)
+            {
+                OnReeledOutOfWater();
+                return;
+            }
+            // Position and struggle jitter are driven by HarpoonHazard in world space
+            return;
+        }
+
         // Safety check: if hazard is gone, inactive, or hook lasts abnormally long (> 12s), reel out and clean up
         if (caughtHazard == null || !caughtHazard.gameObject.activeInHierarchy || hookElapsedTime > 12.0f)
         {
@@ -1131,6 +1258,7 @@ public class Fish : MonoBehaviour
     {
         isHooked = false;
         caughtHazard = null;
+        caughtHarpoon = null;
         hookElapsedTime = 0f;
         hookCurrentAngle = 0f;
         hookAngleVelocity = 0f;
@@ -1179,50 +1307,46 @@ public class Fish : MonoBehaviour
 
     #region Pufferfish Spike Logic
 
+    public void ConfigurePufferfish()
+    {
+        // Level 4 ocean fish or any fish configured with spikeSprite is a Pufferfish
+        if (isPufferFish || (level == 4 && !LevelManager.IsCurrentLakeLevel) || spikeSprite != null)
+        {
+            isPufferFish = true;
+            if (gfx == null) gfx = transform.Find("Graphics") ?? transform.Find("Gfx") ?? transform;
+            if (cachedGfxSr == null && gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+            if (normalSprite == null && cachedGfxSr != null) normalSprite = cachedGfxSr.sprite;
+            if (gfx != null && (gfxDefaultScale == Vector3.zero || gfxDefaultScale == Vector3.one))
+            {
+                gfxDefaultScale = gfx.localScale;
+            }
+        }
+    }
+
     private void UpdatePufferfishLogic()
     {
-        // Decrement recovery cooldown if recently deflated
-        if (deflateCooldownTimer > 0f)
+        // 1. Resolve player reference reliably
+        if (cachedPlayerTransform == null)
         {
-            deflateCooldownTimer -= Time.deltaTime;
-        }
-
-        if (isSpiked)
-        {
-            // Pufferfish can only hold its breath and stay spiked for a limited time (spikeDuration)
-            spikeActiveTimer -= Time.deltaTime;
-
-            // Time expired: pufferfish gets tired and MUST deflate!
-            if (spikeActiveTimer <= 0f)
+            if (GameManager.instance != null && GameManager.instance.playerGameObject != null)
             {
-                SetSpikeMode(false);
-                deflateCooldownTimer = deflateCooldown; // Cannot re-inflate during this recovery window!
+                cachedPlayerTransform = GameManager.instance.playerGameObject.transform;
             }
-            return;
-        }
-
-        // Currently in Normal Mode:
-        // If still in recovery cooldown, pufferfish is exhausted and CANNOT inflate!
-        // This is the player's window of opportunity to strike and eat it!
-        if (deflateCooldownTimer > 0f)
-        {
-            return;
+            else
+            {
+                PlayerController pc = FindObjectOfType<PlayerController>();
+                if (pc != null) cachedPlayerTransform = pc.transform;
+            }
         }
 
         bool threatDetected = false;
         float detectRadiusSqr = spikeDetectRadius * spikeDetectRadius;
 
-        // Threat 1: Player (if alive, not hooked, and able to eat this pufferfish: PlayerLevel >= level)
-        if (cachedPlayerTransform == null && cachedGameManager != null)
-        {
-            if (cachedGameManager.playerGameObject != null)
-                cachedPlayerTransform = cachedGameManager.playerGameObject.transform;
-        }
-
+        // Threat 1: Player (ALWAYS protects itself when the player comes close, regardless of player size/level!)
         if (cachedPlayerTransform != null)
         {
             PlayerController pc = cachedPlayerTransform.GetComponent<PlayerController>();
-            if (pc != null && pc.IsAlive && !pc.IsHooked && GameManager.PlayerLevel >= level)
+            if (pc != null && pc.IsAlive && !pc.IsHooked)
             {
                 float dSqr = ((Vector2)transform.position - (Vector2)cachedPlayerTransform.position).sqrMagnitude;
                 if (dSqr <= detectRadiusSqr)
@@ -1232,13 +1356,13 @@ public class Fish : MonoBehaviour
             }
         }
 
-        // Threat 2: Predator AI Fish with Level > this.level (Level 5, 6, etc.)
+        // Threat 2: Predator AI Fish (Level > this.level)
         if (!threatDetected)
         {
             for (int i = 0; i < AllFish.Count; i++)
             {
                 Fish other = AllFish[i];
-                if (other == null || other == this || other.IsHooked) continue;
+                if (other == null || other == this || other.IsHooked || other.IsDead || !other.gameObject.activeInHierarchy) continue;
                 if (other.level > this.level)
                 {
                     float dSqr = ((Vector2)transform.position - (Vector2)other.transform.position).sqrMagnitude;
@@ -1253,8 +1377,24 @@ public class Fish : MonoBehaviour
 
         if (threatDetected)
         {
+            // Keep spikes deployed while player or predator is within detection radius
             spikeActiveTimer = spikeDuration;
-            SetSpikeMode(true);
+            if (!isSpiked)
+            {
+                SetSpikeMode(true);
+            }
+        }
+        else
+        {
+            if (isSpiked)
+            {
+                // Threat has backed away; count down to safely deflate back to normal
+                spikeActiveTimer -= Time.deltaTime;
+                if (spikeActiveTimer <= 0f)
+                {
+                    SetSpikeMode(false);
+                }
+            }
         }
     }
 
@@ -1428,6 +1568,92 @@ public class Fish : MonoBehaviour
         else
         {
             SetSickStatus(true);
+        }
+    }
+
+    #endregion
+
+    /// <summary>
+    /// AI fish share the player's foreground sorting layer so reef art never
+    /// renders over their sprites.
+    /// </summary>
+    private void ConfigureAiFishRendering()
+    {
+        if (cachedGfxSr == null) return;
+
+        cachedGfxSr.sortingLayerName = "ParallaxForeground";
+        cachedGfxSr.sortingOrder = 59; // Player is 60; keep AI fish just behind it.
+    }
+
+    #region Mouth Bite Animation Logic
+
+    public void TriggerBite(float duration = 0.30f)
+    {
+        if (openSprite == null) return;
+        if (isSpiked) return;
+
+        isBiting = true;
+        biteDuration = duration;
+
+        if (biteTimer > biteDuration * 0.4f)
+        {
+            biteTimer = biteDuration * 0.15f;
+        }
+        else
+        {
+            biteTimer = 0f;
+        }
+
+        if (cachedGfxSr != null)
+        {
+            cachedGfxSr.sprite = openSprite;
+        }
+    }
+
+    private void UpdateBiteAnimation()
+    {
+        if (!isBiting) return;
+        if (isSpiked)
+        {
+            isBiting = false;
+            return;
+        }
+
+        biteTimer += Time.deltaTime;
+        float t = Mathf.Clamp01(biteTimer / biteDuration);
+
+        Sprite restSprite = (isSickFish && sickFishSprite != null) ? sickFishSprite : (closedSprite != null ? closedSprite : normalSprite);
+
+        if (cachedGfxSr != null && openSprite != null)
+        {
+            if (t < 0.60f)
+            {
+                cachedGfxSr.sprite = openSprite;
+            }
+            else
+            {
+                cachedGfxSr.sprite = restSprite;
+            }
+        }
+
+        if (t >= 1f)
+        {
+            isBiting = false;
+            if (cachedGfxSr != null && restSprite != null)
+            {
+                cachedGfxSr.sprite = restSprite;
+            }
+        }
+    }
+
+    public void ResetBiteState()
+    {
+        isBiting = false;
+        biteTimer = 0f;
+        Sprite restSprite = (isSickFish && sickFishSprite != null) ? sickFishSprite : (closedSprite != null ? closedSprite : normalSprite);
+        if (cachedGfxSr != null && restSprite != null && !isSpiked)
+        {
+            cachedGfxSr.sprite = restSprite;
         }
     }
 

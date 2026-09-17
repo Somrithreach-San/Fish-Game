@@ -91,9 +91,45 @@ public class EnemyLibrary : ScriptableObject
     /// </summary>
     public Fish GetRandomPrefab(int level)
     {
+        return GetRandomPrefab(level, LevelManager.IsCurrentLakeLevel);
+    }
+
+    /// <summary>
+    /// Environment-aware random prefab retrieval ensuring river and ocean fish never mix.
+    /// </summary>
+    public Fish GetRandomPrefab(int level, bool isLake)
+    {
+        if (isLake)
+        {
+            // For River levels: strictly look for river fish
+            string riverName = $"river level {Mathf.Clamp(level, 1, 5)} fish";
+            Fish riverFish = GetPrefabByName(level, riverName, true);
+            if (riverFish != null) return riverFish;
+
+            // Fallback: try any river fish from level 5 down to 1
+            for (int lvl = 5; lvl >= 1; lvl--)
+            {
+                riverFish = GetPrefabByName(lvl, $"river level {lvl} fish", true);
+                if (riverFish != null) return riverFish;
+            }
+        }
+        else
+        {
+            // For Ocean levels: strictly look for ocean fish
+            string oceanName = $"level {Mathf.Clamp(level, 1, 5)} fish";
+            Fish oceanFish = GetPrefabByName(level, oceanName, false);
+            if (oceanFish != null) return oceanFish;
+
+            for (int lvl = 5; lvl >= 1; lvl--)
+            {
+                oceanFish = GetPrefabByName(lvl, $"level {lvl} fish", false);
+                if (oceanFish != null) return oceanFish;
+            }
+        }
+
         SpawnPool result = GetPoolForLevel(level);
-        if (result == null) return null;
-        return result.Get();
+        Fish chosen = result != null ? result.Get(isLake) : null;
+        return chosen;
     }
 
     /// <summary>
@@ -101,10 +137,60 @@ public class EnemyLibrary : ScriptableObject
     /// </summary>
     public Fish GetPrefabByName(int level, string namePart)
     {
+        return GetPrefabByName(level, namePart, LevelManager.IsCurrentLakeLevel);
+    }
+
+    /// <summary>
+    /// Environment-aware specific prefab retrieval ensuring river and ocean fish never mix.
+    /// </summary>
+    public Fish GetPrefabByName(int level, string namePart, bool isLake)
+    {
+#if UNITY_EDITOR
+        // 1. In Editor, prioritize loading directly from Prefabs folder
+        string editorPath = $"Assets/Prefabs/Fishes Prefabs/{namePart}.prefab";
+        var editorGo = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(editorPath);
+        if (editorGo != null)
+        {
+            Fish f = editorGo.GetComponent<Fish>();
+            if (f != null && SpawnPool.IsMatchingEnvironment(f.name, isLake)) return f;
+        }
+#endif
+
+        // 2. Primary pool search
         SpawnPool result = GetPoolForLevel(level);
-        if (result == null) return null;
+        if (result != null)
+        {
+            Fish found = result.FindPrefab(namePart, isLake);
+            if (found != null) return found;
+        }
+
+        // 3. Search across all pools
+        if (pools != null)
+        {
+            for (int i = 0; i < pools.Length; i++)
+            {
+                if (pools[i] != null)
+                {
+                    Fish found = pools[i].FindPrefab(namePart, isLake);
+                    if (found != null) return found;
+                }
+            }
+        }
+
+        // 4. Resources folder fallback
+        if (SpawnPool.IsMatchingEnvironment(namePart, isLake))
+        {
+            Fish resFish = Resources.Load<Fish>(namePart);
+            if (resFish != null && SpawnPool.IsMatchingEnvironment(resFish.name, isLake)) return resFish;
+            GameObject resGo = Resources.Load<GameObject>(namePart);
+            if (resGo != null)
+            {
+                resFish = resGo.GetComponent<Fish>();
+                if (resFish != null && SpawnPool.IsMatchingEnvironment(resFish.name, isLake)) return resFish;
+            }
+        }
         
-        return result.FindPrefab(namePart);
+        return null;
     }
 
     /// <summary>
@@ -164,16 +250,45 @@ public class SpawnPool
 
     public Fish Get()
     {
-        if (fishPrefabs.Length == 0 || playerLevel <= 0) return null;
+        return Get(LevelManager.IsCurrentLakeLevel);
+    }
 
-        int index = Random.Range(0, fishPrefabs.Length);
+    public Fish Get(bool isLake)
+    {
+        if (fishPrefabs == null || fishPrefabs.Length == 0 || playerLevel <= 0) return null;
 
-        return fishPrefabs[index];
+        var matching = System.Array.FindAll(fishPrefabs, x => x != null && IsMatchingEnvironment(x.name, isLake));
+        if (matching.Length == 0)
+        {
+            // Safety fallback: if no matching prefabs found for this environment, return null
+            return null;
+        }
+
+        int index = Random.Range(0, matching.Length);
+        return matching[index];
     }
 
     public Fish FindPrefab(string namePart)
     {
+        return FindPrefab(namePart, LevelManager.IsCurrentLakeLevel);
+    }
+
+    public Fish FindPrefab(string namePart, bool isLake)
+    {
         if (fishPrefabs == null) return null;
-        return System.Array.Find(fishPrefabs, x => x.name.Contains(namePart));
+
+        // 1. Exact name match within the requested environment
+        Fish exact = System.Array.Find(fishPrefabs, x => x != null && IsMatchingEnvironment(x.name, isLake) && string.Equals(x.name, namePart, System.StringComparison.OrdinalIgnoreCase));
+        if (exact != null) return exact;
+
+        // 2. Substring match within the requested environment
+        return System.Array.Find(fishPrefabs, x => x != null && IsMatchingEnvironment(x.name, isLake) && x.name.IndexOf(namePart, System.StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    public static bool IsMatchingEnvironment(string prefabName, bool isLake)
+    {
+        if (string.IsNullOrEmpty(prefabName)) return false;
+        bool isRiverPrefab = prefabName.IndexOf("river", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        return isLake ? isRiverPrefab : !isRiverPrefab;
     }
 }

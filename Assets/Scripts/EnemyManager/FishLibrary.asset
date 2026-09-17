@@ -15,6 +15,11 @@ MonoBehaviour:
   pools:
   - playerLevel: 1
     fishPrefabs:
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: 0dc326ff5c561fd4f81348c84a522043, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
@@ -39,6 +44,11 @@ MonoBehaviour:
     - {fileID: 721555715946807086, guid: ae101ea44ba096847b95ba74146ab5ee, type: 3}
   - playerLevel: 2
     fishPrefabs:
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: 0dc326ff5c561fd4f81348c84a522043, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
@@ -75,6 +85,11 @@ MonoBehaviour:
     - {fileID: 721555715946807086, guid: 709d7df08549ed5479bf106816a9954d, type: 3}
   - playerLevel: 3
     fishPrefabs:
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: 2eef3793ab301134f92c4fd83b90ac65, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: aab6ae47f4db40e40ba942daed706634, type: 3}
+    - {fileID: 3698765400459329968, guid: 0dc326ff5c561fd4f81348c84a522043, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}
     - {fileID: 6291866412747655914, guid: 50c07f8a32eee084aa84b8fb60541aac, type: 3}

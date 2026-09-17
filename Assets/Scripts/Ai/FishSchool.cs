@@ -3,6 +3,30 @@ using UnityEngine;
 
 public class FishSchool : MonoBehaviour
 {
+    public static List<FishSchool> ActiveSchools { get; } = new List<FishSchool>();
+
+    public static int ActiveSchoolCount
+    {
+        get
+        {
+            ActiveSchools.RemoveAll(s => s == null || !s.gameObject.activeInHierarchy);
+            return ActiveSchools.Count;
+        }
+    }
+
+    private void OnEnable()
+    {
+        if (!ActiveSchools.Contains(this))
+        {
+            ActiveSchools.Add(this);
+        }
+    }
+
+    private void OnDisable()
+    {
+        ActiveSchools.Remove(this);
+    }
+
     public Vector2 CurrentDestination { get; private set; }
     private bool movingRight;
     private float decisionTimer;
@@ -49,7 +73,7 @@ public class FishSchool : MonoBehaviour
         remainingFish.Remove(fish);
 
         // Entire group cleared by the player! (Groups are 3 to 5 fish)
-        if (remainingFish.Count == 0 && registeredFish.Count >= 3)
+        if (remainingFish.Count == 0 && registeredFish.Count >= 2)
         {
             isCleared = true;
             PlayerController pc = Object.FindFirstObjectByType<PlayerController>();

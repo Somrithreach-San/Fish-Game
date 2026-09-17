@@ -63,3 +63,11 @@ crashlytics-build.properties
 
 # Custom Builds
 Web build/
+scratch/
+*.exe
+*_BurstDebugInformation_DoNotShip/
+*_Data/
+MonoBleedingEdge/
+D3D12/
+UnityPlayer.dll
+UnityCrashHandler64.exe

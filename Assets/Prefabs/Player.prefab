@@ -27,7 +27,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.6, y: 0.6, z: 1}
+  m_LocalScale: {x: 0.69, y: 0.69, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 8469209948450142917}
@@ -77,11 +77,11 @@ SpriteRenderer:
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 1
+  m_SortingLayerID: -1667252925
+  m_SortingLayer: 1
+  m_SortingOrder: 120
   m_MaskInteraction: 0
-  m_Sprite: {fileID: 21300000, guid: eed5a75630de90649b0be6ce42ab85ad, type: 3}
+  m_Sprite: {fileID: 21300000, guid: 9df542ed039c35641b2f9e0c5c68984b, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -163,9 +163,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9dd67989df82ec044bdc3584dd8fe2a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 6
-  verticalSpeedMultiplier: 1.75
-  maxLevel: 6
+  moveSpeed: 7
+  maxLevel: 5
   baseXpRequirement: 100
   levelXpIncreasePercentage: 0.5
   biteSounds:
@@ -174,6 +173,7 @@ MonoBehaviour:
   - {fileID: 8300000, guid: bb5e674ed5bc212449d96a51edeecc0b, type: 3}
   - {fileID: 8300000, guid: 3eb084bf7683a3547b4a8ce903327fc3, type: 3}
   deathSound: {fileID: 8300000, guid: 981015d54fd1d3646829f4568f353767, type: 3}
+  growSound: {fileID: 8300000, guid: d00bdc5ac5573e44da6659315433e827, type: 3}
   boostStartClip: {fileID: 8300000, guid: c56e8c31b74724e45815d6400607b79c, type: 3}
   boostStartVolume: 0.2
   speedEffect: {fileID: 0}
@@ -181,15 +181,29 @@ MonoBehaviour:
   bubbleTexture: {fileID: 2800000, guid: 4b3eb2f98f17eec4d841f6712ca3b889, type: 3}
   eatEffect: {fileID: 0}
   eatBubbleVariants: []
-  idleSprite: {fileID: 21300000, guid: eed5a75630de90649b0be6ce42ab85ad, type: 3}
-  eatSprite: {fileID: 21300000, guid: eed5a75630de90649b0be6ce42ab85ad, type: 3}
+  idleSprite: {fileID: 21300000, guid: 9df542ed039c35641b2f9e0c5c68984b, type: 3}
+  halfBiteSprite: {fileID: 21300000, guid: 426b2be7f9404df43b4dd942e6f31102, type: 3}
+  eatSprite: {fileID: 21300000, guid: 94792a66929af8547aef2026234b4f6f, type: 3}
+  riverPlayerSprite: {fileID: 21300000, guid: b23d2ce4ed63fff4fa21ac0c3610e2d6, type: 3}
+  riverIdleSprite: {fileID: 21300000, guid: 8b1c72ef84fef0340b5069f8dfd87852, type: 3}
+  riverHalfBiteSprite: {fileID: 21300000, guid: c3db7a48e83247c4fb12c6a998e658de,
+    type: 3}
+  riverEatSprite: {fileID: 21300000, guid: 537562de2f2065e47ad80c653ec098ab, type: 3}
   levelScales:
-  - 0.5
-  - 0.62
-  - 0.74
-  - 0.86
-  - 0.98
-  - 1.1
+  - 0.58
+  - 0.65
+  - 0.76
+  - 0.88
+  - 1
+  - 1.12
+  riverLevelScales:
+  - 0.6
+  - 0.75
+  - 0.9
+  - 1.08
+  - 1.25
+  - 1.4
+  cameraZoomPerLevel: 0
   isAlive: 1
   isPaused: 0
   currentLevelXp: 100
@@ -198,6 +212,7 @@ MonoBehaviour:
   smoothTime: 0.15
   tiltAngle: 20
   tiltSpeed: 10
+  gameOverDelay: 1.8
 --- !u!50 &8469209948450142913
 Rigidbody2D:
   serializedVersion: 5

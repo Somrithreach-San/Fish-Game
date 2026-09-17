@@ -90,7 +90,7 @@ SpriteRenderer:
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
-  m_Size: {x: 1.1925, y: 0.715}
+  m_Size: {x: 2.3168, y: 1.7376}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
@@ -118,6 +118,17 @@ MonoBehaviour:
   formationOffset: {x: 0, y: 0}
   bobSpeed: 2
   bobAmount: 0.1
+  closedSprite: {fileID: 0}
+  openSprite: {fileID: 0}
+  isPufferFish: 0
+  normalSprite: {fileID: 0}
+  spikeSprite: {fileID: 0}
+  spikeDetectRadius: 5
+  spikeDuration: 3.5
+  deflateCooldown: 3
+  spikeScaleMultiplier: 1
+  isSickFish: 0
+  sickFishSprite: {fileID: 0}
 --- !u!50 &-111485236333724338
 Rigidbody2D:
   serializedVersion: 5
