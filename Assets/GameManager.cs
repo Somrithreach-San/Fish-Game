@@ -68,10 +68,18 @@ public class GameManager : MonoBehaviour
     public static int PlayerLevel { 
         get
         {
-            if (instance != null && instance.player != null)
-                return instance.player.Level;
-            else
-                return 0;
+            if (instance != null)
+            {
+                if (instance.player != null) return instance.player.Level;
+                if (instance.playerGameObject != null)
+                {
+                    var pc = instance.playerGameObject.GetComponent<PlayerController>();
+                    if (pc != null) return pc.Level;
+                }
+                var foundPc = Object.FindFirstObjectByType<PlayerController>();
+                if (foundPc != null) return foundPc.Level;
+            }
+            return 1;
         } 
     }
 
@@ -136,6 +144,17 @@ public class GameManager : MonoBehaviour
         #endif
         riverMusicClip = Resources.Load<AudioClip>("river_music_bg");
         return riverMusicClip;
+    }
+
+    public AudioClip GetStageClearClip()
+    {
+        if (stageClearClip != null) return stageClearClip;
+        #if UNITY_EDITOR
+        stageClearClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/stageClear.ogg");
+        if (stageClearClip != null) return stageClearClip;
+        #endif
+        stageClearClip = Resources.Load<AudioClip>("stageClear");
+        return stageClearClip;
     }
 
     public void StopBackgroundMusic()
@@ -227,6 +246,9 @@ public class GameManager : MonoBehaviour
         Parallax.RefreshBackground();
         
         // FIX: Ensure Audio settings are correct for background music
+        if (audioSource == null) audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+
         if (audioSource != null)
         {
             AudioClip targetClip = LevelManager.IsCurrentLakeLevel ? GetRiverMusicClip() : GetOceanMusicClip();
@@ -236,12 +258,15 @@ public class GameManager : MonoBehaviour
                 audioSource.clip = targetClip;
             }
 
-            defaultBgmVolume = audioSource.volume > 0f ? audioSource.volume : 1f;
+            defaultBgmVolume = 1f;
             audioSource.loop = true;
             audioSource.playOnAwake = true;
-            audioSource.mute = !AudioSettingsManager.IsMusicEnabled;
-            audioSource.volume = AudioSettingsManager.IsMusicEnabled ? defaultBgmVolume : 0f;
-            if (AudioSettingsManager.IsMusicEnabled)
+            audioSource.spatialBlend = 0f;
+            bool shouldPlay = AudioSettingsManager.IsMusicEnabled && AudioSettingsManager.MusicVolume > 0.001f;
+            audioSource.mute = !shouldPlay;
+            audioSource.volume = shouldPlay ? defaultBgmVolume * AudioSettingsManager.MusicVolume : 0f;
+            AudioSettingsManager.RouteToMusic(audioSource);
+            if (shouldPlay)
             {
                 if (!audioSource.isPlaying) audioSource.Play();
             }
@@ -254,19 +279,24 @@ public class GameManager : MonoBehaviour
         // Setup SFX Source
         sfxSource = gameObject.AddComponent<AudioSource>();
         sfxSource.playOnAwake = false;
+        sfxSource.spatialBlend = 0f;
+        sfxSource.volume = 1f;
         sfxSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        AudioSettingsManager.RouteToSfx(sfxSource);
 
-        // Setup Ambient Source
+        // Setup Ambient Source (Water Loop - part of SFX group, not music)
         if (waterLoopClip != null)
         {
             ambientSource = gameObject.AddComponent<AudioSource>();
             ambientSource.clip = waterLoopClip;
             ambientSource.loop = true;
             ambientSource.playOnAwake = true;
+            ambientSource.spatialBlend = 0f;
             defaultAmbientVolume = ambientSource.volume > 0f ? ambientSource.volume : 1f;
-            ambientSource.mute = !AudioSettingsManager.IsMusicEnabled;
-            ambientSource.volume = AudioSettingsManager.IsMusicEnabled ? defaultAmbientVolume : 0f;
-            if (AudioSettingsManager.IsMusicEnabled)
+            ambientSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            ambientSource.volume = AudioSettingsManager.IsSfxEnabled ? defaultAmbientVolume : 0f;
+            AudioSettingsManager.RouteToSfx(ambientSource);
+            if (AudioSettingsManager.IsSfxEnabled)
             {
                 if (!ambientSource.isPlaying) ambientSource.Play();
             }
@@ -276,20 +306,27 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        // Setup Ocean Surface Wave Ambient Audio (Proximity-based near surface)
+        if (GetComponent<OceanSurfaceWaveAudio>() == null)
+        {
+            gameObject.AddComponent<OceanSurfaceWaveAudio>();
+        }
+
         EventManager.StartListening("playerDeath", PlayerDeathSequence);
+        EventManager.StartListening("GameWin", TriggerGameWin);
         
         // Audio Settings Check On Start
+        AudioSettingsManager.InitializeAudio();
         AudioListener.pause = false;
-        AudioListener.volume = AudioSettingsManager.MasterVolume;
 
         AudioSettingsManager.OnMusicSettingChanged += HandleMusicSettingChanged;
+        AudioSettingsManager.OnMusicVolumeChanged += HandleMusicVolumeChanged;
         AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged += HandleSfxVolumeChanged;
 
         // FORCE MOUSE SIMULATION FOR TOUCH (Fixes UI buttons on Mobile)
         Input.simulateMouseWithTouches = true;
     }
-
-    private bool isOrientationPaused = false;
 
     private void Update()
     {
@@ -315,40 +352,14 @@ public class GameManager : MonoBehaviour
                 if (Input.touchCount > 0 || Input.GetMouseButtonDown(0) || Input.anyKeyDown) inputDetected = true;
             } catch { }
 
-            if (inputDetected && AudioSettingsManager.IsMusicEnabled)
+            if (inputDetected)
             {
-                if (audioSource != null && !audioSource.isPlaying) audioSource.Play();
-                if (ambientSource != null && !ambientSource.isPlaying) ambientSource.Play();
+                if (AudioSettingsManager.IsMusicEnabled && audioSource != null && !audioSource.isPlaying) audioSource.Play();
+                if (AudioSettingsManager.IsSfxEnabled && ambientSource != null && !ambientSource.isPlaying) ambientSource.Play();
             }
         }
 
-        // --- MOBILE ROTATION CHECK ---
-        // Pause if Portrait, Resume if Landscape (and was paused by rotation)
-        if (Application.isMobilePlatform || Application.isEditor) // Testable in Editor too
-        {
-            if (Screen.height > Screen.width) // Portrait
-            {
-                // Always Force Mute in Portrait (User Request: Pause everything including audios)
-                AudioListener.pause = true;
 
-                if (!isPaused)
-                {
-                    PlayPause();
-                    isOrientationPaused = true;
-                }
-            }
-            else // Landscape
-            {
-                // Always Unmute Listener in Landscape (Game Pause handles individual sources)
-                AudioListener.pause = false;
-
-                if (isPaused && isOrientationPaused)
-                {
-                    PlayPause();
-                    isOrientationPaused = false;
-                }
-            }
-        }
 
         // Pause controls:
         // - Esc toggles pause/resume
@@ -393,8 +404,11 @@ public class GameManager : MonoBehaviour
         IsGameOver = true; // Flag Game Over to block pause
         StopBackgroundMusic();
         
-        if (sfxSource != null && stageClearClip != null)
-            sfxSource.PlayOneShot(stageClearClip);
+        AudioClip winClip = GetStageClearClip();
+        if (AudioSettingsManager.IsSfxEnabled && sfxSource != null && winClip != null)
+        {
+            sfxSource.PlayOneShot(winClip);
+        }
 
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
@@ -523,29 +537,51 @@ public class GameManager : MonoBehaviour
     {
         if (audioSource != null)
         {
-            audioSource.mute = !enabled;
-            audioSource.volume = enabled ? defaultBgmVolume : 0f;
-            if (!enabled) audioSource.Pause();
+            bool shouldPlay = enabled && AudioSettingsManager.MusicVolume > 0.001f;
+            audioSource.mute = !shouldPlay;
+            audioSource.volume = shouldPlay ? defaultBgmVolume * AudioSettingsManager.MusicVolume : 0f;
+            if (!shouldPlay) audioSource.Pause();
             else if (!audioSource.isPlaying && !IsGameOver) audioSource.Play();
+            else audioSource.UnPause();
         }
-        if (ambientSource != null)
-        {
-            ambientSource.mute = !enabled;
-            ambientSource.volume = enabled ? defaultAmbientVolume : 0f;
-            if (!enabled) ambientSource.Pause();
-            else if (!ambientSource.isPlaying && !IsGameOver) ambientSource.Play();
-        }
+    }
+
+    private void HandleMusicVolumeChanged(float vol)
+    {
+        HandleMusicSettingChanged(AudioSettingsManager.IsMusicEnabled);
     }
 
     private void HandleSfxSettingChanged(bool enabled)
     {
-        if (sfxSource != null) sfxSource.mute = !enabled;
+        if (sfxSource != null)
+        {
+            sfxSource.mute = !enabled;
+            sfxSource.volume = AudioSettingsManager.SfxVolume;
+        }
+        if (ambientSource != null)
+        {
+            bool shouldPlay = enabled && AudioSettingsManager.SfxVolume > 0.001f;
+            ambientSource.mute = !shouldPlay;
+            ambientSource.volume = shouldPlay ? defaultAmbientVolume * AudioSettingsManager.SfxVolume : 0f;
+            if (!shouldPlay) ambientSource.Pause();
+            else if (!ambientSource.isPlaying && !IsGameOver) ambientSource.Play();
+            else ambientSource.UnPause();
+        }
+    }
+
+    private void HandleSfxVolumeChanged(float vol)
+    {
+        HandleSfxSettingChanged(AudioSettingsManager.IsSfxEnabled);
     }
 
     private void OnDestroy()
     {
+        EventManager.StopListening("playerDeath", PlayerDeathSequence);
+        EventManager.StopListening("GameWin", TriggerGameWin);
         AudioSettingsManager.OnMusicSettingChanged -= HandleMusicSettingChanged;
+        AudioSettingsManager.OnMusicVolumeChanged -= HandleMusicVolumeChanged;
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged -= HandleSfxVolumeChanged;
     }
 
     //==============| /Cinemachine |======================//

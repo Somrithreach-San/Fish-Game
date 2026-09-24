@@ -44,16 +44,16 @@ namespace Rhinotap
         [Tooltip("Top of the map / water surface where bubbles pop and destroy")]
         [SerializeField] private float waterSurfaceY = 15.0f;
 
-        [Header("Straw Vent Mapping (The 3 Straws)")]
+        [Header("Straw Vent Mapping (The 4 Purple Sponge Tube Openings)")]
         [SerializeField]
         private List<VentPoint> vents = new List<VentPoint>()
         {
             new VentPoint
             {
-                name = "Straw_Left",
-                localOffset = new Vector3(-0.32f, -0.105f, 0f),
-                minInterval = 3.0f,
-                maxInterval = 6.0f,
+                name = "Tube_Left",
+                localOffset = new Vector3(0.16f, 1.51f, 0f),
+                minInterval = 2.8f,
+                maxInterval = 5.5f,
                 minBurstCount = 2,
                 maxBurstCount = 4,
                 doublePulseChance = 0.35f,
@@ -63,10 +63,10 @@ namespace Rhinotap
             },
             new VentPoint
             {
-                name = "Straw_TallCenter",
-                localOffset = new Vector3(0.38f, 0.345f, 0f),
+                name = "Tube_CenterTall",
+                localOffset = new Vector3(0.66f, 1.84f, 0f),
                 minInterval = 2.4f,
-                maxInterval = 5.0f,
+                maxInterval = 4.8f,
                 minBurstCount = 3,
                 maxBurstCount = 5,
                 doublePulseChance = 0.50f,
@@ -76,16 +76,29 @@ namespace Rhinotap
             },
             new VentPoint
             {
-                name = "Straw_RightPurple",
-                localOffset = new Vector3(1.04f, -0.555f, 0f),
-                minInterval = 3.5f,
-                maxInterval = 6.5f,
-                minBurstCount = 2,
+                name = "Tube_ShortFront",
+                localOffset = new Vector3(1.04f, 0.70f, 0f),
+                minInterval = 3.2f,
+                maxInterval = 6.2f,
+                minBurstCount = 1,
                 maxBurstCount = 3,
                 doublePulseChance = 0.30f,
                 minSize = 0.16f,
                 maxSize = 0.28f,
                 riseSpeed = new Vector2(3.3f, 4.2f)
+            },
+            new VentPoint
+            {
+                name = "Tube_RightSlanted",
+                localOffset = new Vector3(1.38f, 1.30f, 0f),
+                minInterval = 3.0f,
+                maxInterval = 5.8f,
+                minBurstCount = 2,
+                maxBurstCount = 4,
+                doublePulseChance = 0.40f,
+                minSize = 0.18f,
+                maxSize = 0.30f,
+                riseSpeed = new Vector2(3.4f, 4.3f)
             }
         };
 
@@ -207,6 +220,10 @@ namespace Rhinotap
             vel.x = new ParticleSystem.MinMaxCurve(-0.30f, 0.30f);
             vel.y = new ParticleSystem.MinMaxCurve(0f, 0.40f);
             vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+            vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+            vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+            vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+            vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
 
             // 5. Size over Lifetime: Disabled so bubbles remain at constant size throughout ascent
             var sol = ps.sizeOverLifetime;

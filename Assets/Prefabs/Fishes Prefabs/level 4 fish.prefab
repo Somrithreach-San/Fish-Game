@@ -221,7 +221,7 @@ PrefabInstance:
     - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
       propertyPath: spikeDetectRadius
-      value: 6
+      value: 8.5
       objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}

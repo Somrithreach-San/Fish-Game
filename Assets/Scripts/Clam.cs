@@ -6,6 +6,8 @@ using Rhinotap.Toolkit;
 /// <summary>
 /// Controls the Clam ocean creature and deadly trap.
 /// - Opens through Closed and HalfOpen, then remains FullyOpened while a pearl is available.
+/// - The clam shell uses clean empty shell sprites (never baked/attached pearl images).
+/// - Pearls are rendered via the separate child ClamPearl / PearlRenderer object.
 /// - Allows the player fish to eat the pearl inside when opened.
 /// - When the pearl is eaten, stays open for a calculated delay (pearlEatenClosingDelay) before closing.
 /// - Acts as a crushing hazard: any AI fish swimming inside while closing dies.
@@ -21,21 +23,25 @@ public class Clam : MonoBehaviour
         FullyOpened
     }
 
-    [Header("Clam Animation Frames")]
+    public enum PearlType
+    {
+        None,
+        Normal,
+        Black
+    }
+
+    [Header("Clam Shell Animation Frames (Empty Shell Only)")]
     [Tooltip("Sprite used when the clam is fully shut (idle closed state).")]
     [SerializeField] private Sprite closedSprite;
 
-    [Tooltip("Frames played in order when the clam opens (with pearl inside). " +
-             "Assign: opening_1, opening_2, opening_3, fully_open_has_pearl.")]
+    [Tooltip("Frames played in order when the clam opens.")]
     [SerializeField] private Sprite[] openingFrames;
 
-    [Tooltip("The held sprite while the clam is fully open and the pearl has been collected. " +
-             "Assign: fully_open_no_pearl.")]
-    [SerializeField] private Sprite fullyOpenedEmptySprite;
+    [Tooltip("The held sprite while the clam is fully open.")]
+    [SerializeField] private Sprite fullyOpenedSprite;
 
-    [Tooltip("Frames played in order when the clam closes after the pearl was eaten. " +
-             "Assign: closing_1_no_pearl, closing_2_no_pearl, closing_3_no_pearl.")]
-    [SerializeField] private Sprite[] closingEmptyFrames;
+    [Tooltip("Frames played in order when the clam closes.")]
+    [SerializeField] private Sprite[] closingFrames;
 
     [Tooltip("Frames per second for transition animations.")]
     [SerializeField] private float animFps = 12f;
@@ -47,14 +53,11 @@ public class Clam : MonoBehaviour
     [Tooltip("Duration of the half-open opening warning state")]
     [SerializeField] private float halfOpenDuration = 1.0f;
 
-    [Tooltip("Legacy setting. A clam with a pearl now stays open until that pearl is eaten.")]
-    [SerializeField] private float fullyOpenedDuration = 3.5f;
-
     [Tooltip("Duration of the half-open closing transition (escape warning before snap shut)")]
     [SerializeField] private float closingHalfDuration = 0.35f;
 
     [Tooltip("Calculated delay after pearl is eaten before closing begins (escape grace period)")]
-    [SerializeField] private float pearlEatenClosingDelay = 0.4f;
+    [SerializeField] private float pearlEatenClosingDelay = 0.22f; // Snappy tactile reaction (calibrated from 0.4f)
 
     [Tooltip("Duration of the snap shut impact")]
     [SerializeField] private float snapShutDuration = 0.15f;
@@ -63,14 +66,27 @@ public class Clam : MonoBehaviour
     [Tooltip("Whether this clam currently contains a pearl")]
     [SerializeField] private bool hasPearl = true;
 
-    [Tooltip("XP awarded to the player when the pearl is eaten")]
-    [SerializeField] private int pearlXp = 30;
+    [Tooltip("Type of pearl inside the clam")]
+    [SerializeField] private PearlType pearlType = PearlType.Normal;
 
-    [Tooltip("Can the player eat the pearl during the HalfOpen warning state?")]
-    [SerializeField] private bool canEatInHalfOpen = false;
+    [Tooltip("Sprite for normal white pearl")]
+    [SerializeField] private Sprite normalPearlSprite;
+
+    [Tooltip("Sprite for black pearl")]
+    [SerializeField] private Sprite blackPearlSprite;
+
+    [Tooltip("XP awarded to the player when normal white pearl is eaten")]
+    [SerializeField] private int normalPearlXp = 30;
+
+    [Tooltip("XP awarded to the player when black pearl is eaten")]
+    [SerializeField] private int blackPearlXp = 0;
+
+    [Tooltip("Chance of spawning a Black Pearl instead of a Normal Pearl (0.0 = never, 1.0 = always)")]
+    [Range(0f, 1f)]
+    [SerializeField] private float blackPearlChance = 2f / 3f;
 
     [Tooltip("Seconds the clam remains closed while generating a replacement pearl")]
-    [SerializeField] private float pearlRespawnTime = 25.0f;
+    [SerializeField] private float pearlRespawnTime = 35.0f;
 
     [Tooltip("If true, clam stays closed when empty. Default false for continuous natural cycle.")]
     [SerializeField] private bool stayClosedWhenEmpty = false;
@@ -85,9 +101,6 @@ public class Clam : MonoBehaviour
     [Header("Audio & Juice")]
     [Tooltip("Audio clip played when clam snaps shut")]
     [SerializeField] private AudioClip snapShutClip;
-
-    [Tooltip("Audio clip played when clam starts opening")]
-    [SerializeField] private AudioClip openClip;
 
     [Header("Bubble VFX on Close")]
     [Tooltip("Material used for bubble particles (bubbleParticleMat)")]
@@ -112,10 +125,11 @@ public class Clam : MonoBehaviour
     [SerializeField] private string bubbleSortingLayer = "ParallaxForeground";
 
     [Tooltip("Sorting order for clam bubbles")]
-    [SerializeField] private int bubbleSortingOrder = 110;
+    [SerializeField] private int bubbleSortingOrder = 57;
 
     [Header("Component References")]
     [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private SpriteRenderer pearlRenderer;
     [SerializeField] private ClamPearl clamPearl;
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private Transform visualTransform;
@@ -125,23 +139,36 @@ public class Clam : MonoBehaviour
     private ClamState currentState = ClamState.Closed;
     private Coroutine cycleCoroutine;
     private Coroutine respawnCoroutine;
-    private Vector3 initialVisualPos;
-    private Vector3 initialPearlLocalPos = new Vector3(0f, 1.37f, 0f);
-    private bool hasCachedPearlPos = false;
-    private float closedBaselineBottom = 0f;
+    private readonly Vector3 initialPearlLocalPos = new Vector3(0f, 1.16f, 0f);
+    private readonly Vector3 initialPearlLocalScale = new Vector3(0.85f, 0.85f, 1.0f);
     private bool isStarted = false;
     private bool isClosing = false;
+    private bool snapSoundPlayed = false;
+    private bool isPearlVisualRevealed = false;
     private bool endAudioEventsSubscribed = false;
 
     // Fish / Player inside tracking
     private PlayerController insidePlayer = null;
     private readonly HashSet<Fish> insideFish = new HashSet<Fish>();
 
+    public static readonly System.Collections.Generic.List<Clam> AllClams = new System.Collections.Generic.List<Clam>();
+
     public ClamState CurrentState => currentState;
+    public PearlType CurrentPearlType => pearlType;
     public bool HasPearl => hasPearl;
     public bool IsClosing => isClosing;
     // The pearl is collectible only after the completed open state is reached.
-    public bool CanEatPearl => hasPearl && currentState == ClamState.FullyOpened;
+    public bool CanEatPearl => hasPearl && pearlType != PearlType.None && currentState == ClamState.FullyOpened;
+    public SpriteRenderer PearlRenderer => pearlRenderer;
+    public ClamPearl ClamPearl => clamPearl;
+
+    private void OnEnable()
+    {
+        if (!AllClams.Contains(this))
+        {
+            AllClams.Add(this);
+        }
+    }
 
     private void Awake()
     {
@@ -152,9 +179,20 @@ public class Clam : MonoBehaviour
 
     private void Start()
     {
+        LevelConfig cfg = LevelManager.GetCurrentConfig();
+        if (!cfg.enableClam)
+        {
+            gameObject.SetActive(false);
+            return;
+        }
+
         EnsureInitialized();
         EnsureComponents();
         EnsureBubbleSystems();
+        if (hasPearl)
+        {
+            RollRandomPearl();
+        }
         SetState(ClamState.Closed);
         isStarted = true;
         EventManager.StartListening("playerDeath", StopAudioForGameEnd);
@@ -166,6 +204,7 @@ public class Clam : MonoBehaviour
 
     private void OnDisable()
     {
+        AllClams.Remove(this);
         if (cycleCoroutine != null)
         {
             StopCoroutine(cycleCoroutine);
@@ -178,6 +217,8 @@ public class Clam : MonoBehaviour
         }
         insidePlayer = null;
         insideFish.Clear();
+        crushingFish.Clear();
+        isPlayerBeingCrushed = false;
     }
 
     private void OnDestroy()
@@ -194,15 +235,47 @@ public class Clam : MonoBehaviour
         if (audioSource != null) audioSource.Stop();
     }
 
+    private void OnValidate()
+    {
+        EnsureClamSpritesLoaded();
+        EnsurePearlSpritesLoaded();
+        EnsureAudioLoaded();
+        UpdatePearlVisual();
+    }
+
     private void EnsureInitialized()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponentInChildren<SpriteRenderer>();
-        if (clamPearl == null) clamPearl = GetComponentInChildren<ClamPearl>();
-        if (clamPearl != null && !hasCachedPearlPos)
+        if (spriteRenderer != null)
         {
-            initialPearlLocalPos = clamPearl.transform.localPosition;
-            hasCachedPearlPos = true;
+            // Clam sits on seafloor reef backdrop (50-55), behind AI fish (90), player fish (120), and hazards (95-130)
+            spriteRenderer.sortingOrder = 56;
         }
+
+        if (clamPearl == null) clamPearl = GetComponentInChildren<ClamPearl>();
+        if (clamPearl != null)
+        {
+            clamPearl.transform.localPosition = initialPearlLocalPos;
+            clamPearl.transform.localScale = initialPearlLocalScale;
+            if (pearlRenderer == null)
+            {
+                pearlRenderer = clamPearl.GetComponent<SpriteRenderer>();
+            }
+        }
+
+        if (pearlRenderer != null)
+        {
+            pearlRenderer.sortingOrder = 57;
+            if (spriteRenderer != null)
+            {
+                pearlRenderer.sortingLayerName = spriteRenderer.sortingLayerName;
+            }
+        }
+
+        EnsureClamSpritesLoaded();
+        EnsurePearlSpritesLoaded();
+        EnsureAudioLoaded();
+        UpdatePearlVisual();
 
         if (audioSource == null)
         {
@@ -211,9 +284,187 @@ public class Clam : MonoBehaviour
             {
                 audioSource = gameObject.AddComponent<AudioSource>();
                 audioSource.playOnAwake = false;
-                audioSource.spatialBlend = 0f;
             }
         }
+        if (audioSource != null)
+        {
+            audioSource.spatialBlend = 1.0f; // 3D Spatial Audio for realistic underwater distance
+            audioSource.minDistance = 6.0f;
+            audioSource.maxDistance = 40.0f;
+            audioSource.rolloffMode = AudioRolloffMode.Linear;
+            AudioSettingsManager.RouteToSfx(audioSource);
+        }
+    }
+
+    private static AudioClip s_CachedSnapShutClip = null;
+
+    public void EnsureAudioLoaded()
+    {
+        if (snapShutClip == null)
+        {
+            if (s_CachedSnapShutClip == null)
+            {
+#if UNITY_EDITOR
+                s_CachedSnapShutClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Clam_shut.mp3");
+                if (s_CachedSnapShutClip == null)
+                {
+                    s_CachedSnapShutClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/clam_shut.mp3");
+                }
+#endif
+                if (s_CachedSnapShutClip == null)
+                {
+                    s_CachedSnapShutClip = Resources.Load<AudioClip>("Clam_shut");
+                }
+                if (s_CachedSnapShutClip == null)
+                {
+                    s_CachedSnapShutClip = Resources.Load<AudioClip>("clam_shut");
+                }
+            }
+            if (s_CachedSnapShutClip != null)
+            {
+                snapShutClip = s_CachedSnapShutClip;
+            }
+        }
+    }
+
+    public void EnsureClamSpritesLoaded()
+    {
+#if UNITY_EDITOR
+        if (closedSprite == null)
+            closedSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closed.png");
+        if (fullyOpenedSprite == null)
+            fullyOpenedSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_fully_open_no_pearl.png");
+
+        if (openingFrames == null || openingFrames.Length == 0)
+        {
+            Sprite c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3__no_pearl.png");
+            if (c3 == null) c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3_no_pearl.png");
+
+            openingFrames = new Sprite[]
+            {
+                UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_1__no_pearl.png"),
+                UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_2__no_pearl.png"),
+                c3,
+                UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_fully_open_no_pearl.png")
+            };
+        }
+
+        if (closingFrames == null || closingFrames.Length == 0)
+        {
+            Sprite c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3__no_pearl.png");
+            if (c3 == null) c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3_no_pearl.png");
+
+            closingFrames = new Sprite[]
+            {
+                c3,
+                UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_2__no_pearl.png"),
+                UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_1__no_pearl.png")
+            };
+        }
+#endif
+        if (closedSprite == null) closedSprite = Resources.Load<Sprite>("clam_closed");
+        if (fullyOpenedSprite == null) fullyOpenedSprite = Resources.Load<Sprite>("clam_fully_open_no_pearl");
+    }
+
+    public void EnsurePearlSpritesLoaded()
+    {
+#if UNITY_EDITOR
+        if (normalPearlSprite == null)
+            normalPearlSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/Pearl.png");
+        if (blackPearlSprite == null)
+            blackPearlSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/Black Pearl.png");
+#endif
+        if (normalPearlSprite == null) normalPearlSprite = Resources.Load<Sprite>("Pearl");
+        if (blackPearlSprite == null) blackPearlSprite = Resources.Load<Sprite>("Black Pearl");
+    }
+
+    public void SetPearlType(PearlType type)
+    {
+        pearlType = type;
+        hasPearl = (type != PearlType.None);
+        if (!hasPearl)
+        {
+            isPearlVisualRevealed = false;
+        }
+        if (clamPearl != null)
+        {
+            clamPearl.transform.localPosition = initialPearlLocalPos;
+            clamPearl.transform.localScale = initialPearlLocalScale;
+        }
+        UpdatePearlVisual();
+    }
+
+    public void RollRandomPearl()
+    {
+        if (stayClosedWhenEmpty && pearlType == PearlType.None) return;
+        PearlType chosen = (Random.value < blackPearlChance) ? PearlType.Black : PearlType.Normal;
+        SetPearlType(chosen);
+    }
+
+    public void PreparePearlForSuction()
+    {
+        // Standalone pearl is already distinct and ready for suction
+        if (pearlRenderer != null && hasPearl && pearlType != PearlType.None)
+        {
+            isPearlVisualRevealed = true;
+            pearlRenderer.enabled = true;
+        }
+    }
+
+    public void UpdatePearlVisual()
+    {
+        if (clamPearl == null) clamPearl = GetComponentInChildren<ClamPearl>();
+        if (pearlRenderer == null && clamPearl != null)
+        {
+            pearlRenderer = clamPearl.GetComponent<SpriteRenderer>();
+        }
+
+        bool shouldShowPearl = hasPearl && pearlType != PearlType.None && isPearlVisualRevealed && currentState != ClamState.Closed;
+
+        if (pearlRenderer != null)
+        {
+            if (shouldShowPearl)
+            {
+                Sprite spriteToUse = (pearlType == PearlType.Black) ? blackPearlSprite : normalPearlSprite;
+                if (spriteToUse != null)
+                {
+                    pearlRenderer.sprite = spriteToUse;
+                }
+                pearlRenderer.enabled = true;
+            }
+            else
+            {
+                pearlRenderer.enabled = false;
+            }
+        }
+
+        if (clamPearl != null)
+        {
+            clamPearl.SetTriggerActive(CanEatPearl);
+        }
+    }
+
+    public Vector2 GetMouthWorldCenter()
+    {
+        if (spriteRenderer != null)
+        {
+            Bounds b = spriteRenderer.bounds;
+            return new Vector2(b.center.x, b.min.y + b.size.y * 0.45f);
+        }
+        return transform.TransformPoint(mouthTriggerOffset);
+    }
+
+    public Vector2 GetMouthWorldSize()
+    {
+        if (spriteRenderer != null)
+        {
+            Bounds b = spriteRenderer.bounds;
+            return new Vector2(b.size.x * 0.72f, b.size.y * 0.50f);
+        }
+        return new Vector2(
+            mouthTriggerSize.x * Mathf.Abs(transform.lossyScale.x),
+            mouthTriggerSize.y * Mathf.Abs(transform.lossyScale.y)
+        );
     }
 
     /// <summary>
@@ -221,6 +472,8 @@ public class Clam : MonoBehaviour
     /// </summary>
     public void EnsureComponents()
     {
+        EnsureInitialized();
+
         // 1. Kinematic Rigidbody2D on root so trigger callbacks reliably fire for moving fish
         Rigidbody2D rb = GetComponent<Rigidbody2D>();
         if (rb == null)
@@ -241,8 +494,20 @@ public class Clam : MonoBehaviour
             }
         }
         mouthTriggerCollider.isTrigger = true;
-        mouthTriggerCollider.offset = mouthTriggerOffset;
-        mouthTriggerCollider.size = mouthTriggerSize;
+
+        if (spriteRenderer != null)
+        {
+            Vector2 worldCenter = GetMouthWorldCenter();
+            Vector2 worldSize = GetMouthWorldSize();
+            mouthTriggerCollider.offset = transform.InverseTransformPoint(worldCenter);
+            Vector2 localSize = transform.InverseTransformVector(worldSize);
+            mouthTriggerCollider.size = new Vector2(Mathf.Abs(localSize.x), Mathf.Abs(localSize.y));
+        }
+        else
+        {
+            mouthTriggerCollider.offset = mouthTriggerOffset;
+            mouthTriggerCollider.size = mouthTriggerSize;
+        }
     }
 
     /// <summary>
@@ -264,7 +529,7 @@ public class Clam : MonoBehaviour
                 if (pearlRespawnTime > 0f)
                 {
                     yield return new WaitForSeconds(pearlRespawnTime);
-                    hasPearl = true;
+                    RollRandomPearl();
                     SetState(ClamState.Closed);
                 }
                 else
@@ -279,12 +544,12 @@ public class Clam : MonoBehaviour
             SetState(ClamState.Closed);
             yield return new WaitForSeconds(closedDuration);
 
-            // 2. Smooth Opening transition
-            PlaySound(openClip);
+            // 2. Smooth Opening transition (Opening is silent per user request; sound only plays on closing)
             isClosing = false;
             currentState = ClamState.HalfOpen;
-            UpdatePearlTrigger();
-            yield return PlaySpriteFrames(openingFrames, halfOpenDuration);
+            isPearlVisualRevealed = false;
+            UpdatePearlVisual();
+            yield return PlayOpeningFramesRoutine(halfOpenDuration);
 
             // 3. Fully Opened: keep the clam open for as long as the pearl remains.
             isClosing = false;
@@ -296,7 +561,7 @@ public class Clam : MonoBehaviour
 
             // 4. Closing transition (Half Open warning before snap shut)
             StartClosingTransition();
-            yield return PlayClosingFramesIfEmpty();
+            yield return PlayClosingFrames();
 
             // 5. Snap Shut
             yield return StartCoroutine(SnapShutRoutine());
@@ -312,7 +577,8 @@ public class Clam : MonoBehaviour
         bool wasFullyOpened = currentState == ClamState.FullyOpened;
         isClosing = wasFullyOpened;
         currentState = ClamState.HalfOpen;
-        UpdatePearlTrigger();
+        isPearlVisualRevealed = false;
+        UpdatePearlVisual();
 
         if (isClosing)
         {
@@ -321,12 +587,20 @@ public class Clam : MonoBehaviour
         }
     }
 
+    private void TriggerSnapSound()
+    {
+        if (snapSoundPlayed) return;
+        snapSoundPlayed = true;
+        PlaySound(snapShutClip);
+    }
+
     /// <summary>
     /// Snaps the clam shut immediately with tactile timing, sound, squash juice, and lethal trap checks.
     /// </summary>
     private IEnumerator SnapShutRoutine()
     {
-        PlaySound(snapShutClip);
+        TriggerSnapSound();
+        snapSoundPlayed = false;
 
         // Snap to closed state
         SetState(ClamState.Closed);
@@ -363,11 +637,8 @@ public class Clam : MonoBehaviour
         }
 
         // 2. Physical OverlapBox check to eliminate any possibility of missed trigger exit timing
-        Vector2 worldCenter = transform.TransformPoint(mouthTriggerOffset);
-        Vector2 worldSize = new Vector2(
-            mouthTriggerSize.x * Mathf.Abs(transform.lossyScale.x),
-            mouthTriggerSize.y * Mathf.Abs(transform.lossyScale.y)
-        );
+        Vector2 worldCenter = GetMouthWorldCenter();
+        Vector2 worldSize = GetMouthWorldSize();
 
         Collider2D[] overlaps = Physics2D.OverlapBoxAll(worldCenter, worldSize, transform.eulerAngles.z);
         foreach (var col in overlaps)
@@ -382,18 +653,68 @@ public class Clam : MonoBehaviour
         }
     }
 
+    private readonly HashSet<Fish> crushingFish = new HashSet<Fish>();
+    private bool isPlayerBeingCrushed = false;
+
     private void KillPlayer(PlayerController player)
     {
-        if (player == null || !player.IsAlive) return;
+        if (player == null || !player.IsAlive || isPlayerBeingCrushed) return;
+        if (PlayerAbilitySystem.IsPlayerInvulnerable) return;
 
-        Debug.Log("<color=red>[Clam] Player was crushed inside the clam!</color>");
+        isPlayerBeingCrushed = true;
+        insidePlayer = null;
 
-        // Audio & bubble feedback
+        StartCoroutine(ShrinkAndCrushPlayerRoutine(player));
+    }
+
+    private IEnumerator ShrinkAndCrushPlayerRoutine(PlayerController player)
+    {
+        if (player == null) yield break;
+
+        Debug.Log("<color=red>[Clam] Player was caught and crushed inside closing clam!</color>");
+
+        // 1. Lock player movement & disable colliders
+        player.TerminateMovement();
+        Collider2D[] allCols = player.GetComponentsInChildren<Collider2D>();
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = false;
+        }
+
+        // 2. Audio & bubble feedback
         PlaySound(snapShutClip);
         EmitCloseBubbles();
 
-        // Trigger official player death sequence
-        player.Death();
+        // 3. Smoothly shrink player down into the clam center as it shuts
+        Vector3 initialScale = player.transform.localScale;
+        Vector3 startPos = player.transform.position;
+        Vector3 targetPos = GetMouthWorldCenter();
+
+        float duration = Mathf.Max(0.28f, snapShutDuration);
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            if (player == null) break;
+
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float ease = Mathf.SmoothStep(0f, 1f, t);
+
+            player.transform.localScale = Vector3.Lerp(initialScale, Vector3.zero, ease);
+            player.transform.position = Vector3.Lerp(startPos, targetPos, ease * 0.75f);
+
+            yield return null;
+        }
+
+        if (player != null)
+        {
+            player.transform.localScale = Vector3.zero;
+            Sprite clamSp = GetComponentInChildren<SpriteRenderer>()?.sprite;
+            player.Death(clamSp);
+        }
+
+        isPlayerBeingCrushed = false;
     }
 
     /// <summary>
@@ -413,11 +734,8 @@ public class Clam : MonoBehaviour
         }
 
         // 2. OverlapBox verification for any newly entered fish
-        Vector2 worldCenter = transform.TransformPoint(mouthTriggerOffset);
-        Vector2 worldSize = new Vector2(
-            mouthTriggerSize.x * Mathf.Abs(transform.lossyScale.x),
-            mouthTriggerSize.y * Mathf.Abs(transform.lossyScale.y)
-        );
+        Vector2 worldCenter = GetMouthWorldCenter();
+        Vector2 worldSize = GetMouthWorldSize();
 
         Collider2D[] overlaps = Physics2D.OverlapBoxAll(worldCenter, worldSize, transform.eulerAngles.z);
         foreach (var col in overlaps)
@@ -434,12 +752,70 @@ public class Clam : MonoBehaviour
     private void KillFish(Fish fish)
     {
         if (fish == null || fish.IsDead || !fish.gameObject.activeInHierarchy) return;
+        if (crushingFish.Contains(fish)) return;
 
-        Debug.Log($"<color=orange>[Clam] AI fish {fish.name} was crushed by closing clam!</color>");
-
-        fish.PlayEatEffect();
-        fish.Die();
+        crushingFish.Add(fish);
         insideFish.Remove(fish);
+
+        StartCoroutine(ShrinkAndCrushFishRoutine(fish));
+    }
+
+    private IEnumerator ShrinkAndCrushFishRoutine(Fish fish)
+    {
+        if (fish == null) yield break;
+
+        Debug.Log($"<color=orange>[Clam] AI fish {fish.name} is being smoothly crushed by closing clam!</color>");
+
+        // 1. Immediately disable AI, physics velocity and colliders so it stays trapped inside
+        fish.IsDead = true; // Prevents being eaten by other predators during shrinking
+        var ai = fish.GetComponent<FishAI>();
+        if (ai != null) ai.enabled = false;
+        var mv = fish.GetComponent<FishMovement>();
+        if (mv != null) mv.enabled = false;
+
+        Rigidbody2D rb = fish.GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.simulated = false;
+        }
+
+        Collider2D[] allCols = fish.GetComponentsInChildren<Collider2D>();
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = false;
+        }
+
+        // 2. Smoothly shrink the fish scale down to 0 while gently drawing it into the clam center
+        Vector3 initialScale = fish.transform.localScale;
+        Vector3 startPos = fish.transform.position;
+        Vector3 targetPos = GetMouthWorldCenter();
+
+        float duration = Mathf.Max(0.26f, snapShutDuration);
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            if (fish == null || !fish.gameObject.activeInHierarchy) break;
+
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float ease = Mathf.SmoothStep(0f, 1f, t);
+
+            fish.transform.localScale = Vector3.Lerp(initialScale, Vector3.zero, ease);
+            fish.transform.position = Vector3.Lerp(startPos, targetPos, ease * 0.75f);
+
+            yield return null;
+        }
+
+        if (fish != null)
+        {
+            fish.transform.localScale = Vector3.zero;
+            fish.PlayEatEffect();
+            fish.Die();
+        }
+
+        crushingFish.Remove(fish);
     }
 
     #region Trigger Detection
@@ -525,13 +901,28 @@ public class Clam : MonoBehaviour
         ClamState previousState = currentState;
         currentState = newState;
 
+        if (newState == ClamState.Closed)
+        {
+            isPearlVisualRevealed = false;
+        }
+        else if (newState == ClamState.FullyOpened)
+        {
+            isPearlVisualRevealed = true;
+        }
+
         Sprite targetSprite = GetSpriteForState(currentState);
         if (spriteRenderer != null && targetSprite != null)
         {
             spriteRenderer.sprite = targetSprite;
         }
 
-        UpdatePearlTrigger();
+        UpdatePearlVisual();
+
+        if (newState == ClamState.Closed && clamPearl != null)
+        {
+            clamPearl.transform.localPosition = initialPearlLocalPos;
+            clamPearl.transform.localScale = initialPearlLocalScale;
+        }
 
         // Emit small bubbles from each side of the clam when closing
         if (isStarted && previousState != ClamState.Closed && newState == ClamState.Closed)
@@ -548,16 +939,10 @@ public class Clam : MonoBehaviour
                 return closedSprite;
 
             case ClamState.HalfOpen:
-                // Transition frames are played by PlaySpriteFrames; this is just a fallback.
                 return closedSprite;
 
             case ClamState.FullyOpened:
-                // Last frame of openingFrames is the fully-open-with-pearl sprite.
-                // After pearl eaten we show fullyOpenedEmptySprite.
-                if (!hasPearl && fullyOpenedEmptySprite != null) return fullyOpenedEmptySprite;
-                if (openingFrames != null && openingFrames.Length > 0)
-                    return openingFrames[openingFrames.Length - 1];
-                return closedSprite;
+                return fullyOpenedSprite != null ? fullyOpenedSprite : closedSprite;
 
             default:
                 return closedSprite;
@@ -584,32 +969,45 @@ public class Clam : MonoBehaviour
         }
     }
 
-    private IEnumerator PlayClosingFramesIfEmpty()
+    private IEnumerator PlayOpeningFramesRoutine(float duration)
     {
-        if (hasPearl || closingEmptyFrames == null || closingEmptyFrames.Length == 0)
+        if (openingFrames == null || openingFrames.Length == 0 || spriteRenderer == null)
+        {
+            yield return new WaitForSeconds(duration);
+            yield break;
+        }
+
+        float frameDuration = (animFps > 0f) ? (1f / animFps) : (duration / openingFrames.Length);
+        for (int i = 0; i < openingFrames.Length; i++)
+        {
+            Sprite frame = openingFrames[i];
+            if (frame != null)
+            {
+                spriteRenderer.sprite = frame;
+            }
+
+            // Only reveal pearl on the last frames when the shell is almost fully open
+            bool almostOpen = (i >= openingFrames.Length - 2);
+            if (isPearlVisualRevealed != almostOpen)
+            {
+                isPearlVisualRevealed = almostOpen;
+                UpdatePearlVisual();
+            }
+
+            yield return new WaitForSeconds(frameDuration);
+        }
+    }
+
+    private IEnumerator PlayClosingFrames()
+    {
+        TriggerSnapSound();
+        if (closingFrames == null || closingFrames.Length == 0)
         {
             yield return new WaitForSeconds(closingHalfDuration);
             yield break;
         }
 
-        yield return PlaySpriteFrames(closingEmptyFrames, closingHalfDuration);
-    }
-
-    /// <summary>
-    /// Updates the position and enabled state of the pearl trigger collider.
-    /// </summary>
-    private void UpdatePearlTrigger()
-    {
-        if (clamPearl == null) return;
-
-        bool active = CanEatPearl;
-        clamPearl.SetTriggerActive(active);
-
-        if (active)
-        {
-            // Positioned inside the open mouth cavity above the bottom hinge
-            clamPearl.transform.localPosition = initialPearlLocalPos;
-        }
+        yield return PlaySpriteFrames(closingFrames, closingHalfDuration);
     }
 
     /// <summary>
@@ -620,31 +1018,25 @@ public class Clam : MonoBehaviour
     {
         if (!CanEatPearl) return;
 
-        hasPearl = false;
+        bool isBlack = (pearlType == PearlType.Black);
+        int earnedXp = isBlack ? blackPearlXp : normalPearlXp;
 
-        // Disable pearl trigger AND hide the pearl sprite immediately
+        hasPearl = false;
+        isPearlVisualRevealed = false;
+
+        // Hide pearl visual and trigger immediately
+        UpdatePearlVisual();
         if (clamPearl != null)
         {
-            clamPearl.SetTriggerActive(false);
-            // Hide the pearl visual instantly — no delay
-            SpriteRenderer pearlRenderer = clamPearl.GetComponent<SpriteRenderer>();
-            if (pearlRenderer != null) pearlRenderer.enabled = false;
-            // Also deactivate the GameObject so it's fully gone
-            clamPearl.gameObject.SetActive(false);
-        }
-
-        // Immediately show the "fully open, no pearl" shell sprite
-        // so the player sees the empty clam before it starts closing.
-        if (spriteRenderer != null && fullyOpenedEmptySprite != null)
-        {
-            spriteRenderer.sprite = fullyOpenedEmptySprite;
+            clamPearl.transform.localPosition = initialPearlLocalPos;
+            clamPearl.transform.localScale = initialPearlLocalScale;
         }
 
         // Award player XP, score, bite animation, VFX, and floating text
         Vector3 pearlWorldPos = (clamPearl != null) ? clamPearl.transform.position : transform.position;
         if (player != null)
         {
-            player.EatPearl(pearlXp, pearlWorldPos);
+            player.EatPearl(earnedXp, pearlWorldPos, isBlack);
         }
 
         // Stop the natural cycle and close immediately. The clam remains shut while
@@ -676,7 +1068,7 @@ public class Clam : MonoBehaviour
         if (currentState == ClamState.FullyOpened)
         {
             StartClosingTransition();
-            yield return PlayClosingFramesIfEmpty();
+            yield return PlayClosingFrames();
         }
         yield return StartCoroutine(SnapShutRoutine());
         isClosing = false;
@@ -687,16 +1079,8 @@ public class Clam : MonoBehaviour
             yield return new WaitForSeconds(pearlRespawnTime);
         }
 
-        hasPearl = true;
-
-        // Re-enable the pearl object that was hidden when it was eaten
-        if (clamPearl != null && !clamPearl.gameObject.activeSelf)
-        {
-            clamPearl.gameObject.SetActive(true);
-            SpriteRenderer pearlRenderer = clamPearl.GetComponent<SpriteRenderer>();
-            if (pearlRenderer != null) pearlRenderer.enabled = true;
-            clamPearl.SetTriggerActive(false); // Trigger re-enabled by UpdatePearlTrigger when fully open
-        }
+        RollRandomPearl();
+        UpdatePearlVisual();
 
         SetState(ClamState.Closed);
         cycleCoroutine = StartCoroutine(ClamCycleRoutine());
@@ -706,8 +1090,6 @@ public class Clam : MonoBehaviour
     {
         if (visualTransform == null) yield break;
 
-        // Capture the ACTUAL current scale — do NOT hardcode Vector3.one
-        // because the prefab may have a non-1 scale set in the Inspector.
         Vector3 originalScale = visualTransform.localScale;
         Vector3 squashed = new Vector3(originalScale.x * 1.05f, originalScale.y * 0.95f, originalScale.z);
 
@@ -738,6 +1120,11 @@ public class Clam : MonoBehaviour
     private void PlaySound(AudioClip clip)
     {
         if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
+        if (clip == null)
+        {
+            EnsureAudioLoaded();
+            clip = snapShutClip;
+        }
         if (clip != null && audioSource != null && AudioSettingsManager.IsSfxEnabled)
         {
             audioSource.PlayOneShot(clip, 1.0f);
@@ -874,12 +1261,9 @@ public class Clam : MonoBehaviour
     private void OnDrawGizmosSelected()
     {
         Gizmos.color = isClosing ? Color.red : (CanEatPearl ? Color.green : Color.yellow);
-        Vector3 center = transform.TransformPoint(mouthTriggerOffset);
-        Vector3 size = new Vector3(
-            mouthTriggerSize.x * Mathf.Abs(transform.lossyScale.x),
-            mouthTriggerSize.y * Mathf.Abs(transform.lossyScale.y),
-            0.1f
-        );
+        Vector3 center = GetMouthWorldCenter();
+        Vector2 size2D = GetMouthWorldSize();
+        Vector3 size = new Vector3(size2D.x, size2D.y, 0.1f);
         Gizmos.DrawWireCube(center, size);
     }
 }

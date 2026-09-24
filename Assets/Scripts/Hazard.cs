@@ -5,6 +5,8 @@ using System.Collections.Generic;
 
 public class Hazard : MonoBehaviour
 {
+    private const float MoveAudioNearVolume = 0.08f;
+    private const float MoveAudioFarVolume = 0.015f;
     private static Shader cachedParticleShader;
     private static Dictionary<Texture2D, Material> cachedParticleMaterials = new Dictionary<Texture2D, Material>();
     
@@ -37,6 +39,7 @@ public class Hazard : MonoBehaviour
 
     private AudioSource audioSource;
     private AudioSource[] audioSources;
+    private Transform reelAudioTransform;
     private SpriteRenderer spriteRenderer; // Cached reference
     private LineRenderer cableLine;
     private bool retractSfxPlayed = false;
@@ -182,18 +185,13 @@ public class Hazard : MonoBehaviour
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
         EnsureCableLine();
-        if (audioSource == null) audioSource = GetComponent<AudioSource>();
-        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
-        audioSource.playOnAwake = false;
-        audioSource.loop = true;
-        audioSource.spatialBlend = 0f;
-        audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
-        audioSources = new AudioSource[] { audioSource };
+        EnsureAudioSource();
     }
 
     private void Start()
     {
         EnsureCableLine();
+        EnsureAudioSource();
 
         // Ensure collider is configured if needed (moved from Awake to allow property setting)
         ConfigureCollider();
@@ -257,6 +255,75 @@ public class Hazard : MonoBehaviour
         
         ConfigureCollider();
         UpdateCableLine();
+        UpdateReelAudioPosition();
+    }
+
+    private void EnsureAudioSource()
+    {
+        if (reelAudioTransform == null)
+        {
+            Transform parentTarget = (linkedBoat != null) ? linkedBoat.transform : null;
+            string anchorName = "ReelAudioAnchor_" + GetInstanceID();
+            Transform existing = (parentTarget != null) ? parentTarget.Find(anchorName) : null;
+            if (existing != null)
+            {
+                reelAudioTransform = existing;
+            }
+            else
+            {
+                GameObject anchorObj = new GameObject(anchorName);
+                if (parentTarget != null)
+                {
+                    anchorObj.transform.SetParent(parentTarget, true);
+                }
+                reelAudioTransform = anchorObj.transform;
+            }
+            reelAudioTransform.position = GetReelAudioWorldPosition();
+        }
+
+        if (audioSource == null && reelAudioTransform != null)
+        {
+            audioSource = reelAudioTransform.GetComponent<AudioSource>();
+            if (audioSource == null) audioSource = reelAudioTransform.gameObject.AddComponent<AudioSource>();
+            audioSource.playOnAwake = false;
+            audioSource.loop = true;
+            audioSource.spatialBlend = 1.0f; // 3D Spatial Audio located on the boat
+            audioSource.minDistance = 6.0f;
+            audioSource.maxDistance = 45.0f;
+            audioSource.rolloffMode = AudioRolloffMode.Linear;
+            audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            AudioSettingsManager.RouteToSfx(audioSource);
+        }
+
+        // Clean up any old root AudioSource on the bait if present so it doesn't play from underwater
+        AudioSource rootAudio = GetComponent<AudioSource>();
+        if (rootAudio != null && rootAudio != audioSource)
+        {
+            rootAudio.Stop();
+            rootAudio.enabled = false;
+        }
+
+        if (audioSource != null)
+        {
+            audioSources = new AudioSource[] { audioSource };
+        }
+
+        UpdateReelAudioPosition();
+    }
+
+    public Vector3 GetReelAudioWorldPosition()
+    {
+        float surfaceY = (linkedBoat != null) ? linkedBoat.WaterSurfaceY : 15.0f;
+        float boatY = (linkedBoat != null) ? linkedBoat.transform.position.y : (surfaceY + 1.8f);
+        return new Vector3(transform.position.x, boatY, 0f);
+    }
+
+    private void UpdateReelAudioPosition()
+    {
+        if (reelAudioTransform != null)
+        {
+            reelAudioTransform.position = GetReelAudioWorldPosition();
+        }
     }
 
     private void EnsureCableLine()
@@ -335,6 +402,7 @@ public class Hazard : MonoBehaviour
     private void LateUpdate()
     {
         UpdateCableLine();
+        UpdateReelAudioPosition();
     }
 
     public void SetTargetHookDepth(float targetHookWorldY)
@@ -407,12 +475,14 @@ public class Hazard : MonoBehaviour
         box.isTrigger = true; // Ensure it's a trigger for OnTriggerEnter in Player
     }
 
-
-
     private void OnDestroy()
     {
         AudioSettingsManager.OnSfxSettingChanged -= OnSfxSettingChanged;
         UnsubscribeFromEndAudioEvents();
+        if (reelAudioTransform != null && reelAudioTransform.gameObject != null)
+        {
+            Destroy(reelAudioTransform.gameObject);
+        }
     }
 
     private void SubscribeToEndAudioEvents()
@@ -482,20 +552,22 @@ public class Hazard : MonoBehaviour
 
         if (currentPaused) return;
 
-        // Dynamic distance attenuation & stereo panning based on true bait/hook world position
+        UpdateReelAudioPosition();
+
+        // Dynamic distance attenuation & stereo panning based on boat/reel world position (where the human operates the rod)
         if (audioSource != null && GameManager.instance != null && GameManager.instance.playerGameObject != null)
         {
-            Vector3 baitPos = GetBaitWorldPosition();
+            Vector3 reelPos = GetReelAudioWorldPosition();
             Vector3 playerPos = GameManager.instance.playerGameObject.transform.position;
-            float dist = Vector2.Distance(baitPos, playerPos);
-            float maxDist = 22f; 
+            float dist = Vector2.Distance(reelPos, playerPos);
+            float maxDist = 45f; 
             float normDist = Mathf.Clamp01(dist / maxDist);
-            // Smooth attenuation from 0.80f close up down to 0.12f far away
-            float volume = Mathf.Lerp(0.80f, 0.12f, normDist * normDist);
+            // Keep the rod's pull/drop loop audible without overpowering the mix.
+            float volume = Mathf.Lerp(MoveAudioNearVolume, MoveAudioFarVolume, normDist);
             audioSource.volume = volume;
 
             // Directional stereo panning based on horizontal offset relative to the player
-            float pan = Mathf.Clamp((baitPos.x - playerPos.x) / 12.0f, -0.80f, 0.80f);
+            float pan = Mathf.Clamp((reelPos.x - playerPos.x) / 12.0f, -0.80f, 0.80f);
             audioSource.panStereo = pan;
         }
 
@@ -795,6 +867,8 @@ public class Hazard : MonoBehaviour
         if (bubbleMaterial == null) bubbleMaterial = mat;
         if (bubbleTexture == null) bubbleTexture = tex;
 
+        EnsureAudioSource();
+
         // Ensure clean state when spawned from pool
         ResetHazardState();
         
@@ -806,6 +880,7 @@ public class Hazard : MonoBehaviour
 
     private void StartReelSound()
     {
+        EnsureAudioSource();
         if (audioSource == null) return;
         if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
@@ -813,6 +888,7 @@ public class Hazard : MonoBehaviour
         {
             audioSource.clip = moveSound;
             audioSource.loop = true;
+            audioSource.volume = MoveAudioNearVolume;
             if (!audioSource.isPlaying && AudioSettingsManager.IsSfxEnabled && (GameManager.instance == null || !GameManager.Paused))
             {
                 audioSource.Play();
@@ -832,5 +908,4 @@ public class Hazard : MonoBehaviour
     {
         StopReelSound();
     }
-
 }

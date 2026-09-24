@@ -8,7 +8,7 @@ public class FishermanBoat : MonoBehaviour
     public enum BoatState { Arriving, StoppedWaiting, Fishing, DepartWaiting, Departing }
 
     [Header("Boat Appearance")]
-    [SerializeField] private float boatScale = 0.92f;
+    [SerializeField] private float boatScale = 1.2253f;
     [Tooltip("How deep the lower hull dips below the top camera edge into the water")]
     [SerializeField] private float submergenceDepth = 1.85f;
     [SerializeField] private float bobFrequency = 2.2f;
@@ -62,9 +62,9 @@ public class FishermanBoat : MonoBehaviour
 
     [Header("Engine Audio Settings")]
     [SerializeField] private AudioClip engineDriveClip;
-    [SerializeField] private float maxEngineVolume = 0.85f;
-    [SerializeField] private float minEngineDistance = 5.0f;
-    [SerializeField] private float maxEngineDistance = 24.0f;
+    [SerializeField] private float maxEngineVolume = 1.0f;
+    [SerializeField] private float minEngineDistance = 10.0f;
+    [SerializeField] private float maxEngineDistance = 45.0f;
 
     private AudioSource engineAudioSource;
     private static AudioClip s_CachedEngineClip = null;
@@ -217,9 +217,15 @@ public class FishermanBoat : MonoBehaviour
             }
             engineAudioSource.loop = true;
             engineAudioSource.playOnAwake = false;
-            engineAudioSource.spatialBlend = 0.0f; // 2D custom spatial distance attenuation
+            engineAudioSource.spatialBlend = 1.0f; // 3D Spatial Audio
+            engineAudioSource.minDistance = minEngineDistance;
+            engineAudioSource.maxDistance = maxEngineDistance;
+            engineAudioSource.rolloffMode = AudioRolloffMode.Linear;
+            engineAudioSource.dopplerLevel = 0.3f;
+            engineAudioSource.spread = 45f;
             engineAudioSource.volume = 0f;
             engineAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            AudioSettingsManager.RouteToSfx(engineAudioSource);
             if (clipToUse.loadState != AudioDataLoadState.Loaded && clipToUse.loadState != AudioDataLoadState.Loading)
             {
                 clipToUse.LoadAudioData();
@@ -1062,8 +1068,12 @@ public class FishermanBoat : MonoBehaviour
 
     private Transform GetPlayerTransform()
     {
-        if (playerTransform != null && playerTransform.gameObject.activeInHierarchy)
-            return playerTransform;
+        try
+        {
+            if (playerTransform != null && playerTransform && playerTransform.gameObject.activeInHierarchy)
+                return playerTransform;
+        }
+        catch { playerTransform = null; }
 
         if (GridController.Instance != null && GridController.Instance.Player != null)
         {
@@ -1072,11 +1082,15 @@ public class FishermanBoat : MonoBehaviour
             return playerTransform;
         }
 
-        if (s_GlobalPlayerTransform != null && s_GlobalPlayerTransform.gameObject.activeInHierarchy)
+        try
         {
-            playerTransform = s_GlobalPlayerTransform;
-            return playerTransform;
+            if (s_GlobalPlayerTransform != null && s_GlobalPlayerTransform && s_GlobalPlayerTransform.gameObject.activeInHierarchy)
+            {
+                playerTransform = s_GlobalPlayerTransform;
+                return playerTransform;
+            }
         }
+        catch { s_GlobalPlayerTransform = null; }
 
         PlayerController pc = FindFirstObjectByType<PlayerController>();
         if (pc != null)
@@ -1155,13 +1169,13 @@ public class FishermanBoat : MonoBehaviour
                 }
                 else
                 {
-                    // Smooth quadratic distance rolloff so deep diving fades to complete silence
+                    // Smooth linear distance rolloff over extended range
                     float t = (dist - minEngineDistance) / (maxEngineDistance - minEngineDistance);
-                    targetAudioVolume = (1f - t) * (1f - t) * maxEngineVolume;
+                    targetAudioVolume = (1f - t) * maxEngineVolume;
                 }
 
                 // Dynamic stereo panning based on horizontal offset relative to the player
-                float pan = Mathf.Clamp((transform.position.x - pt.position.x) / 14.0f, -0.85f, 0.85f);
+                float pan = Mathf.Clamp((transform.position.x - pt.position.x) / 16.0f, -0.85f, 0.85f);
                 engineAudioSource.panStereo = pan;
             }
             else

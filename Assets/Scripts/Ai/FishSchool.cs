@@ -40,18 +40,139 @@ public class FishSchool : MonoBehaviour
     [Header("Group Tracking & Reward")]
     private readonly HashSet<Fish> registeredFish = new HashSet<Fish>();
     private readonly HashSet<Fish> remainingFish = new HashSet<Fish>();
+    private static readonly System.Predicate<Fish> s_DeadOrInactiveFilter = f => f == null || !f.gameObject.activeInHierarchy || f.IsDead;
+    private float cleanupTimer = 0f;
     private bool isDisqualified = false;
     private bool isCleared = false;
 
     // Bonus is dynamically set to exactly 1 extra school fish's XP
     private int singleFishXp = 8;
 
+    public List<Fish> RegisteredFishList => new List<Fish>(registeredFish);
+
+    public enum SchoolFormationType
+    {
+        Cluster,
+        Wedge,
+        StaggeredStream,
+        Diamond,
+        Crescent
+    }
+
+    /// <summary>
+    /// Generates organic, randomized formation offsets for school fish with natural spacing.
+    /// Never returns a rigid, fixed identical shape across spawns.
+    /// </summary>
+    public static Vector2[] GenerateSchoolFormation(int count, bool movingRight)
+    {
+        Vector2[] offsets = new Vector2[count];
+        if (count <= 0) return offsets;
+
+        float trailDir = movingRight ? -1f : 1f;
+
+        // Choose a random formation archetype for each school
+        SchoolFormationType type = (SchoolFormationType)Random.Range(0, 5);
+
+        switch (type)
+        {
+            case SchoolFormationType.Cluster:
+                // Organic tight cluster with natural micro-spacing
+                offsets[0] = new Vector2(0f, Random.Range(-0.15f, 0.15f));
+                for (int i = 1; i < count; i++)
+                {
+                    Vector2 candidate = Vector2.zero;
+                    bool valid = false;
+                    for (int attempt = 0; attempt < 25; attempt++)
+                    {
+                        float angle = Random.Range(0f, Mathf.PI * 2f);
+                        float dist = Random.Range(0.65f, 1.25f);
+                        candidate = new Vector2(
+                            trailDir * (Mathf.Abs(Mathf.Cos(angle)) * dist * 1.05f + 0.18f * i),
+                            Mathf.Sin(angle) * dist * 0.75f
+                        );
+
+                        valid = true;
+                        for (int j = 0; j < i; j++)
+                        {
+                            if (Vector2.Distance(candidate, offsets[j]) < 0.60f)
+                            {
+                                valid = false;
+                                break;
+                            }
+                        }
+                        if (valid) break;
+                    }
+                    offsets[i] = candidate;
+                }
+                break;
+
+            case SchoolFormationType.Wedge:
+                // Tight, asymmetrical natural V-wedge
+                offsets[0] = new Vector2(0f, Random.Range(-0.10f, 0.10f));
+                float upperSpread = Random.Range(0.48f, 0.68f);
+                float lowerSpread = Random.Range(0.48f, 0.68f);
+                for (int i = 1; i < count; i++)
+                {
+                    bool isUpper = (i % 2 == 1);
+                    int tier = (i + 1) / 2;
+                    float forwardOffset = trailDir * (tier * Random.Range(0.65f, 0.88f) + Random.Range(-0.08f, 0.08f));
+                    float sideOffset = isUpper
+                        ? (tier * upperSpread + Random.Range(-0.10f, 0.10f))
+                        : (-tier * lowerSpread + Random.Range(-0.10f, 0.10f));
+                    offsets[i] = new Vector2(forwardOffset, sideOffset);
+                }
+                break;
+
+            case SchoolFormationType.StaggeredStream:
+                // Tight drafting stream
+                offsets[0] = new Vector2(0f, Random.Range(-0.10f, 0.10f));
+                for (int i = 1; i < count; i++)
+                {
+                    float xDist = trailDir * (i * Random.Range(0.70f, 0.95f));
+                    float ySign = (i % 2 == 1) ? 1f : -1f;
+                    float yDist = ySign * Random.Range(0.22f, 0.45f) + Mathf.Sin(i * 1.3f) * 0.12f;
+                    offsets[i] = new Vector2(xDist, yDist);
+                }
+                break;
+
+            case SchoolFormationType.Diamond:
+                offsets[0] = new Vector2(0f, Random.Range(-0.08f, 0.08f)); // Leader
+                if (count > 1) offsets[1] = new Vector2(trailDir * Random.Range(0.70f, 0.90f), Random.Range(0.45f, 0.65f)); // Top flank
+                if (count > 2) offsets[2] = new Vector2(trailDir * Random.Range(0.70f, 0.90f), -Random.Range(0.45f, 0.65f)); // Bottom flank
+                if (count > 3) offsets[3] = new Vector2(trailDir * Random.Range(1.40f, 1.70f), Random.Range(-0.12f, 0.12f)); // Center tail
+                if (count > 4) offsets[4] = new Vector2(trailDir * Random.Range(2.05f, 2.35f), Random.Range(-0.18f, 0.18f)); // Rear guard
+                break;
+
+            case SchoolFormationType.Crescent:
+            default:
+                // Tight curved sweeping arc
+                float arcRadius = Random.Range(1.4f, 2.0f);
+                float arcAngleSpread = Random.Range(45f, 65f) * Mathf.Deg2Rad;
+                for (int i = 0; i < count; i++)
+                {
+                    float t = (count > 1) ? ((float)i / (count - 1) - 0.5f) : 0f;
+                    float angle = t * arcAngleSpread;
+                    float x = trailDir * (arcRadius * (1f - Mathf.Cos(angle)) + Random.Range(0f, 0.18f));
+                    float y = Mathf.Sin(angle) * arcRadius * 0.85f + Random.Range(-0.10f, 0.10f);
+                    offsets[i] = new Vector2(x, y);
+                }
+                break;
+        }
+
+        return offsets;
+    }
+
+    public bool MovingRight => movingRight;
+    public Vector2 TravelDirection { get; private set; } = Vector2.right;
+    public float SchoolSpeed { get; set; } = 2.8f;
+
     public void Initialize(bool startRight)
     {
         movingRight = startRight;
-        PickNewDestination();
-        // Auto-destroy school controller after 60 seconds (fish should be gone by then)
-        Destroy(gameObject, 60f);
+        TravelDirection = movingRight ? Vector2.right : Vector2.left;
+        CurrentDestination = (Vector2)transform.position + TravelDirection * 18f;
+        // Auto-destroy school controller after 75 seconds (fish should be cleared or gone by then)
+        Destroy(gameObject, 75f);
     }
 
     public void RegisterFish(Fish fish)
@@ -64,6 +185,25 @@ public class FishSchool : MonoBehaviour
         {
             singleFishXp = fish.Xp;
         }
+    }
+
+    public Vector2 GetSchoolCentroid()
+    {
+        Vector2 sum = Vector2.zero;
+        int count = 0;
+        foreach (var fish in remainingFish)
+        {
+            if (fish != null && fish.gameObject.activeInHierarchy && !fish.IsDead)
+            {
+                sum += (Vector2)fish.transform.position;
+                count++;
+            }
+        }
+        if (count > 0)
+        {
+            return sum / count;
+        }
+        return (Vector2)transform.position;
     }
 
     public void OnFishEatenByPlayer(Fish fish, Vector3 eatPosition)
@@ -108,36 +248,54 @@ public class FishSchool : MonoBehaviour
 
     private void Update()
     {
-        decisionTimer -= Time.deltaTime;
-        if (decisionTimer <= 0)
+        // 1. Clean up inactive or dead fish periodically (every 0.25s) with cached static predicate to eliminate GC allocations
+        cleanupTimer -= Time.deltaTime;
+        if (cleanupTimer <= 0f)
         {
-            PickNewDestination();
+            cleanupTimer = 0.25f;
+            remainingFish.RemoveWhere(s_DeadOrInactiveFilter);
+            if (remainingFish.Count == 0 && registeredFish.Count > 0)
+            {
+                Destroy(gameObject, 0.1f);
+                return;
+            }
         }
-    }
-
-    private void PickNewDestination()
-    {
-        // NATURAL MOVEMENT:
-        // Instead of swimming straight to the edge, pick a random point within the arena
-        // This creates a "wandering" school effect.
-        
-        float targetX = Random.Range(minX, maxX);
-        float targetY = Random.Range(minY, maxY);
-        
-        // Add some bias to keep moving in the general direction (Left or Right) initially
-        // but allow turning back.
-        if (Random.value < 0.7f) // 70% chance to continue in current "flow"
+        else if (remainingFish.Count == 0 && registeredFish.Count > 0)
         {
-             if (movingRight) targetX = Random.Range(0f, maxX);
-             else targetX = Random.Range(minX, 0f);
+            Destroy(gameObject, 0.1f);
+            return;
         }
 
-        CurrentDestination = new Vector2(targetX, targetY);
+        // 2. Track actual live centroid of remaining schoolmates
+        Vector2 centroid = GetSchoolCentroid();
 
-        // Update direction based on new target (for logic use, though FishAI handles rotation)
-        movingRight = (targetX > transform.position.x);
+        // 3. Gentle vertical wave motion across the arena
+        float waveY = Mathf.Sin(Time.time * 0.85f) * 0.22f;
+        Vector2 forwardDir = new Vector2(movingRight ? 1f : -1f, waveY).normalized;
+        TravelDirection = forwardDir;
 
-        // Re-evaluate frequently (3-6 seconds) to change course
-        decisionTimer = Random.Range(3f, 6f);
+        // 4. Smooth continuous advance: school anchor moves forward steadily, tethered smoothly to fish centroid
+        Vector2 desiredPos = centroid + forwardDir * 0.4f;
+        Vector3 step = (Vector3)Vector2.MoveTowards(transform.position, desiredPos, 3.5f * Time.deltaTime);
+        Vector3 advance = (Vector3)(forwardDir * SchoolSpeed * Time.deltaTime);
+        transform.position = step + advance;
+
+        // Keep anchor within vertical arena bounds
+        Vector3 clampedPos = transform.position;
+        clampedPos.y = Mathf.Clamp(clampedPos.y, minY + 1.2f, maxY - 1.2f);
+        transform.position = clampedPos;
+
+        // 5. Lookahead destination is continuously projected ahead (never collapses or points behind)
+        CurrentDestination = (Vector2)transform.position + forwardDir * 18f;
+
+        // 6. Smooth boundary turnaround before hitting world edges
+        if (movingRight && transform.position.x > (maxX - 10f))
+        {
+            movingRight = false;
+        }
+        else if (!movingRight && transform.position.x < (minX + 10f))
+        {
+            movingRight = true;
+        }
     }
 }

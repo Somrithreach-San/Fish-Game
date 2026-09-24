@@ -8,7 +8,7 @@ public class RiverBoat : MonoBehaviour
     public enum BoatState { Arriving, StoppedWaiting, Fishing, DepartWaiting, Departing }
 
     [Header("River Boat Appearance")]
-    [SerializeField] private float boatScale = 1.38f;
+    [SerializeField] private float boatScale = 1.2253f;
     [Tooltip("How deep the lower hull dips below the water surface (4.75f slightly higher than 5.0f)")]
     [SerializeField] private float submergenceDepth = 4.75f;
     [SerializeField] private float bobFrequency = 2.2f;
@@ -30,22 +30,12 @@ public class RiverBoat : MonoBehaviour
     [Header("Movement Settings")]
     [SerializeField] private float arriveSpeed = 4.5f;
     [SerializeField] private float departSpeed = 5.5f;
-    [SerializeField] private float stopPauseDurationMin = 2.5f;
-    [SerializeField] private float stopPauseDurationMax = 3.0f;
 
     [Header("Harpoon Settings")]
     [Tooltip("Min tilt angle deviation from straight down")]
     [SerializeField] private float harpoonTiltMin = 8f;
     [Tooltip("Max tilt angle deviation from straight down (82 = covers full lake from left to right bank while maintaining downward plunge)")]
     [SerializeField] private float harpoonTiltMax = 82f;
-    [Tooltip("Minimum pause before the first harpoon fires (tension build-up)")]
-    [SerializeField] private float preFirPauseMin = 0.4f;
-    [SerializeField] private float preFirPauseMax = 1.2f;
-    [Tooltip("Delay between individual shots in multi-shot patterns")]
-    [SerializeField] private float betweenShotDelayMin = 0.55f;
-    [SerializeField] private float betweenShotDelayMax = 1.8f;
-    [Tooltip("Fan volley spread angle between adjacent harpoons")]
-    [SerializeField] private float fanSpreadAngle = 18f;
     [Tooltip("Number of hunting attempts/rounds the boat makes before departing (at least 2 tries)")]
     [SerializeField] private int huntingRounds = 2;
     [Tooltip("Pause between hunting rounds while boat stays in place before re-aiming")]
@@ -64,6 +54,17 @@ public class RiverBoat : MonoBehaviour
     private float worldWaterSurfaceY = 15.0f;
     private List<HarpoonHazard> activeHarpoons = new List<HarpoonHazard>();
     private Coroutine lifecycleCoroutine;
+
+    // --- SESSION STATE (Leaves permanently once a shark is caught) ---
+    public static bool IsPermanentlyDepartedThisSession { get; set; } = false;
+
+    public static void ResetSessionState()
+    {
+        IsPermanentlyDepartedThisSession = false;
+    }
+
+    private bool hasCaughtShark = false;
+    public bool HasCaughtShark => hasCaughtShark;
 
     // ── Targeting Laser Sight (Aims red laser beam exclusively at the player) ──
     [Header("Laser Sight Settings")]
@@ -87,10 +88,11 @@ public class RiverBoat : MonoBehaviour
     // Laser 1: Player fish
     private LineRenderer laserLineRenderer;
     private Vector3 currentLaserTarget;
-    // Laser 2: AI fish (Level >= 2)
+    // Laser 2: AI fish (Level >= 2) or Active Shark
     private LineRenderer laserLineRendererAI;
     private Vector3 currentAILaserTarget;
     private Fish currentAITarget;
+    private SharkHazard currentSharkTarget;
     private bool hasValidAITarget = false;
 
     private bool isLaserActive = false;
@@ -114,12 +116,19 @@ public class RiverBoat : MonoBehaviour
     private static Shader   s_UnderwaterShader = null;
     private static Texture2D s_NoiseTex = null;
 
+    [Header("Laser Audio Settings")]
+    [SerializeField] private AudioClip laserLockedOnClip;
+    [Tooltip("Volume of the laser locked-on sound (kept softer to avoid being too loud)")]
+    [SerializeField] private float laserLockedOnVolume = 0.38f;
+
+    private AudioSource laserAudioSource;
+    private static AudioClip s_CachedLaserLockedClip;
 
     [Header("Engine Audio Settings")]
     [SerializeField] private AudioClip engineDriveClip;
-    [SerializeField] private float maxEngineVolume = 0.85f;
-    [SerializeField] private float minEngineDistance = 5.0f;
-    [SerializeField] private float maxEngineDistance = 24.0f;
+    [SerializeField] private float maxEngineVolume = 1.0f;
+    [SerializeField] private float minEngineDistance = 10.0f;
+    [SerializeField] private float maxEngineDistance = 45.0f;
 
     private AudioSource engineAudioSource;
     private float currentAudioVolume = 0f;
@@ -162,6 +171,11 @@ public class RiverBoat : MonoBehaviour
     public static void SetGlobalEngineClip(AudioClip clip)
     {
         if (clip != null) s_CachedEngineClip = clip;
+    }
+
+    public static void SetGlobalLaserLockedClip(AudioClip clip)
+    {
+        if (clip != null) s_CachedLaserLockedClip = clip;
     }
 
     public static void SetGlobalPlayer(Transform p)
@@ -240,6 +254,7 @@ public class RiverBoat : MonoBehaviour
         }
 
         SetupAudio();
+        SetupLaserAudioSource();
     }
 
     public void SetupAudio(AudioClip clip = null)
@@ -267,10 +282,74 @@ public class RiverBoat : MonoBehaviour
             engineAudioSource.clip = clipToUse;
             engineAudioSource.loop = true;
             engineAudioSource.playOnAwake = false;
-            engineAudioSource.spatialBlend = 0f;
+            engineAudioSource.spatialBlend = 1.0f; // 3D Spatial Audio
+            engineAudioSource.minDistance = minEngineDistance;
+            engineAudioSource.maxDistance = maxEngineDistance;
+            engineAudioSource.rolloffMode = AudioRolloffMode.Linear;
+            engineAudioSource.dopplerLevel = 0.3f;
+            engineAudioSource.spread = 45f;
             engineAudioSource.volume = 0f;
             engineAudioSource.pitch = 1f;
             engineAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            AudioSettingsManager.RouteToSfx(engineAudioSource);
+        }
+    }
+
+    public void SetupLaserAudioSource(AudioClip clip = null)
+    {
+        if (clip != null) s_CachedLaserLockedClip = clip;
+
+        if (laserAudioSource == null)
+        {
+            laserAudioSource = gameObject.AddComponent<AudioSource>();
+            laserAudioSource.playOnAwake = false;
+            laserAudioSource.loop = false;
+            laserAudioSource.spatialBlend = 0.4f; // Clean stereo presence across screen
+            laserAudioSource.minDistance = 8.0f;
+            laserAudioSource.maxDistance = 45.0f;
+            laserAudioSource.rolloffMode = AudioRolloffMode.Linear;
+            laserAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            AudioSettingsManager.RouteToSfx(laserAudioSource);
+        }
+
+        AudioClip clipToUse = laserLockedOnClip != null ? laserLockedOnClip : s_CachedLaserLockedClip;
+        if (clipToUse == null)
+        {
+#if UNITY_EDITOR
+            clipToUse = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Laser_Locked-On.mp3");
+            if (clipToUse == null)
+                clipToUse = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Laser_Locked.mp3");
+#endif
+            if (clipToUse == null)
+                clipToUse = Resources.Load<AudioClip>("Harpoon_Laser_Locked-On");
+            if (clipToUse == null)
+                clipToUse = Resources.Load<AudioClip>("Harpoon_Laser_Locked");
+            if (clipToUse != null)
+                s_CachedLaserLockedClip = clipToUse;
+        }
+
+        if (clipToUse != null)
+        {
+            laserLockedOnClip = clipToUse;
+            laserAudioSource.clip = clipToUse;
+        }
+    }
+
+    private void PlayLaserLockedSound()
+    {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
+
+        if (laserAudioSource == null || laserAudioSource.clip == null)
+        {
+            SetupLaserAudioSource();
+        }
+
+        if (laserAudioSource != null && laserAudioSource.clip != null)
+        {
+            laserAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            laserAudioSource.volume = Mathf.Clamp01(laserLockedOnVolume);
+            laserAudioSource.pitch = 1f;
+            laserAudioSource.Play();
         }
     }
 
@@ -366,6 +445,10 @@ public class RiverBoat : MonoBehaviour
             engineAudioSource.Stop();
             engineAudioSource.volume = 0f;
         }
+        if (laserAudioSource != null && laserAudioSource.isPlaying)
+        {
+            laserAudioSource.Stop();
+        }
         currentAudioVolume = 0f;
         targetAudioVolume = 0f;
         StopLaserSight();
@@ -385,9 +468,14 @@ public class RiverBoat : MonoBehaviour
             engineAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
             engineAudioSource.volume = 0f;
         }
+        if (laserAudioSource != null)
+        {
+            laserAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        }
         currentAudioVolume = 0f;
         targetAudioVolume = 0f;
         activeHarpoons.Clear();
+        hasCaughtShark = false;
     }
 
     private void OnDisable()
@@ -464,6 +552,11 @@ public class RiverBoat : MonoBehaviour
             if (paused) engineAudioSource.Pause();
             else engineAudioSource.UnPause();
         }
+        if (laserAudioSource != null)
+        {
+            if (paused) laserAudioSource.Pause();
+            else laserAudioSource.UnPause();
+        }
     }
 
     private void OnSfxSettingChanged(bool enabled)
@@ -471,6 +564,10 @@ public class RiverBoat : MonoBehaviour
         if (engineAudioSource != null)
         {
             engineAudioSource.mute = !enabled;
+        }
+        if (laserAudioSource != null)
+        {
+            laserAudioSource.mute = !enabled;
         }
     }
 
@@ -524,6 +621,7 @@ public class RiverBoat : MonoBehaviour
             lifecycleCoroutine = null;
         }
         activeHarpoons.Clear();
+        hasCaughtShark = false;
 
         transform.localScale = Vector3.one * boatScale;
         float boatHalfWidth = GetBoatHalfWidth();
@@ -767,6 +865,7 @@ public class RiverBoat : MonoBehaviour
 
         for (int round = 0; round < totalTries; round++)
         {
+            if (hasCaughtShark) break;
             if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
 
             // USER REQUIREMENT: Target 2 fish at a time (Player fish + AI fish Level >= 2)
@@ -775,6 +874,7 @@ public class RiverBoat : MonoBehaviour
             float elapsed = 0f;
             while (elapsed < laserTrackDuration)
             {
+                if (hasCaughtShark) break;
                 if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
                 {
                     elapsed += Time.deltaTime;
@@ -783,6 +883,8 @@ public class RiverBoat : MonoBehaviour
                 yield return null;
             }
 
+            if (hasCaughtShark) break;
+
             // Intelligent predictive lead aiming calculation:
             // Predict where the player will be when the harpoon strikes!
             Vector2 playerVel = GetPlayerVelocity();
@@ -790,11 +892,19 @@ public class RiverBoat : MonoBehaviour
             Vector3 predictedPlayerPos = PredictTargetPosition(currentLaserTarget, playerVel, harpoonSpeed, postLockReactionDelay);
             lastLockedAngle = CalculateTiltToTarget(predictedPlayerPos);
 
-            // Lock AI fish's predicted location if acquired
-            bool hasAiShot = hasValidAITarget && currentAITarget != null;
+            // Lock AI / Shark predicted location if acquired
+            bool hasAiShot = hasValidAITarget && (currentSharkTarget != null || currentAITarget != null);
             if (hasAiShot)
             {
-                Vector2 aiVel = GetFishVelocity(currentAITarget);
+                Vector2 aiVel = Vector2.zero;
+                if (currentSharkTarget != null)
+                {
+                    aiVel = new Vector2(currentSharkTarget.Direction * currentSharkTarget.CurrentMoveSpeed, 0f);
+                }
+                else if (currentAITarget != null)
+                {
+                    aiVel = GetFishVelocity(currentAITarget);
+                }
                 Vector3 predictedAiPos = PredictTargetPosition(currentAILaserTarget, aiVel, harpoonSpeed, postLockReactionDelay + 0.16f);
                 lastLockedAngleAI = CalculateTiltToTarget(predictedAiPos);
             }
@@ -802,11 +912,17 @@ public class RiverBoat : MonoBehaviour
             // Remove lasers from both fish before firing
             StopLaserSight();
 
+            if (hasCaughtShark) break;
+
             // Brief reaction window: gives player and fish an intuitive window to realize laser is gone and swim away!
             yield return StartCoroutine(PauseRoutine(postLockReactionDelay));
 
+            if (hasCaughtShark) break;
+
             // Shoot harpoon(s) at predicted location(s)
             yield return StartCoroutine(HarpoonLifecycleSequence(lastLockedAngle, hasAiShot, lastLockedAngleAI));
+
+            if (hasCaughtShark) break;
 
             // If game is over (player caught/died), stop hunting further rounds
             if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
@@ -817,6 +933,12 @@ public class RiverBoat : MonoBehaviour
                 currentState = BoatState.StoppedWaiting;
                 yield return StartCoroutine(PauseRoutine(betweenRoundsPause));
             }
+        }
+
+        if (hasCaughtShark)
+        {
+            yield return StartCoroutine(DepartAfterSharkRoutine());
+            yield break;
         }
 
         currentState = BoatState.DepartWaiting;
@@ -887,7 +1009,8 @@ public class RiverBoat : MonoBehaviour
             laserLineRenderer.numCapVertices    = 4;
             laserLineRenderer.numCornerVertices = 4;
             laserLineRenderer.textureMode       = LineTextureMode.Tile; // keeps noise scale constant
-            laserLineRenderer.sortingOrder      = 7;
+            laserLineRenderer.sortingLayerName  = "ParallaxForeground";
+            laserLineRenderer.sortingOrder      = 130; // On top of Player (120), AI fish (90), and Reefs (50-55)
             laserLineRenderer.material          = GetUnderwaterLaserMaterial();
             laserLineRenderer.enabled           = false;
         }
@@ -918,7 +1041,8 @@ public class RiverBoat : MonoBehaviour
             laserLineRendererAI.numCapVertices    = 4;
             laserLineRendererAI.numCornerVertices = 4;
             laserLineRendererAI.textureMode       = LineTextureMode.Tile;
-            laserLineRendererAI.sortingOrder      = 7;
+            laserLineRendererAI.sortingLayerName  = "ParallaxForeground";
+            laserLineRendererAI.sortingOrder      = 130; // On top of Player (120), AI fish (90), and Reefs (50-55)
             laserLineRendererAI.material          = GetUnderwaterLaserMaterial();
             laserLineRendererAI.enabled           = false;
         }
@@ -941,9 +1065,10 @@ public class RiverBoat : MonoBehaviour
             laserTipPlayer = tipObj.GetComponent<SpriteRenderer>();
             if (laserTipPlayer == null)
                 laserTipPlayer = tipObj.AddComponent<SpriteRenderer>();
-            laserTipPlayer.sprite       = GetLaserDotSprite();
-            laserTipPlayer.sortingOrder = 8;
-            tipObj.transform.localScale = new Vector3(0.032f, 0.032f, 1f);
+            laserTipPlayer.sprite           = GetLaserDotSprite();
+            laserTipPlayer.sortingLayerName = "ParallaxForeground";
+            laserTipPlayer.sortingOrder     = 135; // Above laser line (130) and player fish (120)
+            tipObj.transform.localScale     = new Vector3(0.032f, 0.032f, 1f);
             tipObj.SetActive(false);
         }
 
@@ -964,8 +1089,9 @@ public class RiverBoat : MonoBehaviour
             laserTipAI = tipObjAI.GetComponent<SpriteRenderer>();
             if (laserTipAI == null)
                 laserTipAI = tipObjAI.AddComponent<SpriteRenderer>();
-            laserTipAI.sprite       = GetLaserDotSprite();
-            laserTipAI.sortingOrder = 8;
+            laserTipAI.sprite           = GetLaserDotSprite();
+            laserTipAI.sortingLayerName = "ParallaxForeground";
+            laserTipAI.sortingOrder     = 135; // Above laser line (130) and AI fish (90)
             tipObjAI.transform.localScale = new Vector3(0.032f, 0.032f, 1f);
             tipObjAI.SetActive(false);
         }
@@ -994,15 +1120,25 @@ public class RiverBoat : MonoBehaviour
         currentLaserTarget = (pt != null) ? pt.position
             : new Vector3(transform.position.x, worldFloorY, 0f);
 
-        currentAITarget = FindBestAITarget();
-        if (currentAITarget != null)
+        currentSharkTarget = FindBestSharkTarget();
+        if (currentSharkTarget != null)
         {
-            currentAILaserTarget = currentAITarget.transform.position;
+            currentAITarget = null;
+            currentAILaserTarget = currentSharkTarget.transform.position;
             hasValidAITarget = true;
         }
         else
         {
-            hasValidAITarget = false;
+            currentAITarget = FindBestAITarget();
+            if (currentAITarget != null)
+            {
+                currentAILaserTarget = currentAITarget.transform.position;
+                hasValidAITarget = true;
+            }
+            else
+            {
+                hasValidAITarget = false;
+            }
         }
     }
 
@@ -1014,6 +1150,7 @@ public class RiverBoat : MonoBehaviour
         if (laserTipPlayer != null) laserTipPlayer.gameObject.SetActive(false);
         if (laserTipAI     != null) laserTipAI.gameObject.SetActive(false);
         if (bubbleTrail    != null) bubbleTrail.Stop();
+        if (laserAudioSource != null && laserAudioSource.isPlaying) laserAudioSource.Stop();
     }
 
     private void UpdateLaserSight()
@@ -1033,10 +1170,11 @@ public class RiverBoat : MonoBehaviour
         float chargeProgress = Mathf.Clamp01(laserTrackElapsed / Mathf.Max(laserTrackDuration, 0.1f));
         bool isLockingPhase = (laserTrackElapsed >= (laserTrackDuration - 1.4f));
 
-        // Edge-detect: trigger lock-on ping exactly once when phase flips
+        // Edge-detect: trigger lock-on ping and sound exactly once when phase flips
         if (isLockingPhase && !wasLockingPhase)
         {
             TriggerLockOnPing(currentLaserTarget);
+            PlayLaserLockedSound();
             wasLockingPhase = true;
         }
 
@@ -1089,17 +1227,48 @@ public class RiverBoat : MonoBehaviour
         // Bubble trail along player beam
         EmitBubblesAlongBeam(launcherPos, currentLaserTarget, isLockingPhase ? 2 : 1);
 
-        // ── 2. AI laser (Level >= 2, excludes Golden Fish) ───────────────────────────────────────
-        if (currentAITarget == null || !currentAITarget.gameObject.activeInHierarchy || !currentAITarget.enabled ||
-            currentAITarget.IsDead || currentAITarget.IsHooked || currentAITarget.Level < 2 || currentAITarget.IsGoldenFish)
+        // ── 2. AI / Shark laser (Prioritizes Active Shark, or Level >= 2 Fish) ─────────────────────────
+        if (currentSharkTarget != null && (!currentSharkTarget.gameObject.activeInHierarchy || !currentSharkTarget.enabled || currentSharkTarget.IsDead))
         {
-            currentAITarget = FindBestAITarget();
+            currentSharkTarget = null;
         }
 
-        if (currentAITarget != null)
+        if (currentSharkTarget == null)
+        {
+            currentSharkTarget = FindBestSharkTarget();
+        }
+
+        if (currentSharkTarget != null)
+        {
+            currentAITarget = null;
+        }
+        else
+        {
+            if (currentAITarget == null || !currentAITarget.gameObject.activeInHierarchy || !currentAITarget.enabled ||
+                currentAITarget.IsDead || currentAITarget.IsHooked || currentAITarget.Level < 2 || currentAITarget.IsGoldenFish)
+            {
+                currentAITarget = FindBestAITarget();
+            }
+        }
+
+        Vector3 targetPosAI = Vector3.zero;
+        bool targetAcquired = false;
+
+        if (currentSharkTarget != null)
+        {
+            targetPosAI = currentSharkTarget.transform.position;
+            targetAcquired = true;
+        }
+        else if (currentAITarget != null)
+        {
+            targetPosAI = currentAITarget.transform.position;
+            targetAcquired = true;
+        }
+
+        if (targetAcquired)
         {
             // Different seed (offset 37) so the two beams waver independently
-            currentAILaserTarget = Vector3.SmoothDamp(currentAILaserTarget, currentAITarget.transform.position, ref aiTargetVelocity, targetFollowLag);
+            currentAILaserTarget = Vector3.SmoothDamp(currentAILaserTarget, targetPosAI, ref aiTargetVelocity, targetFollowLag);
             currentAILaserTarget.x = Mathf.Clamp(currentAILaserTarget.x, worldBgLeft + 0.8f, worldBgRight - 0.8f);
             currentAILaserTarget.y = Mathf.Clamp(currentAILaserTarget.y, worldFloorY + 0.5f, worldWaterSurfaceY);
             hasValidAITarget     = true;
@@ -1217,7 +1386,8 @@ public class RiverBoat : MonoBehaviour
         col.color = grad;
 
         var rend = ps.GetComponent<ParticleSystemRenderer>();
-        rend.sortingOrder = 6; // just under the beam (beam=7, tip dot=8)
+        rend.sortingLayerName = "ParallaxForeground";
+        rend.sortingOrder = 129; // just under the beam (beam=130, tip dot=135)
 
         return ps;
     }
@@ -1233,9 +1403,10 @@ public class RiverBoat : MonoBehaviour
         var go = new GameObject("LockOnPing");
         go.transform.position = worldPos;
         var sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite       = GetLaserDotSprite();
-        sr.color        = new Color(1f, 0.30f, 0.10f, 0.80f);
-        sr.sortingOrder = 9;
+        sr.sprite           = GetLaserDotSprite();
+        sr.color            = new Color(1f, 0.30f, 0.10f, 0.80f);
+        sr.sortingLayerName = "ParallaxForeground";
+        sr.sortingOrder     = 136;
 
         float duration = 0.28f;
         float elapsed  = 0f;
@@ -1248,6 +1419,33 @@ public class RiverBoat : MonoBehaviour
             yield return null;
         }
         Destroy(go);
+    }
+
+    private SharkHazard FindBestSharkTarget()
+    {
+        if (SharkHazard.ActiveSharks == null || SharkHazard.ActiveSharks.Count == 0) return null;
+
+        SharkHazard bestShark = null;
+        float closestDistSqr = float.MaxValue;
+        Vector3 launcherPos = GetHarpoonLauncherPosition();
+
+        for (int i = 0; i < SharkHazard.ActiveSharks.Count; i++)
+        {
+            SharkHazard s = SharkHazard.ActiveSharks[i];
+            if (s == null || !s.gameObject.activeInHierarchy || !s.enabled || s.IsDead) continue;
+
+            Vector3 pos = s.transform.position;
+            if (pos.x < worldBgLeft - 2.0f || pos.x > worldBgRight + 2.0f) continue;
+
+            float dSqr = (pos - launcherPos).sqrMagnitude;
+            if (dSqr < closestDistSqr)
+            {
+                closestDistSqr = dSqr;
+                bestShark = s;
+            }
+        }
+
+        return bestShark;
     }
 
     private Fish FindBestAITarget()
@@ -1477,6 +1675,73 @@ public class RiverBoat : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Called immediately when a harpoon impales a shark. Stops laser sights and marks boat for departure.
+    /// </summary>
+    public void OnSharkImpaled(SharkHazard shark)
+    {
+        hasCaughtShark = true;
+        IsPermanentlyDepartedThisSession = true;
+        StopLaserSight();
+
+        // Immediately recall or clear any other active harpoons that missed/are empty so the boat doesn't wait on them
+        if (activeHarpoons != null && activeHarpoons.Count > 0)
+        {
+            for (int i = 0; i < activeHarpoons.Count; i++)
+            {
+                var h = activeHarpoons[i];
+                if (h != null && h.CaughtShark != shark)
+                {
+                    h.FastRecallOrDespawn();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called when the harpoon finishes hauling the shark up to the boat. 
+    /// The boat takes its prize, departs offscreen, and will never return for this game session.
+    /// </summary>
+    public void OnSharkHauledIn(SharkHazard shark)
+    {
+        hasCaughtShark = true;
+        IsPermanentlyDepartedThisSession = true;
+        StopLaserSight();
+
+        // Fast-clear any leftover active harpoons
+        if (activeHarpoons != null && activeHarpoons.Count > 0)
+        {
+            for (int i = 0; i < activeHarpoons.Count; i++)
+            {
+                var h = activeHarpoons[i];
+                if (h != null)
+                {
+                    h.FastRecallOrDespawn();
+                }
+            }
+            activeHarpoons.Clear();
+        }
+
+        if (lifecycleCoroutine != null)
+        {
+            StopCoroutine(lifecycleCoroutine);
+            lifecycleCoroutine = null;
+        }
+
+        StartCoroutine(DepartAfterSharkRoutine());
+    }
+
+    private IEnumerator DepartAfterSharkRoutine()
+    {
+        // Active harpoons have already been fast-cleared, ensure list is purged cleanly
+        activeHarpoons.RemoveAll(h => h == null || !h.gameObject.activeInHierarchy);
+
+        // Crisp, punchy delay (0.12s) before sailing away immediately with the caught shark
+        currentState = BoatState.DepartWaiting;
+        yield return StartCoroutine(PauseRoutine(0.12f));
+
+        StartDeparture();
+    }
 
     private void StartDeparture()
     {
@@ -1553,8 +1818,12 @@ public class RiverBoat : MonoBehaviour
 
     private Transform GetPlayerTransform()
     {
-        if (playerTransform != null && playerTransform.gameObject.activeInHierarchy)
-            return playerTransform;
+        try
+        {
+            if (playerTransform != null && playerTransform && playerTransform.gameObject.activeInHierarchy)
+                return playerTransform;
+        }
+        catch { playerTransform = null; }
 
         if (GridController.Instance != null && GridController.Instance.Player != null)
         {
@@ -1563,11 +1832,15 @@ public class RiverBoat : MonoBehaviour
             return playerTransform;
         }
 
-        if (s_GlobalPlayerTransform != null && s_GlobalPlayerTransform.gameObject.activeInHierarchy)
+        try
         {
-            playerTransform = s_GlobalPlayerTransform;
-            return playerTransform;
+            if (s_GlobalPlayerTransform != null && s_GlobalPlayerTransform && s_GlobalPlayerTransform.gameObject.activeInHierarchy)
+            {
+                playerTransform = s_GlobalPlayerTransform;
+                return playerTransform;
+            }
         }
+        catch { s_GlobalPlayerTransform = null; }
 
         PlayerController pc = FindFirstObjectByType<PlayerController>();
         if (pc != null)
@@ -1637,7 +1910,7 @@ public class RiverBoat : MonoBehaviour
                 else
                 {
                     float t = (dist - minEngineDistance) / (maxEngineDistance - minEngineDistance);
-                    targetAudioVolume = (1f - t) * (1f - t) * maxEngineVolume;
+                    targetAudioVolume = (1f - t) * maxEngineVolume;
                 }
 
                 float pan = Mathf.Clamp((transform.position.x - pt.position.x) / 14.0f, -0.85f, 0.85f);
@@ -1675,4 +1948,3 @@ public class RiverBoat : MonoBehaviour
         }
     }
 }
-

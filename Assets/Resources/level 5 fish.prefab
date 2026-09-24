@@ -55,6 +55,24 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
+      propertyPath: closedSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: b91c009806630b3448ffc07daa463d4a,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: normalSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: b91c009806630b3448ffc07daa463d4a,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
+      propertyPath: openSprite
+      value: 
+      objectReference: {fileID: -6137392788026131151, guid: e6423976fecffbf4ea8bb2253d05a1c7,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
       propertyPath: eatSfxOverride
       value: 
       objectReference: {fileID: 8300000, guid: 3eb084bf7683a3547b4a8ce903327fc3, type: 3}

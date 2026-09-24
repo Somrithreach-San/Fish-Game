@@ -173,6 +173,8 @@ MonoBehaviour:
   - {fileID: 8300000, guid: bb5e674ed5bc212449d96a51edeecc0b, type: 3}
   - {fileID: 8300000, guid: 3eb084bf7683a3547b4a8ce903327fc3, type: 3}
   deathSound: {fileID: 8300000, guid: 981015d54fd1d3646829f4568f353767, type: 3}
+  lakeDeathSound: {fileID: 8300000, guid: 9ccf50f5e5dcc144b8293f915905aa77, type: 3}
+  sickFishEatSound: {fileID: 8300000, guid: 50c813e233c2a3b4ba75ad9da27a7d9b, type: 3}
   growSound: {fileID: 8300000, guid: d00bdc5ac5573e44da6659315433e827, type: 3}
   boostStartClip: {fileID: 8300000, guid: c56e8c31b74724e45815d6400607b79c, type: 3}
   boostStartVolume: 0.2
@@ -183,26 +185,26 @@ MonoBehaviour:
   eatBubbleVariants: []
   idleSprite: {fileID: 21300000, guid: 9df542ed039c35641b2f9e0c5c68984b, type: 3}
   halfBiteSprite: {fileID: 21300000, guid: 426b2be7f9404df43b4dd942e6f31102, type: 3}
-  eatSprite: {fileID: 21300000, guid: 94792a66929af8547aef2026234b4f6f, type: 3}
+  eatSprite: {fileID: 21300000, guid: 797cf22f5d8c0a84c9b2602ce0b3998c, type: 3}
   riverPlayerSprite: {fileID: 21300000, guid: b23d2ce4ed63fff4fa21ac0c3610e2d6, type: 3}
   riverIdleSprite: {fileID: 21300000, guid: 8b1c72ef84fef0340b5069f8dfd87852, type: 3}
   riverHalfBiteSprite: {fileID: 21300000, guid: c3db7a48e83247c4fb12c6a998e658de,
     type: 3}
   riverEatSprite: {fileID: 21300000, guid: 537562de2f2065e47ad80c653ec098ab, type: 3}
   levelScales:
+  - 0.42
   - 0.58
-  - 0.65
-  - 0.76
-  - 0.88
-  - 1
-  - 1.12
+  - 0.78
+  - 1.02
+  - 1.3
+  - 1.6
   riverLevelScales:
   - 0.6
-  - 0.75
-  - 0.9
-  - 1.08
-  - 1.25
-  - 1.4
+  - 0.78
+  - 0.98
+  - 1.2
+  - 1.45
+  - 1.7
   cameraZoomPerLevel: 0
   isAlive: 1
   isPaused: 0

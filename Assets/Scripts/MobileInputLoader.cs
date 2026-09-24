@@ -23,10 +23,8 @@ public class MobileInputLoader : MonoBehaviour
             isMobile = true;
         }
 
-        // Check for Touch Support (Handles Simulator & Touch Laptops)
-        // Fix: Removed simple Input.touchSupported check because it returns true on many desktop devices
-        // We rely on Application.isMobilePlatform or explicit simulation
-        if (!Application.isEditor && Input.touchSupported && (Application.isMobilePlatform || UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld))
+        // Check for Touch Support (Handles Simulator & Touch Devices)
+        if (!Application.isEditor && (Application.isMobilePlatform || UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld || UnityEngine.InputSystem.Touchscreen.current != null))
         {
             isMobile = true;
         }
@@ -56,6 +54,7 @@ public class MobileInputLoader : MonoBehaviour
             if (mobileInputPrefab != null && MobileJoystick.Instance == null)
             {
                 instantiatedControls = Instantiate(mobileInputPrefab);
+                EnsureMobileAbilityButton(instantiatedControls);
             }
             else if (mobileInputPrefab == null)
             {
@@ -92,7 +91,42 @@ public class MobileInputLoader : MonoBehaviour
                     Destroy(MobileBoostButton.Instance.gameObject);
                 }
             }
+
+            // Also check for Ability Button separately
+            if (MobileAbilityButton.Instance != null)
+            {
+                if (MobileAbilityButton.Instance.transform.root.name.Contains("MobileInputCanvas"))
+                {
+                    Destroy(MobileAbilityButton.Instance.transform.root.gameObject);
+                }
+                else
+                {
+                    Destroy(MobileAbilityButton.Instance.gameObject);
+                }
+            }
         }
+    }
+
+    private void EnsureMobileAbilityButton(GameObject canvasObj)
+    {
+        if (canvasObj == null) return;
+        if (canvasObj.GetComponentInChildren<MobileAbilityButton>(true) != null) return;
+
+        // Create AbilityButton under canvas
+        GameObject abilityBtnObj = new GameObject("AbilityButton");
+        abilityBtnObj.transform.SetParent(canvasObj.transform, false);
+
+        RectTransform rt = abilityBtnObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1, 0);
+        rt.anchorMax = new Vector2(1, 0);
+        rt.pivot = new Vector2(1, 0);
+        rt.sizeDelta = new Vector2(200, 200);
+        rt.anchoredPosition = new Vector2(-480, 228);
+
+        abilityBtnObj.AddComponent<CanvasRenderer>();
+        MobileAbilityButton abilityBtn = abilityBtnObj.AddComponent<MobileAbilityButton>();
+        abilityBtn.BuildUIHierarchyIfNeeded();
+        abilityBtn.SyncLayoutWithBoostButton();
     }
 
     private void OnDestroy()

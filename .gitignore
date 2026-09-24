@@ -63,6 +63,8 @@ crashlytics-build.properties
 
 # Custom Builds
 Web build/
+docs/Build/
+Assets/_Recovery/
 scratch/
 *.exe
 *_BurstDebugInformation_DoNotShip/

@@ -8,11 +8,12 @@ public class HarpoonHazard : MonoBehaviour
 
     [Header("Movement Settings")]
     [SerializeField] private float descendSpeed = 38f; // High-velocity punchy plunge (boosted from 27f)
-    [SerializeField] private float retractSpeed = 18f; // Fast winch reel speed (boosted from 12f)
+    [SerializeField] private float retractSpeed = 22f; // Fast, responsive winch reel speed
     [SerializeField] private float bottomPauseDuration = 0.15f; // Snappy turn-around
     [SerializeField] private float impactAbsorbDuration = 0.08f; // Brief micro-nudge as fish absorbs momentum
 
     [Header("Visuals & Audio")]
+    private const float HarpoonReelVolume = 0.08f;
     [SerializeField] private Sprite harpoonSprite;
     [SerializeField] private AudioClip shootSound;
     [SerializeField] private AudioClip reelSound;
@@ -21,6 +22,7 @@ public class HarpoonHazard : MonoBehaviour
 
     private HarpoonState currentState = HarpoonState.Descending;
     public HarpoonState State => currentState;
+    public SharkHazard CaughtShark => caughtShark;
 
     private RiverBoat linkedBoat;
     private Vector3 launchOrigin;
@@ -37,7 +39,11 @@ public class HarpoonHazard : MonoBehaviour
     private bool isPaused = false;
     private Fish caughtFish = null;             // AI fish being pulled up
     private PlayerController caughtPlayer = null; // Player being pulled up
+    private SharkHazard caughtShark = null;       // Shark being pulled up on lethal hit
+    public Sprite HarpoonSprite => (sr != null && sr.sprite != null) ? sr.sprite : harpoonSprite;
     private Quaternion caughtFishWorldRot = Quaternion.identity;
+    private Quaternion caughtSharkWorldRot = Quaternion.identity;
+    private float caughtVictimOffset = -0.35f; // Local Y offset along spear so barbed tip protrudes through belly
     private System.Collections.Generic.List<SpriteRenderer> elevatedRenderers = new System.Collections.Generic.List<SpriteRenderer>();
     private System.Collections.Generic.List<int> originalSortingOrders = new System.Collections.Generic.List<int>();
 
@@ -48,9 +54,11 @@ public class HarpoonHazard : MonoBehaviour
     private ParticleSystem bubbleTrail;
     private AudioSource audioSource;
     private AudioSource stabAudioSource;
+    private Transform launcherAudioAnchor;
 
     private static Sprite s_DefaultHarpoonSprite;
     private static Material s_DefaultCableMaterial;
+    private static AudioClip s_DefaultShootSound;
     private static AudioClip s_DefaultStabSound;
 
     private void Awake()
@@ -62,7 +70,8 @@ public class HarpoonHazard : MonoBehaviour
     {
         if (sr == null) sr = GetComponent<SpriteRenderer>();
         if (sr == null) sr = gameObject.AddComponent<SpriteRenderer>();
-        sr.sortingOrder = 6; // Render in front of boat hull and underwater fish
+        sr.sortingLayerName = "ParallaxForeground";
+        sr.sortingOrder = 130; // Render in front of player fish (120) and AI fish (90)
         sr.enabled = true;
 
         if (harpoonSprite == null)
@@ -150,15 +159,44 @@ public class HarpoonHazard : MonoBehaviour
         }
         cableLine.startColor = Color.white;
         cableLine.endColor = Color.white;
-        cableLine.sortingOrder = 7; // Render in front of boat hull and underwater fish
+        cableLine.sortingLayerName = "ParallaxForeground";
+        cableLine.sortingOrder = 129; // Render in front of player fish (120) and AI fish (90)
 
-        if (audioSource == null) audioSource = GetComponent<AudioSource>();
-        if (audioSource == null)
+        if (launcherAudioAnchor == null)
         {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.playOnAwake = false;
-            audioSource.spatialBlend = 0f;
+            Transform parentTarget = (linkedBoat != null) ? linkedBoat.transform : null;
+            string anchorName = "LauncherAudioAnchor_" + GetInstanceID();
+            Transform existing = (parentTarget != null) ? parentTarget.Find(anchorName) : null;
+            if (existing != null)
+            {
+                launcherAudioAnchor = existing;
+            }
+            else
+            {
+                GameObject anchorObj = new GameObject(anchorName);
+                if (parentTarget != null)
+                {
+                    anchorObj.transform.SetParent(parentTarget, true);
+                }
+                launcherAudioAnchor = anchorObj.transform;
+            }
+            launcherAudioAnchor.position = GetCurrentLauncherPos();
         }
+
+        if (audioSource == null && launcherAudioAnchor != null)
+        {
+            audioSource = launcherAudioAnchor.GetComponent<AudioSource>();
+            if (audioSource == null)
+            {
+                audioSource = launcherAudioAnchor.gameObject.AddComponent<AudioSource>();
+            }
+            audioSource.playOnAwake = false;
+            audioSource.spatialBlend = 1.0f; // 3D Spatial Audio located on the boat launcher
+            audioSource.minDistance = 6.0f;
+            audioSource.maxDistance = 45.0f;
+            audioSource.rolloffMode = AudioRolloffMode.Linear;
+        }
+        AudioSettingsManager.RouteToSfx(audioSource);
 
         if (stabAudioSource == null)
         {
@@ -172,7 +210,37 @@ public class HarpoonHazard : MonoBehaviour
                 stabAudioSource = gameObject.AddComponent<AudioSource>();
             }
             stabAudioSource.playOnAwake = false;
-            stabAudioSource.spatialBlend = 0f;
+            stabAudioSource.spatialBlend = 1.0f;
+            stabAudioSource.minDistance = 6.0f;
+            stabAudioSource.maxDistance = 40.0f;
+            stabAudioSource.rolloffMode = AudioRolloffMode.Linear;
+        }
+        AudioSettingsManager.RouteToSfx(stabAudioSource);
+
+        if (shootSound == null)
+        {
+            if (s_DefaultShootSound == null)
+            {
+#if UNITY_EDITOR
+                s_DefaultShootSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Firing_Harpoon.mp3");
+                if (s_DefaultShootSound == null)
+                {
+                    s_DefaultShootSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/firing_harpoon.mp3");
+                }
+#endif
+                if (s_DefaultShootSound == null)
+                {
+                    s_DefaultShootSound = Resources.Load<AudioClip>("Firing_Harpoon");
+                }
+                if (s_DefaultShootSound == null)
+                {
+                    s_DefaultShootSound = Resources.Load<AudioClip>("firing_harpoon");
+                }
+            }
+            if (s_DefaultShootSound != null)
+            {
+                shootSound = s_DefaultShootSound;
+            }
         }
 
         if (stabSound == null)
@@ -232,6 +300,8 @@ public class HarpoonHazard : MonoBehaviour
         if (sr != null) sr.enabled = true;
 
         if (shootClip != null) shootSound = shootClip;
+        else if (shootSound == null && s_DefaultShootSound != null) shootSound = s_DefaultShootSound;
+
         if (reelClip != null) reelSound = reelClip;
         if (stabClip != null) stabSound = stabClip;
 
@@ -256,10 +326,13 @@ public class HarpoonHazard : MonoBehaviour
             bubbleTrail.Play();
         }
 
+        // Immediately play the harpoon firing sound effect from the boat launcher
         if (audioSource != null && shootSound != null && AudioSettingsManager.IsSfxEnabled)
         {
             audioSource.mute = false;
-            audioSource.PlayOneShot(shootSound, 1.0f);
+            audioSource.volume = 0.38f;
+            audioSource.spatialBlend = 1.0f; // 3D Spatial Audio located on the boat launcher
+            audioSource.PlayOneShot(shootSound, 0.38f);
         }
 
         if (GameManager.instance != null)
@@ -288,19 +361,20 @@ public class HarpoonHazard : MonoBehaviour
         main.loop = true;
         main.playOnAwake = false;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 2.0f);
-        main.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.7f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.22f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.8f, 2.5f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.35f, 0.85f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.10f, 0.28f);
         main.gravityModifier = -0.1f;
-        main.maxParticles = 60;
+        main.maxParticles = 100;
 
         var emission = bubbleTrail.emission;
-        emission.rateOverTime = 30f;
+        emission.rateOverTime = 48f; // Increased bubble density when plunging
+        emission.SetBursts(new ParticleSystem.Burst[] { new ParticleSystem.Burst(0.0f, 8, 14) }); // Snappy plunge burst
 
         var shape = bubbleTrail.shape;
         shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle = 12f;
-        shape.radius = 0.1f;
+        shape.angle = 14f;
+        shape.radius = 0.12f;
 
         if (bubbleMat != null)
         {
@@ -337,7 +411,9 @@ public class HarpoonHazard : MonoBehaviour
     {
         caughtFish = null;
         caughtPlayer = null;
+        caughtShark = null;
         caughtFishWorldRot = Quaternion.identity;
+        caughtSharkWorldRot = Quaternion.identity;
         isPaused = false;
         descendElapsed = 0f;
 
@@ -359,12 +435,21 @@ public class HarpoonHazard : MonoBehaviour
         // Reset visibility so pooled object spawns correctly next time
         if (sr != null) sr.enabled = true;
 
+        if (caughtShark != null)
+        {
+            if (caughtShark.gameObject.activeInHierarchy) caughtShark.OnReeledToBoat(linkedBoat);
+            if (linkedBoat != null)
+            {
+                linkedBoat.OnSharkHauledIn(caughtShark);
+            }
+            caughtShark = null;
+        }
+
         if (linkedBoat != null)
         {
             linkedBoat.OnHarpoonRetracted(this);
             linkedBoat = null;
         }
-
         if (caughtFish != null)
         {
             if (caughtFish.gameObject.activeInHierarchy) caughtFish.Die();
@@ -390,6 +475,11 @@ public class HarpoonHazard : MonoBehaviour
             }
             catch { }
             isEventSubscribed = false;
+        }
+
+        if (launcherAudioAnchor != null && launcherAudioAnchor.gameObject != null)
+        {
+            Destroy(launcherAudioAnchor.gameObject);
         }
     }
 
@@ -426,13 +516,8 @@ public class HarpoonHazard : MonoBehaviour
 
     private Vector3 GetTetherWorldPos()
     {
-        // When a fish/player is caught, the metal harpoon is buried inside its flesh.
-        // The line connects directly into the center of the fish!
-        if (caughtFish != null || caughtPlayer != null)
-        {
-            return transform.position;
-        }
-        // Top ring eyelet center of harpoon sprite while plunging
+        // Top ring eyelet center of harpoon sprite (at local Y = +0.96f)
+        // Cable remains firmly connected to the top eyelet ring above the fish body
         return transform.TransformPoint(new Vector3(0f, 0.96f, 0f));
     }
 
@@ -440,20 +525,54 @@ public class HarpoonHazard : MonoBehaviour
     {
         if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
 
+        Vector3 currentLauncherPos = GetCurrentLauncherPos();
+
+        if (launcherAudioAnchor != null)
+        {
+            launcherAudioAnchor.position = currentLauncherPos;
+
+            // Distance attenuation & stereo panning relative to player from the boat launcher
+            if (audioSource != null && GameManager.instance != null && GameManager.instance.playerGameObject != null)
+            {
+                Vector3 playerPos = GameManager.instance.playerGameObject.transform.position;
+                float dist = Vector2.Distance(currentLauncherPos, playerPos);
+                float maxDist = 45f;
+                float normDist = Mathf.Clamp01(dist / maxDist);
+                float baseVol = (currentState == HarpoonState.Retracting) ? 0.28f : 0.38f;
+                audioSource.volume = Mathf.Lerp(baseVol, baseVol * 0.20f, normDist);
+                float pan = Mathf.Clamp((currentLauncherPos.x - playerPos.x) / 12.0f, -0.75f, 0.75f);
+                audioSource.panStereo = pan;
+            }
+        }
+
         // Update cable positions continuously
         if (cableLine != null && cableLine.enabled)
         {
-            cableLine.SetPosition(0, GetCurrentLauncherPos());
+            cableLine.SetPosition(0, currentLauncherPos);
             cableLine.SetPosition(1, GetTetherWorldPos());
         }
 
-        // Subtle, tense struggle tremble while reeled in by harpoon (tracked in world space without parenting scale distortion)
+        // Subtle, tense struggle tremble while reeled in by harpoon (tracked in world space with barbed tip protruding)
+        Vector3 spearedWorldPos = transform.TransformPoint(new Vector3(0f, caughtVictimOffset, 0f));
+        if (caughtShark != null && caughtShark.gameObject.activeInHierarchy)
+        {
+            float trembleAngle = Mathf.Sin(Time.time * 22f) * 3.5f;
+            Vector3 jitter = new Vector3(Mathf.Sin(Time.time * 24f) * 0.015f, Mathf.Cos(Time.time * 26f) * 0.015f, 0f);
+            caughtShark.transform.position = spearedWorldPos + jitter;
+            caughtShark.transform.rotation = caughtSharkWorldRot * Quaternion.Euler(0f, 0f, trembleAngle);
+        }
         if (caughtFish != null && caughtFish.gameObject.activeInHierarchy)
         {
             float trembleAngle = Mathf.Sin(Time.time * 22f) * 3.5f;
             Vector3 jitter = new Vector3(Mathf.Sin(Time.time * 24f) * 0.015f, Mathf.Cos(Time.time * 26f) * 0.015f, 0f);
-            caughtFish.transform.position = transform.position + jitter;
+            caughtFish.transform.position = spearedWorldPos + jitter;
             caughtFish.transform.rotation = caughtFishWorldRot * Quaternion.Euler(0f, 0f, trembleAngle);
+        }
+        if (caughtPlayer != null && caughtPlayer.gameObject.activeInHierarchy)
+        {
+            float trembleAngle = Mathf.Sin(Time.time * 22f) * 3.5f;
+            Vector3 jitter = new Vector3(Mathf.Sin(Time.time * 24f) * 0.015f, Mathf.Cos(Time.time * 26f) * 0.015f, 0f);
+            caughtPlayer.transform.position = spearedWorldPos + jitter;
         }
 
         switch (currentState)
@@ -550,6 +669,8 @@ public class HarpoonHazard : MonoBehaviour
 
             if (audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
             {
+                audioSource.spatialBlend = 1.0f;
+                audioSource.volume = HarpoonReelVolume;
                 audioSource.clip = reelSound;
                 audioSource.loop = true;
                 audioSource.Play();
@@ -563,14 +684,32 @@ public class HarpoonHazard : MonoBehaviour
         Vector3 tetherPos = GetTetherWorldPos();
         Vector3 toLauncher = targetLauncher - tetherPos;
         float dist = toLauncher.magnitude;
+        Vector3 spearedWorldPos = transform.TransformPoint(new Vector3(0f, caughtVictimOffset, 0f));
+        bool reachedBoat = (dist < 0.85f) || 
+                           (tetherPos.y >= targetLauncher.y - 0.35f) || 
+                           (caughtShark != null && (dist < 1.4f || spearedWorldPos.y >= targetLauncher.y - 1.2f)) ||
+                           (caughtPlayer != null && (dist < 1.2f || spearedWorldPos.y >= targetLauncher.y - 1.0f)) ||
+                           (caughtFish != null && (dist < 1.2f || spearedWorldPos.y >= targetLauncher.y - 1.0f));
 
-        if (dist < 0.55f || (dist < 1.0f && tetherPos.y >= targetLauncher.y))
+        if (reachedBoat)
         {
+            if (caughtShark != null)
+            {
+                if (caughtShark.gameObject.activeInHierarchy)
+                {
+                    caughtShark.OnReeledToBoat(linkedBoat);
+                }
+                if (linkedBoat != null)
+                {
+                    linkedBoat.OnSharkHauledIn(caughtShark);
+                }
+                caughtShark = null;
+            }
             if (caughtFish != null)
             {
                 if (caughtFish.gameObject.activeInHierarchy)
                 {
-                    caughtFish.Die();
+                    caughtFish.OnReeledOutOfWater();
                 }
                 caughtFish = null;
             }
@@ -603,7 +742,10 @@ public class HarpoonHazard : MonoBehaviour
             return;
         }
 
-        Vector3 moveStep = toLauncher.normalized * retractSpeed * Time.deltaTime;
+        // Dynamically reel towards launcher at physical speed (duration = distance / speed)
+        float currentRetractSpeed = (caughtShark != null) ? (retractSpeed * 0.95f) : retractSpeed;
+        float stepDist = Mathf.Min(currentRetractSpeed * Time.deltaTime, dist);
+        Vector3 moveStep = (dist > 0.001f) ? (toLauncher / dist) * stepDist : Vector3.zero;
         transform.position += moveStep;
 
         if (toLauncher.sqrMagnitude > 0.04f)
@@ -612,14 +754,49 @@ public class HarpoonHazard : MonoBehaviour
             transform.rotation = Quaternion.Euler(0f, 0f, targetAngle);
         }
 
-        // Drag impaled victims along with the projectile in world space (without parenting, avoiding scale distortion)
+        // Drag impaled victims along with the projectile in world space (with barbed tip protruding through body)
+        spearedWorldPos = transform.TransformPoint(new Vector3(0f, caughtVictimOffset, 0f));
+        float trembleAngle = Mathf.Sin(Time.time * 22f) * 3.5f;
+        Vector3 jitter = new Vector3(Mathf.Sin(Time.time * 24f) * 0.015f, Mathf.Cos(Time.time * 26f) * 0.015f, 0f);
+
+        if (caughtShark != null && caughtShark.gameObject.activeInHierarchy)
+        {
+            caughtShark.transform.position = spearedWorldPos + jitter;
+            caughtShark.transform.rotation = caughtSharkWorldRot * Quaternion.Euler(0f, 0f, trembleAngle);
+        }
         if (caughtPlayer != null && caughtPlayer.gameObject.activeInHierarchy)
         {
-            caughtPlayer.transform.position = transform.position;
+            caughtPlayer.transform.position = spearedWorldPos + jitter;
         }
         if (caughtFish != null && caughtFish.gameObject.activeInHierarchy)
         {
-            caughtFish.transform.position = transform.position;
+            caughtFish.transform.position = spearedWorldPos + jitter;
+            caughtFish.transform.rotation = caughtFishWorldRot * Quaternion.Euler(0f, 0f, trembleAngle);
+        }
+    }
+
+    public void FastRecallOrDespawn()
+    {
+        if (caughtShark != null || caughtPlayer != null || caughtFish != null) return;
+        
+        RestoreElevatedSortingOrders();
+        currentState = HarpoonState.Completed;
+        if (audioSource != null && audioSource.isPlaying) audioSource.Stop();
+        if (cableLine != null) cableLine.enabled = false;
+
+        if (linkedBoat != null)
+        {
+            linkedBoat.OnHarpoonRetracted(this);
+            linkedBoat = null;
+        }
+
+        if (ObjectPoolManager.Instance != null)
+        {
+            ObjectPoolManager.Instance.Despawn(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
         }
     }
 
@@ -637,6 +814,35 @@ public class HarpoonHazard : MonoBehaviour
         PlayerController hitPlayer = null;
         Fish bestHitFish = null;
         Vector3 hitPosition = Vector3.zero;
+
+        // 0. Check Shark Hazards along swept trajectory (Highest priority: shark shields everything behind it!)
+        SharkHazard bestHitShark = null;
+        if (SharkHazard.ActiveSharks != null && SharkHazard.ActiveSharks.Count > 0)
+        {
+            for (int i = 0; i < SharkHazard.ActiveSharks.Count; i++)
+            {
+                SharkHazard s = SharkHazard.ActiveSharks[i];
+                if (s == null || !s.gameObject.activeInHierarchy || s.IsDead) continue;
+
+                Vector3 sPos = s.transform.position;
+                Collider2D sCol = s.GetComponent<Collider2D>();
+                float sRadius = (sCol != null) ? Mathf.Max(sCol.bounds.extents.x, sCol.bounds.extents.y) : 1.8f;
+                float hitThreshold = 0.65f + sRadius;
+
+                float distSqr = SqrDistanceToSegment(sPos, fromPos, toPos, out float t);
+                if (distSqr <= hitThreshold * hitThreshold)
+                {
+                    if (t < bestT)
+                    {
+                        bestT = t;
+                        hitIsPlayer = false;
+                        bestHitFish = null;
+                        bestHitShark = s;
+                        hitPosition = Vector3.Lerp(fromPos, toPos, t);
+                    }
+                }
+            }
+        }
 
         // 1. Check Player along swept trajectory
         PlayerController pc = null;
@@ -659,10 +865,15 @@ public class HarpoonHazard : MonoBehaviour
             float distSqr = SqrDistanceToSegment(pPos, fromPos, toPos, out float t);
             if (distSqr <= hitThreshold * hitThreshold)
             {
-                bestT = t;
-                hitIsPlayer = true;
-                hitPlayer = pc;
-                hitPosition = Vector3.Lerp(fromPos, toPos, t);
+                if (t < bestT)
+                {
+                    bestT = t;
+                    hitIsPlayer = true;
+                    bestHitFish = null;
+                    bestHitShark = null;
+                    hitPlayer = pc;
+                    hitPosition = Vector3.Lerp(fromPos, toPos, t);
+                }
             }
         }
 
@@ -673,8 +884,8 @@ public class HarpoonHazard : MonoBehaviour
             {
                 Fish f = Fish.AllFish[i];
                 if (f == null || !f.gameObject.activeInHierarchy || f.IsDead || f.IsHooked) continue;
-                // Harpoon ignores small Level 1 fish and Golden Fish
-                if (f.Level < 2 || f.IsGoldenFish) continue;
+                // Harpoon ignores small Level 1 fish, Golden Fish, and Cuttlefish
+                if (f.Level < 2 || f.IsGoldenFish || f.IsCuttlefish) continue;
 
                 Vector3 fPos = f.transform.position;
                 Collider2D fCol = f.GetComponent<Collider2D>();
@@ -688,6 +899,7 @@ public class HarpoonHazard : MonoBehaviour
                     {
                         bestT = t;
                         hitIsPlayer = false;
+                        bestHitShark = null;
                         bestHitFish = f;
                         hitPosition = Vector3.Lerp(fromPos, toPos, t);
                     }
@@ -705,12 +917,26 @@ public class HarpoonHazard : MonoBehaviour
                 Collider2D col = hits[i].collider;
                 if (col == null) continue;
 
-                if (col.GetComponentInParent<SharkHazard>() != null || 
-                    col.GetComponentInParent<Hazard>() != null || 
+                if (col.GetComponentInParent<Hazard>() != null || 
                     col.GetComponentInParent<HarpoonHazard>() != null ||
                     col.GetComponentInParent<FishermanBoat>() != null || 
                     col.GetComponentInParent<RiverBoat>() != null) 
                 {
+                    continue;
+                }
+
+                SharkHazard hitShark = col.GetComponentInParent<SharkHazard>();
+                if (hitShark != null && !hitShark.IsDead)
+                {
+                    float t = hits[i].fraction;
+                    if (t < bestT)
+                    {
+                        bestT = t;
+                        hitIsPlayer = false;
+                        bestHitFish = null;
+                        bestHitShark = hitShark;
+                        hitPosition = hits[i].point;
+                    }
                     continue;
                 }
 
@@ -722,6 +948,8 @@ public class HarpoonHazard : MonoBehaviour
                     {
                         bestT = t;
                         hitIsPlayer = true;
+                        bestHitFish = null;
+                        bestHitShark = null;
                         hitPlayer = hitPc;
                         hitPosition = hits[i].point;
                     }
@@ -731,14 +959,15 @@ public class HarpoonHazard : MonoBehaviour
                 Fish hitF = col.GetComponent<Fish>() ?? col.GetComponentInParent<Fish>();
                 if (hitF != null && !hitF.IsDead && !hitF.IsHooked && hitF.gameObject.activeInHierarchy)
                 {
-                    // Harpoon ignores small Level 1 fish and Golden Fish
-                    if (hitF.Level < 2 || hitF.IsGoldenFish) continue;
+                    // Harpoon ignores small Level 1 fish, Golden Fish, and Cuttlefish
+                    if (hitF.Level < 2 || hitF.IsGoldenFish || hitF.IsCuttlefish) continue;
 
                     float t = hits[i].fraction;
                     if (t < bestT)
                     {
                         bestT = t;
                         hitIsPlayer = false;
+                        bestHitShark = null;
                         bestHitFish = hitF;
                         hitPosition = hits[i].point;
                     }
@@ -747,7 +976,13 @@ public class HarpoonHazard : MonoBehaviour
         }
 
         // Apply hit to the first target encountered along the line
-        if (hitIsPlayer && hitPlayer != null)
+        if (bestHitShark != null)
+        {
+            transform.position = hitPosition;
+            ImpaleShark(bestHitShark);
+            return true;
+        }
+        else if (hitIsPlayer && hitPlayer != null)
         {
             transform.position = hitPosition;
             ImpalePlayer(hitPlayer);
@@ -766,37 +1001,75 @@ public class HarpoonHazard : MonoBehaviour
     private float SqrDistanceToSegment(Vector2 p, Vector2 a, Vector2 b, out float t)
     {
         Vector2 ab = b - a;
-        float lenSqr = ab.sqrMagnitude;
-        if (lenSqr < 0.0001f)
+        float abSqr = ab.sqrMagnitude;
+        if (abSqr < 0.0001f)
         {
             t = 0f;
             return (p - a).sqrMagnitude;
         }
-        t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / lenSqr);
-        Vector2 proj = a + t * ab;
-        return (p - proj).sqrMagnitude;
+        t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / abSqr);
+        Vector2 projection = a + (ab * t);
+        return (p - projection).sqrMagnitude;
     }
 
-    private void ImpalePlayer(PlayerController pc)
+    /// <summary>
+    /// Freezes the shark, locks it onto the harpoon tip,
+    /// stops the downward plunge, and reels the shark up to the boat (at slightly reduced speed).
+    /// </summary>
+    public void ImpaleShark(SharkHazard shark)
     {
-        if (caughtPlayer != null || caughtFish != null || pc == null || !pc.IsAlive || pc.IsHooked) return;
+        if (shark == null || (shark.IsDead && caughtShark == shark)) return;
 
-        caughtPlayer = pc;
-        ElevateFishSortingOrder(pc.gameObject);
+        caughtShark = shark;
+        caughtVictimOffset = 0f;
+        caughtSharkWorldRot = shark.transform.rotation;
 
-        if (bubbleTrail != null && bubbleTrail.isPlaying) bubbleTrail.Stop();
+        shark.OnHarpoonImpaled(this);
+        shark.transform.position = transform.position;
+
+        ElevateFishSortingOrder(shark.gameObject);
+
+        if (linkedBoat != null)
+        {
+            linkedBoat.OnSharkImpaled(shark);
+        }
 
         StartImpactAbsorb();
-        PlayStabAudio(transform.position, isPlayer: true);
-        pc.OnHarpoonImpaled(this);
+        PlayStabAudio(shark.transform.position, isPlayer: false);
     }
 
+    /// <summary>
+    /// Freezes the player's movement, locks them onto the harpoon tip,
+    /// stops the downward plunge, and reels the player all the way to the boat!
+    /// </summary>
+    private void ImpalePlayer(PlayerController player)
+    {
+        if (player == null || !player.IsAlive || player.IsHooked) return;
+
+        caughtPlayer = player;
+        caughtVictimOffset = 0f; // Buried right in the center of the torso
+
+        // Disable player physics and control immediately
+        player.OnHarpoonImpaled(this);
+
+        // Center player on the harpoon tip in world space
+        player.transform.position = transform.position;
+
+        // Elevate player sorting order so player body renders in front of the harpoon shaft (135 vs 130),
+        // making the harpoon look buried inside the player's flesh rather than pasted on top of it.
+        ElevateFishSortingOrder(player.gameObject);
+
+        StartImpactAbsorb();
+        PlayStabAudio(player.transform.position, isPlayer: true);
+    }
+
+    /// <summary>
+    /// Freezes the AI fish's movement, locks it onto the harpoon tip,
+    /// stops the downward plunge, and reels the fish all the way to the boat!
+    /// </summary>
     private void ImpaleFish(Fish fish)
     {
-        if (caughtFish != null || caughtPlayer != null || fish == null || fish.IsDead || fish.IsHooked || !fish.gameObject.activeInHierarchy) return;
-        if (fish.Level < 2 || fish.IsGoldenFish) return;
-
-        if (bubbleTrail != null && bubbleTrail.isPlaying) bubbleTrail.Stop();
+        if (fish == null || fish.IsDead || fish.IsHooked) return;
 
         StartImpactAbsorb();
         PlayStabAudio(fish.transform.position, isPlayer: false);
@@ -807,8 +1080,7 @@ public class HarpoonHazard : MonoBehaviour
     {
         if (currentState != HarpoonState.Descending && currentState != HarpoonState.AtBottom) return;
 
-        if (other.GetComponentInParent<SharkHazard>() != null || 
-            other.GetComponentInParent<Hazard>() != null || 
+        if (other.GetComponentInParent<Hazard>() != null || 
             other.GetComponentInParent<HarpoonHazard>() != null ||
             other.GetComponentInParent<FishermanBoat>() != null || 
             other.GetComponentInParent<RiverBoat>() != null) 
@@ -816,7 +1088,15 @@ public class HarpoonHazard : MonoBehaviour
             return;
         }
 
-        // 1. Check Player
+        // 1. Check Shark Hazard (1-shot impale and lift up)
+        SharkHazard shark = other.GetComponentInParent<SharkHazard>();
+        if (shark != null && !shark.IsDead)
+        {
+            ImpaleShark(shark);
+            return;
+        }
+
+        // 2. Check Player
         PlayerController pc = other.GetComponentInParent<PlayerController>();
         if (pc != null && pc.IsAlive && !pc.IsHooked)
         {
@@ -824,12 +1104,12 @@ public class HarpoonHazard : MonoBehaviour
             return;
         }
 
-        // 2. Check AI Fish
-        if (caughtFish != null || caughtPlayer != null) return;
+        // 3. Check AI Fish
+        if (caughtFish != null || caughtPlayer != null || caughtShark != null) return;
         Fish fish = other.GetComponent<Fish>() ?? other.GetComponentInParent<Fish>();
         if (fish != null && !fish.IsDead && !fish.IsHooked && fish.gameObject.activeInHierarchy)
         {
-            if (fish.Level < 2 || fish.IsGoldenFish) return;
+            if (fish.Level < 2 || fish.IsGoldenFish || fish.IsCuttlefish) return;
             ImpaleFish(fish);
         }
     }
@@ -856,13 +1136,18 @@ public class HarpoonHazard : MonoBehaviour
         float easeOut = 1f - (1f - t) * (1f - t);
         transform.position = Vector3.Lerp(impactStartPos, impactTargetPos, easeOut);
 
+        Vector3 spearedWorldPos = transform.TransformPoint(new Vector3(0f, caughtVictimOffset, 0f));
+        if (caughtShark != null && caughtShark.gameObject.activeInHierarchy)
+        {
+            caughtShark.transform.position = spearedWorldPos;
+        }
         if (caughtPlayer != null && caughtPlayer.gameObject.activeInHierarchy)
         {
-            caughtPlayer.transform.position = transform.position;
+            caughtPlayer.transform.position = spearedWorldPos;
         }
         if (caughtFish != null && caughtFish.gameObject.activeInHierarchy)
         {
-            caughtFish.transform.position = transform.position;
+            caughtFish.transform.position = spearedWorldPos;
         }
 
         if (t >= 1f)
@@ -872,6 +1157,8 @@ public class HarpoonHazard : MonoBehaviour
 
             if (audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
             {
+                audioSource.spatialBlend = 1.0f;
+                audioSource.volume = HarpoonReelVolume;
                 audioSource.clip = reelSound;
                 audioSource.loop = true;
                 audioSource.Play();
@@ -887,8 +1174,6 @@ public class HarpoonHazard : MonoBehaviour
     {
         if (stabSound == null || !AudioSettingsManager.IsSfxEnabled) return;
 
-        float volume = 1.0f;
-        float pan = 0f;
         float pitch = Random.Range(0.96f, 1.04f);
 
         Transform playerTransform = null;
@@ -904,9 +1189,7 @@ public class HarpoonHazard : MonoBehaviour
 
         if (isPlayer || playerTransform == null)
         {
-            volume = 1.0f;
-            pan = 0f;
-            pitch = 1.0f;
+            SFXPool.Play2D(stabSound, 1.0f, 1.0f);
             if (GameManager.instance != null)
             {
                 GameManager.instance.CameraShake(0.22f, 5.5f, 2.2f);
@@ -914,44 +1197,14 @@ public class HarpoonHazard : MonoBehaviour
         }
         else
         {
+            SFXPool.Play3D(stabSound, victimPos, 1.0f, 4.0f, 30.0f, pitch);
+
             float dist = Vector2.Distance(victimPos, playerTransform.position);
-            const float minDist = 4.0f;
-            const float maxDist = 26.0f;
-
-            if (dist <= minDist)
-            {
-                volume = 0.95f;
-            }
-            else if (dist >= maxDist)
-            {
-                volume = 0.06f;
-            }
-            else
-            {
-                float t = (dist - minDist) / (maxDist - minDist);
-                volume = Mathf.Lerp(0.95f, 0.06f, t * t);
-            }
-
-            pan = Mathf.Clamp((victimPos.x - playerTransform.position.x) / 14.0f, -0.85f, 0.85f);
-
             if (dist < 14.0f && GameManager.instance != null)
             {
                 float shakeIntensity = (1.0f - (dist / 14.0f)) * 2.0f;
                 GameManager.instance.CameraShake(0.12f, shakeIntensity, 1.5f);
             }
-        }
-
-        if (stabAudioSource != null)
-        {
-            stabAudioSource.mute = false;
-            stabAudioSource.panStereo = pan;
-            stabAudioSource.pitch = pitch;
-            stabAudioSource.PlayOneShot(stabSound, volume);
-        }
-        else if (audioSource != null)
-        {
-            audioSource.panStereo = pan;
-            audioSource.PlayOneShot(stabSound, volume);
         }
     }
 
@@ -962,6 +1215,7 @@ public class HarpoonHazard : MonoBehaviour
     private void CatchFish(Fish fish)
     {
         caughtFish = fish;
+        caughtVictimOffset = 0f; // Buried right in the center of the fish's torso
 
         // Notify fish that it has been impaled by the harpoon to cleanly freeze autonomy and preserve exact scale
         fish.OnHarpoonImpaled(this);
@@ -972,14 +1226,15 @@ public class HarpoonHazard : MonoBehaviour
         caughtFishWorldRot = fish.transform.rotation;
         fish.transform.position = transform.position;
 
-        // Elevate fish sorting order so it renders in front of the boat hull and line
+        // Elevate fish sorting order so fish body renders in front of the harpoon shaft (135 vs 130),
+        // making the harpoon look buried inside the fish's flesh rather than pasted on top of it.
         ElevateFishSortingOrder(fish.gameObject);
     }
 
     /// <summary>
     /// Temporarily raises the sortingOrder of all SpriteRenderers on the caught fish
-    /// so it renders cleanly in front of the boat hull (3), wake (4), and cable line (7),
-    /// preventing the fish from slipping behind the boat hull while the cable stays in front.
+    /// so the fish renders in front of the harpoon shaft (135 vs 130),
+    /// making the spear look authentically embedded inside the fish's flesh.
     /// </summary>
     private void ElevateFishSortingOrder(GameObject fishObj)
     {
@@ -991,8 +1246,8 @@ public class HarpoonHazard : MonoBehaviour
             {
                 elevatedRenderers.Add(srs[i]);
                 originalSortingOrders.Add(srs[i].sortingOrder);
-                // Ensure fish is in front of boat/cable without dropping behind foreground parallax (min 65)
-                srs[i].sortingOrder = Mathf.Max(srs[i].sortingOrder, 65);
+                // Ensure fish renders in front of spear (135 > 130)
+                srs[i].sortingOrder = 135;
             }
         }
     }

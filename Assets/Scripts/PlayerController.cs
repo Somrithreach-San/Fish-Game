@@ -10,7 +10,7 @@ public class PlayerController : MonoBehaviour
 {
     #region INSPECTOR
     [SerializeField]
-    private float moveSpeed = 5f;
+    private float moveSpeed = 8.0f; // Organic, energetic swim speed (Feeding Frenzy style)
 
     [SerializeField]
     private int maxLevel = 6; // Increased to 6 to support Level 6 growth
@@ -28,6 +28,12 @@ public class PlayerController : MonoBehaviour
     public AudioClip[] BiteSounds => biteSounds;
     [SerializeField]
     private AudioClip deathSound;
+    [SerializeField]
+    private AudioClip lakeDeathSound;
+    public AudioClip LakeDeathSound => lakeDeathSound;
+    [SerializeField]
+    private AudioClip sickFishEatSound;
+    public AudioClip SickFishEatSound => sickFishEatSound;
     [SerializeField]
     private AudioClip growSound;
     [SerializeField]
@@ -47,10 +53,16 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private Texture2D bubbleTexture;
     public Texture2D BubbleTexture => bubbleTexture; // Public accessor
+    public ParticleSystem SpeedEffect => speedEffect;
 
     [Header("Eat Effects")]
     [SerializeField]
     private ParticleSystem eatEffect;
+    public ParticleSystem EatEffect => eatEffect;
+
+    public static Sprite LastKillerSprite = null;
+    public static Color LastKillerColor = Color.white;
+    public static bool LastKillerIsSick = false;
     [Tooltip("Assign multiple bubble textures here for variety")]
     [SerializeField]
     private Texture2D[] eatBubbleVariants;
@@ -59,12 +71,20 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private Sprite idleSprite; // Closed mouth
     [SerializeField]
-    private Sprite eatSprite; // Open mouth
+    private Sprite halfBiteSprite; // Half-open mouth
+    [SerializeField]
+    private Sprite eatSprite; // Fully open mouth
     
     [Header("Manual Level Scaling")]
-    [Tooltip("Define exact scale for each level (Index 0 = Level 1, Index 1 = Level 2, etc.)")]
+    [Tooltip("Define exact scale for each level in Ocean levels (Index 0 = Level 1, Index 1 = Level 2, etc.)")]
     [SerializeField]
-    private float[] levelScales = new float[] { 0.5f, 0.62f, 0.74f, 0.86f, 0.98f, 1.1f };
+    private float[] levelScales = new float[] { 0.42f, 0.58f, 0.78f, 1.02f, 1.30f, 1.60f };
+
+    [Tooltip("Define exact scale for each level in River levels")]
+    [SerializeField]
+    private float[] riverLevelScales = new float[] { 0.60f, 0.78f, 0.98f, 1.40f, 1.80f, 2.10f };
+
+    private Coroutine growthCoroutine;
 
     #endregion
 
@@ -111,9 +131,9 @@ public class PlayerController : MonoBehaviour
     // Boost fields
     [Header("Boost")]
     [SerializeField]
-    private float boostMultiplier = 1.6f;
+    private float boostMultiplier = 1.80f;
     [SerializeField]
-    private float boostDuration = 0.6f;
+    private float boostDuration = 0.45f;
     private float currentSpeedMultiplier = 1f;
     private float boostTimer = 0f;
 
@@ -124,18 +144,30 @@ public class PlayerController : MonoBehaviour
     
     // Visuals
     private float currentBaseScale = 1f;
+    public float CurrentBaseScale => currentBaseScale;
     private float lastBubbleScaleApplied = -1f;
     private SpriteRenderer spriteRenderer;
     private float baseMoveSpeed;
     
     // Physics & Movement
     private Rigidbody2D rb;
-    private Vector2 _moveInput; // Raw input direction * speed factor
-    private Vector2 _smoothVelocity; // For SmoothDamp
-    [Header("Movement Polish")]
-    [SerializeField] private float smoothTime = 0.03f; // Reduced for snappier response (was 0.05f)
-    [SerializeField] private float tiltAngle = 20f; // Max tilt angle in degrees
-    [SerializeField] private float tiltSpeed = 10f; // How fast we tilt
+    private Vector2 _targetVelocity = Vector2.zero;
+    private Vector2 _targetWorldPos = Vector2.zero;
+    private bool _hasInitializedTarget = false;
+    private bool _isMouseControl = false;
+    public bool IsDropping { get; set; } = false;
+
+    public void SetTargetPosition(Vector2 pos)
+    {
+        _targetWorldPos = pos;
+        _hasInitializedTarget = true;
+    }
+
+    [Header("Movement Polish (Feeding Frenzy Style)")]
+    [SerializeField] private float swimAcceleration = 42f; // Snappy propulsion while moving mouse
+    [SerializeField] private float waterDrag = 14f; // Underwater friction: slides for a bit then stops
+    [SerializeField] private float tiltAngle = 24f; // Max tilt angle in degrees
+    [SerializeField] private float tiltSpeed = 16f; // How fast we tilt
     
     // Optimization: Cache the generated material to prevent lag on spawn
     private static Material _cachedGeneratedMaterial;
@@ -147,22 +179,83 @@ public class PlayerController : MonoBehaviour
 
     public Vector2 Velocity => rb != null ? rb.linearVelocity : Vector2.zero;
 
-    public void EatPearl(float pearlXp, Vector3 pearlWorldPos)
+    // Poison / Sick Fish Debuff (Feeding Frenzy Style)
+    private float poisonTimer = 0f;
+    public bool IsPoisoned => poisonTimer > 0f;
+
+    // Ink Disorientation (from Cuttlefish ink)
+    private float inkDisorientTimer = 0f;
+    public bool IsDisorientedByInk => inkDisorientTimer > 0f && (InkScreenOverlay.Instance == null || InkScreenOverlay.IsBlindingActive);
+
+    public void ApplyInkDisorientation(float duration = 5.0f)
+    {
+        inkDisorientTimer = duration;
+    }
+
+    public float GetActiveSpeedMultiplier()
+    {
+        float mult = currentSpeedMultiplier;
+        if (IsPoisoned) mult *= 0.65f;
+        if (IsDisorientedByInk)
+        {
+            float alpha = InkScreenOverlay.BlindingAlpha;
+            mult *= Mathf.Lerp(1.0f, 0.35f, alpha);
+        }
+        return mult;
+    }
+
+    public void ApplyPoisonDebuff(float duration = 3.5f)
+    {
+        poisonTimer = duration;
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.color = new Color(0.72f, 1f, 0.72f, 1f); // Sickly green tint
+        }
+    }
+
+    public void ReducePoisonTime(float amount = 0.65f)
+    {
+        if (poisonTimer > 0f)
+        {
+            poisonTimer = Mathf.Max(0f, poisonTimer - amount);
+            if (poisonTimer <= 0f && spriteRenderer != null)
+            {
+                spriteRenderer.color = Color.white;
+            }
+        }
+    }
+
+    public void EatPearl(float pearlXp, Vector3 pearlWorldPos, bool isBlackPearl = false)
     {
         if (!isAlive || isPaused) return;
 
+        LevelManager.RecordPearlEaten(isBlackPearl);
         PlayEatEffect();
 
-        int finalXp = Mathf.RoundToInt(pearlXp * xpMultiplier);
-        currentXp += finalXp;
-        score += (finalXp * Level);
-
-        if (GuiManager.instance != null)
+        if (isBlackPearl)
         {
-            GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
-            string prefix = "÷";
-            Color xpColor = (xpMultiplier > 1f) ? new Color(1f, 0.8f, 0f, 1f) : new Color(1f, 0.9f, 0.4f, 1f);
-            GuiManager.instance.ShowFloatingText(pearlWorldPos, prefix + finalXp + " BinÞú", xpColor);
+            if (PlayerAbilitySystem.Instance != null)
+            {
+                PlayerAbilitySystem.Instance.TriggerBlackPearlBonus();
+            }
+
+            if (GuiManager.instance != null)
+            {
+                // Display sprite-based 'x5' popup matching the streak HUD style
+                GuiManager.instance.ShowFloatingStreakBonus(pearlWorldPos, 5);
+            }
+        }
+        else
+        {
+            int finalXp = Mathf.RoundToInt(pearlXp * xpMultiplier);
+            currentXp += finalXp;
+            score += (finalXp * Level);
+
+            if (GuiManager.instance != null)
+            {
+                GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+                GuiManager.instance.ShowFloatingXp(pearlWorldPos, finalXp);
+            }
         }
 
         if (audioSource != null && biteSounds != null && biteSounds.Length > 0 && AudioSettingsManager.IsSfxEnabled)
@@ -175,11 +268,18 @@ public class PlayerController : MonoBehaviour
     public void OnHarpoonImpaled(HarpoonHazard harpoon)
     {
         if (!isAlive || isHooked) return;
+
+        // Cancel any active special ability immediately upon being impaled
+        if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive)
+        {
+            PlayerAbilitySystem.Instance.EndAbility();
+        }
+
         isHooked = true;
         caughtHarpoon = harpoon;
         caughtHazard = null;
         hookElapsedTime = 0f;
-        _moveInput = Vector2.zero;
+        _targetVelocity = Vector2.zero;
         if (rb != null)
         {
             rb.linearVelocity = Vector2.zero;
@@ -228,6 +328,9 @@ public class PlayerController : MonoBehaviour
         }
 
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        EventManager.StopListening("GameWin", StopMovementForGameEnd);
+        EventManager.StopListening("GameLoss", StopMovementForGameEnd);
+        EventManager.StopListening("playerDeath", StopMovementForGameEnd);
     }
 
     private void HandleSfxSettingChanged(bool enabled)
@@ -238,6 +341,10 @@ public class PlayerController : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        LastKillerSprite = null;
+        LastKillerColor = Color.white;
+        LastKillerIsSick = false;
+
         // USER REQUEST: "Feeding Frenzy" Style Progression
         // Level 1 takes ~15 minnows (120 XP / 8 XP) to advance, preventing instant level skips.
         baseXpRequirement = 120;
@@ -285,11 +392,41 @@ public class PlayerController : MonoBehaviour
 #if UNITY_EDITOR
                  var closedAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_closed mouth.png");
                  foreach (var a in closedAssets) { if (a is Sprite s) { idleSprite = s; break; } }
+                 var halfAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_half-open mouth.png");
+                 foreach (var a in halfAssets) { if (a is Sprite s) { halfBiteSprite = s; break; } }
                  var openAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_ open mouth.png");
                  foreach (var a in openAssets) { if (a is Sprite s) { eatSprite = s; break; } }
 #endif
                  if (idleSprite == null) idleSprite = Resources.Load<Sprite>("river player_fish_closed mouth");
+                 if (halfBiteSprite == null) halfBiteSprite = Resources.Load<Sprite>("river player_fish_half-open mouth");
                  if (eatSprite == null) eatSprite = Resources.Load<Sprite>("river player_fish_ open mouth");
+             }
+             else
+             {
+#if UNITY_EDITOR
+                 if (idleSprite == null)
+                 {
+                     var closedAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Mouth Closed.png");
+                     foreach (var a in closedAssets) { if (a is Sprite s) { idleSprite = s; break; } }
+                 }
+                 if (halfBiteSprite == null)
+                 {
+                     var halfAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Mouth_Half_Open.png");
+                     foreach (var a in halfAssets) { if (a is Sprite s) { halfBiteSprite = s; break; } }
+                 }
+                 if (eatSprite == null)
+                 {
+                     var openAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Full_Mouth_Open.png");
+                     foreach (var a in openAssets) { if (a is Sprite s) { eatSprite = s; break; } }
+                 }
+                 if (eatSprite == null)
+                 {
+                     eatSprite = halfBiteSprite;
+                 }
+#endif
+                 if (idleSprite == null) idleSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Mouth Closed") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Mouth Closed");
+                 if (halfBiteSprite == null) halfBiteSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Mouth_Half_Open") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Mouth_Half_Open");
+                 if (eatSprite == null) eatSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Full_Mouth_Open") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Full_Mouth_Open") ?? halfBiteSprite;
              }
 
              if (spriteRenderer != null && idleSprite != null)
@@ -334,21 +471,29 @@ public class PlayerController : MonoBehaviour
 
         //Listen to game pause event to update isPaused
         EventManager.StartListening<bool>("gamePaused", (param) => { isPaused = param; });
+        EventManager.StartListening("GameWin", StopMovementForGameEnd);
+        EventManager.StartListening("GameLoss", StopMovementForGameEnd);
+        EventManager.StartListening("playerDeath", StopMovementForGameEnd);
 
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        AudioSettingsManager.RouteToSfx(audioSource);
 
-        // Ensure AudioListener is on the player or camera
+        // Ensure exactly one AudioListener exists in the scene
         audioListener = GetComponent<AudioListener>();
         if (audioListener == null)
         {
-            // Usually listener is on Camera, but for 2D top-down where player is center, 
-            // having it on player or camera (which follows player) is fine.
-            // Let's check Main Camera first
-            if (Camera.main != null && Camera.main.GetComponent<AudioListener>() == null)
+            if (FindFirstObjectByType<AudioListener>() == null)
             {
-                 Camera.main.gameObject.AddComponent<AudioListener>();
+                if (Camera.main != null && Camera.main.GetComponent<AudioListener>() == null)
+                {
+                    Camera.main.gameObject.AddComponent<AudioListener>();
+                }
+                else
+                {
+                    audioListener = gameObject.AddComponent<AudioListener>();
+                }
             }
         }
         if (audioSource == null)
@@ -364,14 +509,21 @@ public class PlayerController : MonoBehaviour
         GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
 
         // Enforce initial scale based on manual array
-        if (levelScales != null && levelScales.Length >= Level)
+        float[] activeScales = GetCurrentLevelScales();
+        if (activeScales != null && activeScales.Length >= Level)
         {
-             currentBaseScale = levelScales[Level - 1];
+             currentBaseScale = activeScales[Level - 1];
              float scale = currentBaseScale;
              transform.localScale = new Vector3(scale, scale, 1);
+             UpdateCollision();
         }
 
         baseMoveSpeed = moveSpeed;
+
+        if (GetComponent<PlayerAbilitySystem>() == null)
+        {
+            gameObject.AddComponent<PlayerAbilitySystem>();
+        }
     }
 
     //==============================| Public API for Effects |========================//
@@ -398,6 +550,16 @@ public class PlayerController : MonoBehaviour
         {
             speedEffect.Stop();
         }
+    }
+
+    private void StopMovementForGameEnd()
+    {
+        _targetVelocity = Vector2.zero;
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+        }
+        StopSpeedEffect();
     }
 
     private void UpdateBubbleParticles()
@@ -450,6 +612,10 @@ public class PlayerController : MonoBehaviour
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 0f);
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f);
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Size over Lifetime: Grow then pop
@@ -569,6 +735,10 @@ public class PlayerController : MonoBehaviour
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 1f); // Drift left/right
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f); // Always go up-ish
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Color/Fade
@@ -646,54 +816,96 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // Unified Input (Mouse & Touch & Joystick)
+    // Unified Input (Mouse & Touch & Joystick - Feeding Frenzy Style)
     void HandleInput()
     {
+        if (IsDropping || !isAlive || isHooked || isPaused || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver))
+        {
+            _targetVelocity = Vector2.zero;
+            if (rb != null) rb.linearVelocity = Vector2.zero;
+            if (IsDropping) _targetWorldPos = transform.position;
+            return;
+        }
+
         Vector3 moveDir = Vector3.zero;
         float speedFactor = 0f;
-        bool hasInput = false;
         bool boostInput = false;
-        // Robust Mobile Check (Matches MobileJoystick logic)
-        // Fix: Removed Input.touchSupported to prevent false positives on Desktop with touch screens
         bool isMobile = Application.isMobilePlatform || 
                        UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld;
 
-        // 0. Mobile Joystick (New)
-        if (MobileJoystick.Instance != null && MobileJoystick.Instance.InputDirection != Vector2.zero)
+        // Gamepad Dual-Stick & Triggers Support (Authentic Feeding Frenzy Console Style)
+        bool hasGamepad = Gamepad.current != null;
+        Vector2 leftStick = hasGamepad ? Gamepad.current.leftStick.ReadValue() : Vector2.zero;
+        Vector2 rightStick = hasGamepad ? Gamepad.current.rightStick.ReadValue() : Vector2.zero;
+        Vector2 stickInput = (leftStick.sqrMagnitude > rightStick.sqrMagnitude) ? leftStick : rightStick;
+
+        bool gamepadBoostPressed = hasGamepad && (Gamepad.current.aButton.wasPressedThisFrame || 
+                                                 Gamepad.current.leftTrigger.wasPressedThisFrame || 
+                                                 Gamepad.current.leftShoulder.wasPressedThisFrame);
+
+        bool gamepadPausePressed = hasGamepad && Gamepad.current.startButton.wasPressedThisFrame;
+        if (gamepadPausePressed && GameManager.instance != null)
         {
-            moveDir = new Vector3(MobileJoystick.Instance.InputDirection.x, MobileJoystick.Instance.InputDirection.y, 0f);
-            speedFactor = moveDir.magnitude;
-            moveDir.Normalize();
-            hasInput = true;
+            GameManager.instance.PlayPause();
         }
 
-        // 2. Mouse Input
-        else if (!hasInput && !isMobile && Mouse.current != null)
+        // 0. Gamepad Dual Sticks (Left Stick or Right Stick)
+        if (stickInput.sqrMagnitude > 0.04f)
         {
-            Vector2 inputScreenPos = Mouse.current.position.ReadValue();
-            
-            // Fix: Check for valid screen coordinates to prevent "Screen position out of view frustum" error
-            if (!float.IsFinite(inputScreenPos.x) || !float.IsFinite(inputScreenPos.y))
+            _isMouseControl = false;
+            moveDir = new Vector3(stickInput.x, stickInput.y, 0f);
+            speedFactor = Mathf.Clamp01(moveDir.magnitude);
+            moveDir.Normalize();
+
+            if (Mathf.Abs(moveDir.x) > 0.15f)
             {
-                _moveInput = Vector2.zero;
-                return;
+                float targetFacing = Mathf.Sign(moveDir.x);
+                transform.localScale = new Vector3(targetFacing * currentBaseScale, currentBaseScale, 1f);
             }
+            float speedMult = GetActiveSpeedMultiplier();
+            _targetVelocity = moveDir * (moveSpeed * speedMult * speedFactor);
+        }
+        // 1. Mobile Joystick
+        else if (MobileJoystick.Instance != null && MobileJoystick.Instance.InputDirection != Vector2.zero)
+        {
+            _isMouseControl = false;
+            moveDir = new Vector3(MobileJoystick.Instance.InputDirection.x, MobileJoystick.Instance.InputDirection.y, 0f);
+            speedFactor = Mathf.Clamp01(moveDir.magnitude);
+            moveDir.Normalize();
 
-            if (_mainCamera != null)
+            if (Mathf.Abs(moveDir.x) > 0.15f)
             {
-                Vector3 worldTarget = _mainCamera.ScreenToWorldPoint(new Vector3(inputScreenPos.x, inputScreenPos.y, Mathf.Abs(_mainCamera.transform.position.z - transform.position.z)));
-                worldTarget.z = transform.position.z;
+                float targetFacing = Mathf.Sign(moveDir.x);
+                transform.localScale = new Vector3(targetFacing * currentBaseScale, currentBaseScale, 1f);
+            }
+            float speedMult = GetActiveSpeedMultiplier();
+            _targetVelocity = moveDir * (moveSpeed * speedMult * speedFactor);
+        }
+        // 2. Mouse Input (Feeding Frenzy: Fish swims toward mouse position, smoothly eases/slides to stop at cursor)
+        else if (!isMobile && Mouse.current != null)
+        {
+            _isMouseControl = true;
+            Vector2 inputScreenPos = Mouse.current.position.ReadValue();
+            Vector2 mouseDelta = Mouse.current.delta.ReadValue();
 
-                Vector3 diff = worldTarget - transform.position;
-                float distance = diff.magnitude;
-                
-                float stopDistance = 0.2f; 
-                if (distance >= stopDistance)
+            if (float.IsFinite(inputScreenPos.x) && float.IsFinite(inputScreenPos.y) && _mainCamera != null)
+            {
+                if (mouseDelta.sqrMagnitude > 0.05f || !_hasInitializedTarget)
                 {
-                    float speedRampRadius = 4.0f; 
-                    speedFactor = Mathf.Clamp01((distance - stopDistance) / speedRampRadius);
-                    moveDir = diff.normalized;
-                    hasInput = true;
+                    Vector3 worldTarget = _mainCamera.ScreenToWorldPoint(new Vector3(inputScreenPos.x, inputScreenPos.y, Mathf.Abs(_mainCamera.transform.position.z - transform.position.z)));
+                    _targetWorldPos = new Vector2(worldTarget.x, worldTarget.y);
+                    _hasInitializedTarget = true;
+                }
+
+                // Instant Facing Flip
+                float dx = _targetWorldPos.x - transform.position.x;
+                if (dx < -0.05f)
+                {
+                    transform.localScale = new Vector3(-currentBaseScale, currentBaseScale, 1f);
+                }
+                else if (dx > 0.05f)
+                {
+                    transform.localScale = new Vector3(currentBaseScale, currentBaseScale, 1f);
                 }
             }
 
@@ -702,83 +914,80 @@ public class PlayerController : MonoBehaviour
                 boostInput = true;
             }
         }
+        // 3. Keyboard Input (WASD / Arrows)
+        else if (Keyboard.current != null)
+        {
+            _isMouseControl = false;
+            float kx = 0f;
+            float ky = 0f;
+            if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) kx -= 1f;
+            if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) kx += 1f;
+            if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) ky += 1f;
+            if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) ky -= 1f;
 
-        // Set Input
-        if (hasInput)
-        {
-            _moveInput = moveDir * speedFactor;
-        }
-        else
-        {
-            _moveInput = Vector2.zero;
-        }
-
-        // 4. Visuals: Flip Left/Right & Tilt (Based on Physics Velocity)
-        if (rb.linearVelocity.magnitude > 0.1f)
-        {
-            // Flip: Only update facing direction if we have significant X movement
-            // This prevents flipping when moving purely vertically (fixes jitter)
-            if (Mathf.Abs(rb.linearVelocity.x) > 0.1f)
+            if (kx != 0f || ky != 0f)
             {
-                float directionSign = Mathf.Sign(rb.linearVelocity.x);
-                
-                // Calculate final scale
-                float finalScale = currentBaseScale;
-                Vector3 newScale = new Vector3(finalScale, finalScale, 1f);
-                
-                newScale.x = directionSign * finalScale; // Keep Magnitude, Flip Sign
-                transform.localScale = newScale;
+                moveDir = new Vector3(kx, ky, 0f).normalized;
+                if (Mathf.Abs(kx) > 0.05f)
+                {
+                    float targetFacing = Mathf.Sign(kx);
+                    transform.localScale = new Vector3(targetFacing * currentBaseScale, currentBaseScale, 1f);
+                }
+                float speedMult = GetActiveSpeedMultiplier();
+                _targetVelocity = moveDir * (moveSpeed * speedMult);
             }
-
-            // Lock Rotation (No upside down) if we have a separate graphics object
-            if (playerGraphics != transform)
+            else
             {
-                transform.rotation = Quaternion.identity;
-            }
-            
-            // Apply Tilt to Graphics ("Feeding Frenzy" Style)
-            if (playerGraphics != null)
-            {
-                // Calculate target tilt based on Y velocity
-                // Tilt Up if moving Up, Down if moving Down
-                float yVel = rb.linearVelocity.y;
-                float targetTilt = Mathf.Clamp(yVel * 3f, -tiltAngle, tiltAngle); // *3 multiplier for responsiveness
-                
-                float currentZ = playerGraphics.localEulerAngles.z;
-                float newZ = Mathf.LerpAngle(currentZ, targetTilt, tiltSpeed * Time.deltaTime);
-                
-                playerGraphics.localRotation = Quaternion.Euler(0, 0, newZ);
+                _targetVelocity = Vector2.zero;
             }
         }
         else
         {
-            // Reset tilt when stopped
-            if (playerGraphics != null)
+            _isMouseControl = false;
+            _targetVelocity = Vector2.zero;
+        }
+
+        // Lock transform rotation
+        if (playerGraphics != transform)
+        {
+            transform.rotation = Quaternion.identity;
+        }
+
+        // Visual Pitch / Tilt: Dynamic angular swimming curves based on real velocity
+        if (playerGraphics != null && rb != null)
+        {
+            if (rb.linearVelocity.sqrMagnitude > 0.08f)
+            {
+                float facing = Mathf.Sign(transform.localScale.x);
+                float forwardX = rb.linearVelocity.x * facing;
+                float velY = rb.linearVelocity.y;
+                float targetTilt = Mathf.Atan2(velY, Mathf.Max(0.5f, forwardX)) * Mathf.Rad2Deg;
+                targetTilt = Mathf.Clamp(targetTilt, -tiltAngle, tiltAngle);
+
+                float currentZ = playerGraphics.localEulerAngles.z;
+                if (currentZ > 180f) currentZ -= 360f;
+                float newZ = Mathf.MoveTowardsAngle(currentZ, targetTilt, tiltSpeed * 10f * Time.deltaTime);
+                playerGraphics.localRotation = Quaternion.Euler(0f, 0f, newZ);
+            }
+            else
             {
                 float currentZ = playerGraphics.localEulerAngles.z;
-                float newZ = Mathf.LerpAngle(currentZ, 0f, tiltSpeed * Time.deltaTime);
-                playerGraphics.localRotation = Quaternion.Euler(0, 0, newZ);
+                if (currentZ > 180f) currentZ -= 360f;
+                float newZ = Mathf.MoveTowardsAngle(currentZ, 0f, tiltSpeed * 8f * Time.deltaTime);
+                playerGraphics.localRotation = Quaternion.Euler(0f, 0f, newZ);
             }
         }
 
-        // else block removed (Animation cleanup)
-
-        // 5. Boost
-        // FIX: Ensure single-frame press logic for ALL inputs (Keyboard, Mouse, Mobile)
+        // Boost Input Check
         bool spacePressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-        
-        // Mobile Boost: Using WasPressedThisFrame logic from MobileBoostButton script
         bool mobileBoostPressed = MobileBoostButton.Instance != null && MobileBoostButton.Instance.WasPressedThisFrame;
+        bool anyActionPressed = (boostInput || spacePressed || mobileBoostPressed || gamepadBoostPressed);
         
-        // Mouse Boost: Already checked via wasPressedThisFrame above
-        
-        if ((boostInput || spacePressed || mobileBoostPressed) && boostTimer <= 0)
+        if (anyActionPressed && boostTimer <= 0 && !IsDropping)
         {
-            // Play Start Sound (ONCE)
-            if (audioSource != null && boostStartClip != null)
+            if (audioSource != null && boostStartClip != null && AudioSettingsManager.IsSfxEnabled)
                 audioSource.PlayOneShot(boostStartClip, boostStartVolume);
             
-            // Play Particles
             if (speedEffect != null)
             {
                 speedEffect.Play();
@@ -786,21 +995,32 @@ public class PlayerController : MonoBehaviour
 
             boostTimer = boostDuration;
             currentSpeedMultiplier = boostMultiplier;
+
+            // Instant burst impulse forward in current velocity or facing direction
+            float facing = Mathf.Sign(transform.localScale.x);
+            Vector2 boostDir = (rb != null && rb.linearVelocity.sqrMagnitude > 0.1f) 
+                ? rb.linearVelocity.normalized 
+                : new Vector2(facing, 0f);
+            if (rb != null)
+            {
+                rb.linearVelocity = boostDir * (moveSpeed * boostMultiplier);
+            }
         }
     }
 
     void FixedUpdate()
     {
-        // FIX: Stop physics movement immediately if dead or hooked
-        if (!isAlive || isHooked)
+        // FIX: Stop physics movement immediately if dead, hooked, dropping, paused, level completed or game over
+        if (!isAlive || isHooked || IsDropping || isPaused || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver))
         {
-            rb.linearVelocity = Vector2.zero;
+            if (rb != null) rb.linearVelocity = Vector2.zero;
             return;
         }
 
-        if (isPaused)
+        // River Blitz ability: automated dash routine moves transform directly
+        if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive && LevelManager.IsCurrentLakeLevel)
         {
-            rb.linearVelocity = Vector2.zero;
+            if (rb != null) rb.linearVelocity = Vector2.zero;
             return;
         }
 
@@ -809,18 +1029,58 @@ public class PlayerController : MonoBehaviour
         {
             spikeBounceTimer -= Time.fixedDeltaTime;
             rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, Vector2.zero, 16f * Time.fixedDeltaTime);
-            _smoothVelocity = Vector2.zero;
+        }
+        else if (_isMouseControl)
+        {
+            Vector2 toTarget = _targetWorldPos - rb.position;
+            float dist = toTarget.magnitude;
+
+            if (dist <= 0.04f)
+            {
+                // Reached cursor -> stop completely (zero sliding past cursor, zero jitter)
+                rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, Vector2.zero, 45f * Time.fixedDeltaTime);
+            }
+            else
+            {
+                // Maximum possible step velocity so fish NEVER overshoots the mouse cursor in one frame
+                float maxStepSpeed = (dist - 0.015f) / Time.fixedDeltaTime;
+                float speedMult = GetActiveSpeedMultiplier();
+                float cruisingSpeed = moveSpeed * speedMult;
+
+                // Organic arrival deceleration curve within 0.85m (slides for a bit, then stops)
+                float slowRadius = 0.85f;
+                float speedFactor = 1f;
+                if (dist < slowRadius)
+                {
+                    float normDist = Mathf.Clamp01(dist / slowRadius);
+                    speedFactor = normDist * (2f - normDist); // Smooth quadratic ease-out curve
+                }
+
+                float targetSpeed = Mathf.Min(cruisingSpeed * speedFactor, maxStepSpeed);
+                Vector2 targetVelocity = toTarget.normalized * targetSpeed;
+
+                // Snappy propulsion and braking
+                float currentAcc = (targetSpeed < rb.linearVelocity.magnitude) ? 55f : swimAcceleration;
+                rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, targetVelocity, currentAcc * Time.fixedDeltaTime);
+            }
+        }
+        else if (_targetVelocity.sqrMagnitude > 0.01f)
+        {
+            // Active swim propulsion while moving keys/joystick
+            rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, _targetVelocity, swimAcceleration * Time.fixedDeltaTime);
         }
         else
         {
-            float targetSpeed = moveSpeed * currentSpeedMultiplier;
-            Vector2 targetVelocity = _moveInput * targetSpeed;
-            
-            rb.linearVelocity = Vector2.SmoothDamp(rb.linearVelocity, targetVelocity, ref _smoothVelocity, smoothTime);
+            // Underwater drag: slides for a moment then stops smoothly
+            rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, Vector2.zero, waterDrag * Time.fixedDeltaTime);
+            if (rb.linearVelocity.sqrMagnitude < 0.001f)
+            {
+                rb.linearVelocity = Vector2.zero;
+            }
         }
 
         // Apply Boundaries (Camera Viewport)
-        if (_mainCamera != null)
+        if (_mainCamera != null && rb != null)
         {
             float camHeight = 2f * _mainCamera.orthographicSize;
             float camWidth = camHeight * _mainCamera.aspect;
@@ -828,8 +1088,6 @@ public class PlayerController : MonoBehaviour
             
             float halfWidth = camWidth / 2f;
             float halfHeight = camHeight / 2f;
-
-            // Option 1 (Feeding Frenzy style): Fixed margin so boundaries never pinch inward as you grow
             float margin = 0.25f; 
             
             float minX = camPos.x - halfWidth + margin;
@@ -840,32 +1098,28 @@ public class PlayerController : MonoBehaviour
             Vector2 pos = rb.position;
             Vector2 vel = rb.linearVelocity;
 
-            // Horizontal bounds: clamp position & only kill velocity pushing into the wall
+            // Horizontal bounds clamp
             if (pos.x < minX)
             {
                 pos.x = minX;
                 if (vel.x < 0f) vel.x = 0f;
-                if (_smoothVelocity.x < 0f) _smoothVelocity.x = 0f;
             }
             else if (pos.x > maxX)
             {
                 pos.x = maxX;
                 if (vel.x > 0f) vel.x = 0f;
-                if (_smoothVelocity.x > 0f) _smoothVelocity.x = 0f;
             }
 
-            // Vertical bounds: clamp position & only kill velocity pushing into the wall
+            // Vertical bounds clamp
             if (pos.y < minY)
             {
                 pos.y = minY;
                 if (vel.y < 0f) vel.y = 0f;
-                if (_smoothVelocity.y < 0f) _smoothVelocity.y = 0f;
             }
             else if (pos.y > maxY)
             {
                 pos.y = maxY;
                 if (vel.y > 0f) vel.y = 0f;
-                if (_smoothVelocity.y > 0f) _smoothVelocity.y = 0f;
             }
 
             rb.position = pos;
@@ -937,12 +1191,27 @@ public class PlayerController : MonoBehaviour
         Vector3 worldCenter = playerGraphics.TransformPoint(spriteCenter);
         Vector3 localCenter = transform.InverseTransformPoint(worldCenter);
 
-        // Apply Forgiveness (0.75f) - "Feeding Frenzy" feel (Player gets extra advantage)
-        // Enemies are 0.85f. Player is 0.75f (Harder to get hit).
-        float forgiveness = 0.75f;
-        
-        capsule.size = finalSize * forgiveness;
-        capsule.offset = localCenter;
+        // Aspect ratio check:
+        // Ocean fish is elongated (aspect ratio ~1.9:1), while River fish is round (~1:1).
+        float aspectRatio = finalSize.x / Mathf.Max(0.01f, finalSize.y);
+        if (!LevelManager.IsCurrentLakeLevel || aspectRatio > 1.6f)
+        {
+            // Elongated Ocean Fish:
+            // Extend horizontal reach forward to the snout/teeth so bites register naturally on contact.
+            // Keep vertical profile sleek (0.65f) to match the torpedo body without clipping high/low hazards.
+            float forgivenessX = 0.88f;
+            float forgivenessY = 0.65f;
+            float forwardShift = finalSize.x * 0.05f; // shifts collider forward towards the mouth
+            capsule.size = new Vector2(finalSize.x * forgivenessX, finalSize.y * forgivenessY);
+            capsule.offset = new Vector2(localCenter.x + forwardShift, localCenter.y);
+        }
+        else
+        {
+            // Standard / River Fish:
+            float forgiveness = 0.75f;
+            capsule.size = finalSize * forgiveness;
+            capsule.offset = localCenter;
+        }
         
         // Auto-Orientation
         if (finalSize.x >= finalSize.y)
@@ -973,6 +1242,10 @@ public class PlayerController : MonoBehaviour
         if (boostTimer > 0)
         {
             boostTimer -= Time.deltaTime;
+            // Ease-out curve for energetic lunge burst smoothly settling back to normal
+            float t = Mathf.Clamp01(boostTimer / boostDuration);
+            currentSpeedMultiplier = Mathf.Lerp(1.0f, boostMultiplier, Mathf.Sqrt(t));
+
             if (boostTimer <= 0)
             {
                 currentSpeedMultiplier = 1f;
@@ -984,17 +1257,50 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        // Handle Poison / Sick Fish Timer
+        if (poisonTimer > 0f)
+        {
+            poisonTimer -= Time.deltaTime;
+            if (poisonTimer <= 0f && spriteRenderer != null)
+            {
+                spriteRenderer.color = Color.white;
+            }
+        }
+
+        // Handle Ink Disorientation Timer
+        if (inkDisorientTimer > 0f)
+        {
+            if (InkScreenOverlay.Instance != null && !InkScreenOverlay.IsBlindingActive)
+            {
+                inkDisorientTimer = 0f;
+            }
+            else
+            {
+                inkDisorientTimer -= Time.deltaTime;
+            }
+        }
+
         //Movement
-        if( !isPaused && isAlive && !isHooked )
+        if (!isPaused && isAlive && !isHooked && !LevelManager.IsLevelCompleted && !(GameManager.instance != null && GameManager.instance.IsGameOver) && !(PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive && LevelManager.IsCurrentLakeLevel))
         {
             // Use mouse-based controls (original game style). Left click gives a short speed boost.
             HandleInput();
         }
-        
-        //Level Management
-        if( currentXp >= currentLevelXp)
+        else
         {
-            //Level up
+            _targetVelocity = Vector2.zero;
+            if (rb != null) rb.linearVelocity = Vector2.zero;
+        }
+        
+        // Level Management
+        while (currentXp >= currentLevelXp && isAlive && !LevelManager.IsLevelCompleted)
+        {
+            if (Level >= maxLevel)
+            {
+                currentXp = currentLevelXp; // Keep bar full for final level
+                LevelUp();
+                break;
+            }
             LevelUp();
         }
         //DebugCanvas.Set("Xp: " + currentXp.ToString() + " / " + currentLevelXp.ToString(), 2);
@@ -1005,10 +1311,23 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// Run on death event
     /// </summary>
-    public void Death()
+    public void Death(Sprite killerSprite = null, Color? killerColor = null, bool isSick = false)
     {
         if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
         if (!isAlive) return;
+
+        if (killerSprite != null)
+        {
+            LastKillerSprite = killerSprite;
+            LastKillerColor = killerColor ?? (isSick ? new Color(0.72f, 1f, 0.72f, 1f) : Color.white);
+            LastKillerIsSick = isSick;
+        }
+
+        // Cancel any active special ability immediately on death
+        if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive)
+        {
+            PlayerAbilitySystem.Instance.EndAbility();
+        }
 
         isHooked = false;
         caughtHazard = null;
@@ -1019,8 +1338,9 @@ public class PlayerController : MonoBehaviour
             if (allAnimators[i] != null) allAnimators[i].enabled = true;
         }
 
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
+        AudioClip targetDeathClip = GetDeathSoundClip();
+        if (audioSource != null && targetDeathClip != null && AudioSettingsManager.IsSfxEnabled)
+            audioSource.PlayOneShot(targetDeathClip, 1.0f);
 
         GameManager.instance.CameraShake(0.2f, 7f, 2.5f);
 
@@ -1029,12 +1349,62 @@ public class PlayerController : MonoBehaviour
         
         // FIX: Stop input and movement immediately
         isAlive = false;
-        _moveInput = Vector2.zero; 
+        _targetVelocity = Vector2.zero;
         if(rb != null) rb.linearVelocity = Vector2.zero;
+
+        // Immediately disable all colliders so dead invisible player cannot trigger physics or hazards
+        Collider2D[] allCols = GetComponentsInChildren<Collider2D>(true);
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            if (allCols[i] != null) allCols[i].enabled = false;
+        }
 
         playerGraphics.gameObject.SetActive(false);
         Destroy(gameObject, 2.5f);
 
+    }
+
+    public AudioClip GetDeathSoundClip()
+    {
+        if (LevelManager.IsCurrentLakeLevel)
+        {
+            if (lakeDeathSound != null) return lakeDeathSound;
+            #if UNITY_EDITOR
+            lakeDeathSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/gameOver_Lake.wav");
+            if (lakeDeathSound != null) return lakeDeathSound;
+            #endif
+            lakeDeathSound = Resources.Load<AudioClip>("gameOver_Lake");
+            if (lakeDeathSound != null) return lakeDeathSound;
+        }
+
+        if (deathSound != null) return deathSound;
+        #if UNITY_EDITOR
+        deathSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/playerDie.ogg");
+        if (deathSound != null) return deathSound;
+        #endif
+        deathSound = Resources.Load<AudioClip>("playerDie");
+        return deathSound;
+    }
+
+    public AudioClip GetSickFishEatSoundClip()
+    {
+        if (sickFishEatSound != null) return sickFishEatSound;
+        #if UNITY_EDITOR
+        sickFishEatSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/player_Ate_Sick_Fish.wav");
+        if (sickFishEatSound != null) return sickFishEatSound;
+        #endif
+        sickFishEatSound = Resources.Load<AudioClip>("player_Ate_Sick_Fish");
+        return sickFishEatSound;
+    }
+
+    /// <summary>
+    /// Cleanly halts player movement and physics when the result or game over modal appears.
+    /// </summary>
+    public void TerminateMovement()
+    {
+        _targetVelocity = Vector2.zero;
+        if (rb != null) rb.linearVelocity = Vector2.zero;
+        StopSpeedEffect();
     }
 
     #region Hazard Hook Interaction
@@ -1046,6 +1416,13 @@ public class PlayerController : MonoBehaviour
     public void OnHookedByHazard(Hazard hazard)
     {
         if (!isAlive || isHooked || hazard == null) return;
+
+        // Immediately cancel any active special ability upon being hooked
+        if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive)
+        {
+            PlayerAbilitySystem.Instance.EndAbility();
+        }
+
         if (!hazard.HookPlayer(this)) return;
 
         isHooked = true;
@@ -1054,7 +1431,7 @@ public class PlayerController : MonoBehaviour
         hookElapsedTime = 0f;
 
         // 1. Stop input, velocity, boost and physics simulation
-        _moveInput = Vector2.zero;
+        _targetVelocity = Vector2.zero;
         if (rb != null)
         {
             rb.linearVelocity = Vector2.zero;
@@ -1195,12 +1572,28 @@ public class PlayerController : MonoBehaviour
     public void OnReeledOutOfWater()
     {
         if (!isAlive) return;
+
+        Sprite killer = null;
+        Color killerCol = Color.white;
+        if (caughtHarpoon != null)
+        {
+            SpriteRenderer sr = caughtHarpoon.GetComponentInChildren<SpriteRenderer>();
+            killer = sr?.sprite;
+            if (sr != null) killerCol = sr.color;
+        }
+        if (killer == null && caughtHazard != null)
+        {
+            SpriteRenderer sr = caughtHazard.GetComponentInChildren<SpriteRenderer>();
+            killer = sr?.sprite;
+            if (sr != null) killerCol = sr.color;
+        }
+
         isHooked = false;
         caughtHazard = null;
         caughtHarpoon = null;
 
         // Complete the catch: trigger game over
-        Death();
+        Death(killer, killerCol, false);
     }
 
     #endregion
@@ -1212,13 +1605,14 @@ public class PlayerController : MonoBehaviour
         if (audioSource != null)
         {
             AudioClip clip = null;
-            if (fish != null && fish.EatSfxOverride != null) clip = fish.EatSfxOverride;
+            if (fish != null && fish.IsSickFish) clip = GetSickFishEatSoundClip();
+            else if (fish != null && fish.EatSfxOverride != null) clip = fish.EatSfxOverride;
             else if (biteSounds.Length > 0) clip = biteSounds[Random.Range(0, biteSounds.Length)];
-            if (clip != null) audioSource.PlayOneShot(clip);
+            if (clip != null && AudioSettingsManager.IsSfxEnabled) audioSource.PlayOneShot(clip, 1.0f);
         }
 
 
-        if (spriteRenderer != null && eatSprite != null)
+        if (spriteRenderer != null && (eatSprite != null || halfBiteSprite != null))
         {
             StartCoroutine(BiteAnimation());
         }
@@ -1231,32 +1625,51 @@ public class PlayerController : MonoBehaviour
 
         bool wasSickFish = (fish != null && fish.IsSickFish);
 
-        //Kill the referenced fish
-        LevelManager.RecordFishEaten(fish.Level, fish.IsGoldenFish);
+        // Kill the referenced fish
+        LevelManager.RecordFishEaten(fish.Level, fish.IsGoldenFish, wasSickFish);
         fish.Die();
 
-        // Check for Sick Fish (deducts XP and displays score deduction in red)
-        // User rules:
-        // 1. Never shrink the user (currentBaseScale & transform.localScale remain intact).
-        // 2. Never demote/reduce growth state (Level is strictly preserved; XP is clamped at minimum 0 for current level).
-        // 3. Never re-trigger a growth state / evolution animation when recovering XP.
+        // Check for Sick Fish (applies poison debuff and points deduction without regressing XP progress)
+        // Apex Frenzy Rule: During active ability (IsPlayerInvulnerable), frenzy cleanses toxins!
+        // No poison debuff, no point deduction, no streak reset, awards normal XP.
         if (wasSickFish)
         {
-            int penaltyXp = (fish != null && fish.Xp > 0) ? fish.Xp : 18;
-            currentXp = Mathf.Max(0, currentXp - penaltyXp);
-            score = Mathf.Max(0, score - (penaltyXp * Level));
+            if (PlayerAbilitySystem.IsPlayerInvulnerable)
+            {
+                // Purified sick fish consumption during ultimate frenzy
+                if (PlayerAbilitySystem.Instance != null)
+                {
+                    PlayerAbilitySystem.Instance.OnFishEaten(fish);
+                }
+
+                int purifiedXp = Mathf.RoundToInt((fish.Xp > 0 ? fish.Xp : 20) * xpMultiplier);
+                currentXp += purifiedXp;
+                score += (purifiedXp * Level);
+
+                if (GuiManager.instance != null)
+                {
+                    GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+                    GuiManager.instance.ShowFloatingXp(fish.transform.position, purifiedXp);
+                }
+                return;
+            }
+
+            ApplyPoisonDebuff(3.5f); // Poison debuff from Sick Fish (Feeding Frenzy style)
+            int penaltyPoints = (fish != null && fish.Xp > 0) ? fish.Xp : 18;
+            score = Mathf.Max(0, score - (penaltyPoints * Level));
 
             if (GuiManager.instance != null)
             {
-                // Feeding Frenzy modular bar: completed segments (< Level - 1) stay locked at 1.0f
-                // Only current level segment drains, clamped to 0 minimum.
                 GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
-
-                // Display score deduction in red color per user request
-                string text = "-" + penaltyXp;
-                Color deductionColor = new Color(1f, 0.25f, 0.25f, 1f); // Vibrant light red
-                GuiManager.instance.ShowFloatingText(fish.transform.position, text, deductionColor);
+                GuiManager.instance.ShowFloatingXp(fish.transform.position, penaltyPoints, true);
             }
+
+            // Deplete streak counts back to 0 when eating a sick fish
+            if (PlayerAbilitySystem.Instance != null)
+            {
+                PlayerAbilitySystem.Instance.ResetStreak();
+            }
+
             return;
         }
 
@@ -1265,35 +1678,100 @@ public class PlayerController : MonoBehaviour
         {
             ActivateXpMultiplier(2f, 10f); // 2x XP for 10 seconds
             
-            // Show Special Text for Golden Fish (Khmer Font Mapping: RtImas)
-            GuiManager.instance.ShowFloatingText(fish.transform.position, "RtImas", new Color(1f, 0.8f, 0f, 1f));
+            // Show Special Banner for Golden Fish
+            if (GuiManager.instance != null)
+            {
+                GuiManager.instance.ShowFloatingDoubleXp(fish.transform.position);
+            }
+
+            // Apply Ability System Streak & Energy for Golden Fish as well
+            if (PlayerAbilitySystem.Instance != null)
+            {
+                PlayerAbilitySystem.Instance.OnFishEaten(fish);
+            }
 
             // Golden fish itself gives 0 XP, just the buff
             return;
         }
 
 
-        // Apply Multiplier
-        int finalXp = Mathf.RoundToInt(fish.Xp * xpMultiplier);
+        // Apply Ability System Streak & Energy
+        if (PlayerAbilitySystem.Instance != null)
+        {
+            PlayerAbilitySystem.Instance.OnFishEaten(fish);
+        }
+
+        // Standardized XP based on fish type (Streak multiplier does NOT affect XP)
+        int baseFishXp = (fish != null) ? fish.Xp : 20;
+        int spikeBonusXp = (fish != null && fish.IsSpiked) ? 50 : 0;
+        int finalXp = Mathf.RoundToInt((baseFishXp + spikeBonusXp) * xpMultiplier);
 
         currentXp += finalXp;
 
         score += (finalXp * Level);
 
-        GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
-        
-        // Show Floating XP Text
-        // Updated to Khmer format: "÷10 BinÞú" (where ÷ is + in that font)
-        // User requested NO prefix change for x2, just color change.
-        string prefix = "÷";
-        Color xpColor = (xpMultiplier > 1f) ? new Color(1f, 0.8f, 0f, 1f) : Color.white; // Gold color for x2
-        GuiManager.instance.ShowFloatingText(fish.transform.position, prefix + finalXp + " BinÞú", xpColor);
+        if (GuiManager.instance != null)
+        {
+            GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+            GuiManager.instance.ShowFloatingXp(fish.transform.position, finalXp);
+        }
 
     }
 
     /// <summary>
+    /// Eats fish directly during active player abilities (Vortex Vacuum or River Apex Blitz).
+    /// </summary>
+    public void EatFromAbility(Fish fish)
+    {
+        if (fish == null || !fish.gameObject.activeSelf || fish.IsDead) return;
+        Eat(fish);
+        PlayEatEffect();
+    }
+
+    /// <summary>
+    /// Calculates the world position of the player's mouth for suction vacuum physics.
+    /// </summary>
+    public Vector3 GetMouthPosition()
+    {
+        float dir = transform.localScale.x >= 0f ? 1f : -1f;
+        float forwardOffset = LevelManager.IsCurrentLakeLevel ? 3.30f : 2.85f;
+        float verticalOffset = LevelManager.IsCurrentLakeLevel ? -0.25f : -0.17f;
+        Vector3 offset = new Vector3(dir * forwardOffset * currentBaseScale, verticalOffset * currentBaseScale, 0f);
+        if (playerGraphics != null)
+        {
+            offset = playerGraphics.localRotation * offset;
+        }
+        return transform.position + offset;
+    }
+
+    /// <summary>
+    /// Opens or closes mouth sprite during special ability executions.
+    /// </summary>
+    public void SetMouthOpen(bool open)
+    {
+        if (spriteRenderer == null) return;
+        if (open)
+        {
+            if (eatSprite != null) spriteRenderer.sprite = eatSprite;
+            else if (halfBiteSprite != null) spriteRenderer.sprite = halfBiteSprite;
+        }
+        else
+        {
+            if (idleSprite != null) spriteRenderer.sprite = idleSprite;
+        }
+    }
+
+    /// <summary>
+    /// Sets facing direction during automated blitz dashing.
+    /// </summary>
+    public void SetFacingDirection(bool faceRight)
+    {
+        float sign = faceRight ? 1f : -1f;
+        transform.localScale = new Vector3(sign * currentBaseScale, currentBaseScale, 1f);
+    }
+
+    /// <summary>
     /// Awarded when the user eats all fish in a spawned school/group.
-    /// In Khmer Limon font: "rgVan;kRkum ÷15 BinÞú" displays as "រង្វាន់ក្រុម +15 ពិន្ទុ" (Group Reward +15 Points).
     /// </summary>
     public void AwardSchoolBonus(int bonusXp, Vector3 position)
     {
@@ -1304,11 +1782,7 @@ public class PlayerController : MonoBehaviour
         if (GuiManager.instance != null)
         {
             GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
-
-            // Display only +X (e.g. +8 or +5) with no group eaten text, in green
-            string text = "÷" + finalBonus;
-            Color bonusColor = new Color(0.2f, 1f, 0.4f, 1f); // Vibrant light green
-            GuiManager.instance.ShowFloatingText(position + Vector3.up * 0.9f, text, bonusColor);
+            GuiManager.instance.ShowFloatingXp(position + Vector3.up * 0.9f, finalBonus);
         }
     }
 
@@ -1324,31 +1798,24 @@ public class PlayerController : MonoBehaviour
         // Limon Font Mapping: x -> ខ, * -> 8.
         // Solution: Use '2dg' which renders as '2ដង' (2 Times) in Khmer Limon.
         // REMOVED: Duplicate text call here, as it's already handled in Eat()
-        // GuiManager.instance.ShowFloatingText(transform.position, "RtImas 2dg BinÞú ¡", new Color(1f, 0.8f, 0f, 1f));
     }
-
 
     private void LevelUp()
     {
         if (Level >= maxLevel)
         {
             // Max Level Reached
-            
-            // Check if we have filled the bar for the final level
-            // Since LevelUp() is called when currentXp >= currentLevelXp, 
-            // being here means the bar is effectively full.
+            currentXp = currentLevelXp;
+            if (GuiManager.instance != null)
+            {
+                GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+            }
 
-            if (!isPaused && isAlive)
+            if (!isPaused && isAlive && !LevelManager.IsLevelCompleted)
             {
                  LevelManager.CompleteCurrentLevel();
-                 GameManager.instance.TriggerGameWin();
-                 isAlive = false;
-                 _moveInput = Vector2.zero;
-                 if (rb != null) rb.linearVelocity = Vector2.zero;
-                 StopSpeedEffect();
-                 
-                 // Trigger Game Win event
-                 EventManager.Trigger("GameWin"); // Trigger Win Message
+                 // Trigger Game Win event (modal will open after a brief delay, player continues moving until then)
+                 EventManager.Trigger("GameWin"); 
             }
             return;
         }
@@ -1369,15 +1836,15 @@ public class PlayerController : MonoBehaviour
 
         GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
 
-        // Scale logic: Use Manual Array
-        if (levelScales != null && levelScales.Length >= Level)
+        // Scale logic: Use Manual Array for current environment
+        float[] activeScales = GetCurrentLevelScales();
+        if (activeScales != null && activeScales.Length >= Level)
         {
-             // Trigger Evolution Animation
-             float targetScale = levelScales[Level - 1];
+             float targetScale = activeScales[Level - 1];
              
-             // Immediate Scale Update (No Animation)
-             transform.localScale = new Vector3(targetScale, targetScale, 1f);
-             currentBaseScale = targetScale;
+             // Trigger Evolution Animation with juicy growth pop
+             if (growthCoroutine != null) StopCoroutine(growthCoroutine);
+             growthCoroutine = StartCoroutine(GrowthPulseAnimation(currentBaseScale, targetScale));
              
              // Play growth sound for level up feedback
              if (audioSource != null && AudioSettingsManager.IsSfxEnabled)
@@ -1421,13 +1888,28 @@ public class PlayerController : MonoBehaviour
 
     private void HandleCollision(GameObject other)
     {
-        if (!isAlive || isHooked) return;
+        if (!isAlive || isHooked || LevelManager.IsLevelCompleted) return;
 
-        // Check for Hazard (Hook/Bait) - Hook Sequence
+        // Check for Hazard (Fishing Hook / Bait) - Lethal hook sequence catches player even during ability
         Hazard hazard = other.GetComponentInParent<Hazard>();
         if (hazard != null)
         {
             OnHookedByHazard(hazard);
+            return;
+        }
+
+        // Invulnerability Safeguard: during 5s special abilities, ignore all lethal damage from regular predators
+        if (PlayerAbilitySystem.IsPlayerInvulnerable)
+        {
+            Fish fishTarget = other.GetComponent<Fish>();
+            if (fishTarget != null && !fishTarget.IsHooked)
+            {
+                if (fishTarget.Level <= Level)
+                {
+                    Eat(fishTarget);
+                    PlayEatEffect();
+                }
+            }
             return;
         }
 
@@ -1443,9 +1925,23 @@ public class PlayerController : MonoBehaviour
 
                 // Defense Rule for Spiked Pufferfish:
                 // User requirement: "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
+                // Exception: When active ability is triggered (IsPlayerInvulnerable), frenzy overpowers spikes!
                 if (collidedFish.IsSpiked)
                 {
-                    Death();
+                    if (PlayerAbilitySystem.IsPlayerInvulnerable)
+                    {
+                        if (collidedFish.Level <= Level)
+                        {
+                            Eat(collidedFish);
+                            PlayEatEffect();
+                        }
+                        return;
+                    }
+
+                    SpriteRenderer sr = collidedFish.GetComponentInChildren<SpriteRenderer>();
+                    Sprite killerSp = sr != null ? sr.sprite : null;
+                    Color killerCol = (sr != null) ? sr.color : (collidedFish.IsSickFish ? new Color(0.72f, 1f, 0.72f, 1f) : Color.white);
+                    Death(killerSp, killerCol, collidedFish.IsSickFish);
                     return;
                 }
 
@@ -1458,9 +1954,14 @@ public class PlayerController : MonoBehaviour
                 
                 if (fishLevel > Level)
                 {
-                    if (collidedFish.IsGoldenFish)
+                    if (collidedFish.IsGoldenFish || collidedFish.IsCuttlefish)
                     {
-                        // Golden fish is a bonus prey fish, NOT a predator, so it never kills the player.
+                        // Golden fish and Cuttlefish are NOT predator fish, so they never bite or kill the player.
+                        if (collidedFish.IsCuttlefish)
+                        {
+                            var cf = collidedFish.GetComponent<Cuttlefish>();
+                            if (cf != null) cf.TriggerInkAndJetEscape((Vector2)transform.position - (Vector2)collidedFish.transform.position, targetPlayer: this);
+                        }
                         return;
                     }
 
@@ -1469,7 +1970,10 @@ public class PlayerController : MonoBehaviour
                     // If the player touches the predator from behind its tail, the predator doesn't bite!
                     if (IsPredatorBiteContact(collidedFish, other))
                     {
-                        Death();
+                        SpriteRenderer sr = collidedFish.GetComponentInChildren<SpriteRenderer>();
+                        Sprite killerSp = sr != null ? sr.sprite : null;
+                        Color killerCol = (sr != null) ? sr.color : (collidedFish.IsSickFish ? new Color(0.72f, 1f, 0.72f, 1f) : Color.white);
+                        Death(killerSp, killerCol, collidedFish.IsSickFish);
                     }
                 }
                 else
@@ -1517,8 +2021,7 @@ public class PlayerController : MonoBehaviour
         Vector2 bounceDir = (Vector2)(transform.position - spikeSource);
         if (bounceDir.sqrMagnitude < 0.001f)
         {
-            bounceDir = -_moveInput.normalized;
-            if (bounceDir == Vector2.zero) bounceDir = Vector2.up;
+            bounceDir = (rb != null && rb.linearVelocity.sqrMagnitude > 0.01f) ? -rb.linearVelocity.normalized : Vector2.up;
         }
         else
         {
@@ -1576,19 +2079,125 @@ public class PlayerController : MonoBehaviour
 
     IEnumerator BiteAnimation()
     {
-        // Swap to open mouth
-        if (eatSprite != null)
+        if (eatSprite != null && eatSprite != halfBiteSprite)
         {
+            // 3-stage bite when separate fully-open mouth sprite exists
+            if (halfBiteSprite != null)
+            {
+                spriteRenderer.sprite = halfBiteSprite;
+                yield return new WaitForSeconds(0.04f);
+            }
+
             spriteRenderer.sprite = eatSprite;
+            yield return new WaitForSeconds(0.10f);
+
+            if (halfBiteSprite != null)
+            {
+                spriteRenderer.sprite = halfBiteSprite;
+                yield return new WaitForSeconds(0.04f);
+            }
         }
-        
-        // Wait
-        yield return new WaitForSeconds(0.15f);
-        
-        // Swap back to closed mouth
-        if (spriteRenderer != null && idleSprite != null)
+        else if (halfBiteSprite != null)
+        {
+            // 2-stage bite when only closed and half-open mouth sprites exist
+            spriteRenderer.sprite = halfBiteSprite;
+            yield return new WaitForSeconds(0.14f);
+        }
+
+        // Return to closed mouth (only if special ability is NOT actively holding mouth open)
+        if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityActive)
+        {
+            if (spriteRenderer != null)
+            {
+                if (eatSprite != null) spriteRenderer.sprite = eatSprite;
+                else if (halfBiteSprite != null) spriteRenderer.sprite = halfBiteSprite;
+            }
+        }
+        else if (spriteRenderer != null && idleSprite != null)
         {
             spriteRenderer.sprite = idleSprite;
         }
     }
+
+    public float[] GetCurrentLevelScales()
+    {
+        if (LevelManager.IsCurrentLakeLevel && riverLevelScales != null && riverLevelScales.Length > 0)
+        {
+            return riverLevelScales;
+        }
+        return levelScales;
+    }
+
+    private IEnumerator GrowthPulseAnimation(float fromScale, float toScale)
+    {
+        float duration = 0.32f;
+        float elapsed = 0f;
+
+        // Visual growth burst feedback
+        PlayEatEffect();
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+
+            // Smooth cubic ease-out growth curve with a tactile 15% pulse pop
+            float easeOut = 1f - Mathf.Pow(1f - t, 3f);
+            float pulse = Mathf.Sin(t * Mathf.PI) * 0.15f;
+            float s = Mathf.Lerp(fromScale, toScale, easeOut) + (pulse * toScale);
+
+            currentBaseScale = s;
+            float dir = Mathf.Sign(transform.localScale.x);
+            transform.localScale = new Vector3(dir * s, s, 1f);
+
+            yield return null;
+        }
+
+        currentBaseScale = toScale;
+        float finalDir = Mathf.Sign(transform.localScale.x);
+        transform.localScale = new Vector3(finalDir * toScale, toScale, 1f);
+
+        UpdateCollision();
+        growthCoroutine = null;
+    }
+
+    #region Cheat / Testing Helpers
+
+    public void CheatLevelUp()
+    {
+        if (Level < maxLevel)
+        {
+            LevelUp();
+        }
+    }
+
+    public void CheatLevelDown()
+    {
+        if (Level > 1)
+        {
+            Level--;
+            currentXp = 0;
+            currentLevelXp = RequiredXpForLevel(Level, baseXpRequirement);
+            if (GuiManager.instance != null)
+            {
+                GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
+            }
+            float[] activeScales = GetCurrentLevelScales();
+            if (activeScales != null && activeScales.Length >= Level)
+            {
+                currentBaseScale = activeScales[Level - 1];
+            }
+            float dir = Mathf.Sign(transform.localScale.x);
+            transform.localScale = new Vector3(dir * currentBaseScale, currentBaseScale, 1f);
+            UpdateCollision();
+            EventManager.Trigger<int>("onLevelUp", Level);
+        }
+    }
+
+    public void CheatAddScore(int amount = 1000)
+    {
+        score += amount;
+    }
+
+    #endregion
 }

@@ -23,16 +23,14 @@ public class GridController : MonoBehaviour
 
     [Header("Arena Spawning")]
     [SerializeField]
-    private int maxFishCount = 28; // Reduced from 68 to prevent screen crowding
+    private int maxFishCount = 34; // Increased to 34 so waters are lively and filled with eatable prey
     [SerializeField]
-    private float spawnInterval = 1.3f; // Clean arrival interval
+    private float spawnInterval = 0.85f; // Fast, responsive spawn interval (0.85s) for smooth combo chaining
     [SerializeField]
     private GameObject goldenFishPrefab; // Custom prefab for the rare golden fish
-    [SerializeField] private float sickFishChance = 0.25f; // Chance for Level 2 fish to spawn as sick
+    [SerializeField] private float sickFishChance = 0.08f; // Rare chance for Level 2 fish to spawn as sick (max 1 at a time)
     [Header("School Settings")]
-    [SerializeField] private int maxActiveSchools = 2; // Maximum concurrent schools across ocean/river
     [SerializeField] private Vector2 schoolSizeRange = new Vector2(2f, 3f); // 2 to 3 fish per school
-    [SerializeField] private float schoolCooldownDuration = 6.5f; // Delay between school arrivals
     private float schoolSpawnCooldownTimer = 0f;
     private float spawnTimer = 0f;
 
@@ -43,8 +41,6 @@ public class GridController : MonoBehaviour
     private Sprite hazardSprite; // Backup if prefab is missing
     [SerializeField]
     private Sprite hazardSpriteVariant; // Second Variant
-    [SerializeField]
-    private float hazardChance = 0.15f; // Reduced from 0.20f (User Request: "reduce spawn chance")
     [SerializeField]
     private float hazardScale = 0.50f; // Scaled down for realistic, sleek fishing rod & bait proportion
 
@@ -60,7 +56,12 @@ public class GridController : MonoBehaviour
     private static Sprite s_CachedBoatSprite = null;
     [SerializeField]
     private AudioClip boatEngineSound;
-    private static AudioClip s_CachedEngineClip = null;
+    [Tooltip("Engine loop used by the river FishermanBoat hazard.")]
+    [SerializeField]
+    private AudioClip riverBoatEngineSound;
+    [Tooltip("Engine loop used by the ocean RiverBoat/harpoon hazard.")]
+    [SerializeField]
+    private AudioClip oceanBoatEngineSound;
     private List<GameObject> activeBoats = new List<GameObject>();
     private FishermanBoat currentBoat = null;
     private RiverBoat currentRiverBoat = null;
@@ -79,9 +80,9 @@ public class GridController : MonoBehaviour
     
     [Header("Hazard Dynamic Timers")]
     [Tooltip("Min and Max delay (seconds) before the first boat appears after level starts")]
-    [SerializeField] private Vector2 boatInitialDelayRange = new Vector2(6f, 18f);
+    [SerializeField] private Vector2 boatInitialDelayRange = new Vector2(6f, 14f);
     [Tooltip("Min and Max cooldown (seconds) between boat departures and the next boat arrival")]
-    [SerializeField] private Vector2 boatCooldownRange = new Vector2(14f, 28f);
+    [SerializeField] private Vector2 boatCooldownRange = new Vector2(12f, 22f);
 
     [Tooltip("Min and Max delay (seconds) before the first shark appears after level starts")]
     [SerializeField] private Vector2 sharkInitialDelayRange = new Vector2(10f, 25f);
@@ -108,8 +109,6 @@ public class GridController : MonoBehaviour
     [SerializeField]
     private Sprite warningIconSprite;
     [SerializeField]
-    private float sharkChance = 0.03f; // Reduced from 0.05f (User Request: "shark spawn too often reduce it abit")
-    [SerializeField]
     private AudioClip sharkWarningSound;
     [SerializeField]
     private AudioClip sharkAttackSound;
@@ -122,6 +121,13 @@ public class GridController : MonoBehaviour
     
     // Track active shark
     private GameObject activeShark;
+
+    [Header("Cuttlefish Hazard Settings")]
+    [SerializeField] private Sprite cuttlefishSprite;
+    private GameObject cuttlefishTemplate;
+    private GameObject activeCuttlefish;
+    private float cuttlefishCooldownTimer = 16f;
+    private Vector2 cuttlefishCooldownRange = new Vector2(20f, 32f);
 
     // Templates for Optimization
     private GameObject sharkTemplate;
@@ -149,7 +155,7 @@ public class GridController : MonoBehaviour
 
     private void Awake()
     {
-        if (Instance == null) Instance = this;
+        Instance = this;
 
         // Ensure ObjectPoolManager exists
         if (ObjectPoolManager.Instance == null)
@@ -182,27 +188,37 @@ public class GridController : MonoBehaviour
             RiverBoat.SetGlobalBubbleMaterial(cachedBubbleMat);
         }
 
-        if (boatEngineSound != null)
+        // Keep the legacy shared field as a fallback, but use dedicated clips
+        // for each hazard so river and ocean boats never share the same loop.
+        if (riverBoatEngineSound == null) riverBoatEngineSound = boatEngineSound;
+        if (oceanBoatEngineSound == null) oceanBoatEngineSound = boatEngineSound;
+#if UNITY_EDITOR
+        if (riverBoatEngineSound == null)
         {
-            s_CachedEngineClip = boatEngineSound;
+            riverBoatEngineSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/river_boat.mp3");
         }
-        #if UNITY_EDITOR
-        if (s_CachedEngineClip == null)
+        if (oceanBoatEngineSound == null)
         {
-            s_CachedEngineClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Boat_Engine_Drive.MP3");
-            if (boatEngineSound == null) boatEngineSound = s_CachedEngineClip;
+            oceanBoatEngineSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Ocean_Boat.mp3");
         }
-        #endif
-        if (s_CachedEngineClip == null)
+#endif
+        if (riverBoatEngineSound == null)
         {
-            s_CachedEngineClip = Resources.Load<AudioClip>("Boat_Engine_Drive");
-            if (boatEngineSound == null) boatEngineSound = s_CachedEngineClip;
+            riverBoatEngineSound = Resources.Load<AudioClip>("river_boat");
         }
-        if (s_CachedEngineClip != null)
+        if (oceanBoatEngineSound == null)
         {
-            FishermanBoat.SetGlobalEngineClip(s_CachedEngineClip);
-            RiverBoat.SetGlobalEngineClip(s_CachedEngineClip);
+            oceanBoatEngineSound = Resources.Load<AudioClip>("Ocean_Boat");
         }
+        if (riverBoatEngineSound != null) FishermanBoat.SetGlobalEngineClip(riverBoatEngineSound);
+        if (oceanBoatEngineSound != null) RiverBoat.SetGlobalEngineClip(oceanBoatEngineSound);
+
+        AudioClip laserLockSound = null;
+#if UNITY_EDITOR
+        laserLockSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Laser_Locked-On.mp3");
+#endif
+        if (laserLockSound == null) laserLockSound = Resources.Load<AudioClip>("Harpoon_Laser_Locked-On");
+        if (laserLockSound != null) RiverBoat.SetGlobalLaserLockedClip(laserLockSound);
 
         if (hazardSound == null && hazardPrefab != null)
         {
@@ -288,6 +304,8 @@ public class GridController : MonoBehaviour
 
     private void Start()
     {
+        SharkHazard.ResetSessionState();
+        RiverBoat.ResetSessionState();
         EnsureWorldBoundsCached();
         if (LevelManager.IsCurrentLakeLevel)
         {
@@ -302,9 +320,9 @@ public class GridController : MonoBehaviour
         boatCooldownTimer = Random.Range(boatInitialDelayRange.x, boatInitialDelayRange.y);
         sharkCooldownTimer = Random.Range(sharkInitialDelayRange.x, sharkInitialDelayRange.y);
 
-        if (maxFishCount > 32)
+        if (maxFishCount < 20 || maxFishCount > 45)
         {
-            maxFishCount = 28;
+            maxFishCount = 34;
         }
         schoolSpawnCooldownTimer = Random.Range(2f, 4f);
     }
@@ -481,11 +499,61 @@ public class GridController : MonoBehaviour
         }
     }
 
+    private void EnsureCorrectCuttlefishSprite()
+    {
+#if UNITY_EDITOR
+        if (cuttlefishSprite == null)
+        {
+            cuttlefishSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/cuttle_fish.png");
+            if (cuttlefishSprite == null)
+            {
+                var allAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Hazard/cuttle_fish.png");
+                if (allAssets != null)
+                {
+                    foreach (var a in allAssets)
+                    {
+                        if (a is Sprite s)
+                        {
+                            cuttlefishSprite = s;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+#endif
+        if (cuttlefishSprite == null)
+        {
+            cuttlefishSprite = Resources.Load<Sprite>("cuttle_fish") ?? Resources.Load<Sprite>("cuttle_fish_0");
+        }
+        if (cuttlefishSprite == null)
+        {
+            try
+            {
+                string path = System.IO.Path.Combine(Application.dataPath, "Graphics", "Hazard", "cuttle_fish.png");
+                if (System.IO.File.Exists(path))
+                {
+                    byte[] bytes = System.IO.File.ReadAllBytes(path);
+                    Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    if (tex.LoadImage(bytes))
+                    {
+                        cuttlefishSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("Failed to load cuttle_fish.png: " + ex.Message);
+            }
+        }
+    }
+
     private void OnValidate()
     {
         EnsureCorrectBoatSprite();
         EnsureCorrectRiverBoatSprite();
         EnsureCorrectHarpoonSprite();
+        EnsureCorrectCuttlefishSprite();
     }
 
     private void InitRiverBoatTemplate()
@@ -527,7 +595,7 @@ public class GridController : MonoBehaviour
         }
 
         boatComp.SetupWakeParticlesTemplate(cachedBubbleMat, cachedBubbleTex);
-        boatComp.SetupAudio(s_CachedEngineClip);
+        boatComp.SetupAudio(oceanBoatEngineSound);
         boatComp.WarmUpParticles();
 
         if (riverBoatSprite != null && riverBoatSprite.texture != null)
@@ -580,7 +648,7 @@ public class GridController : MonoBehaviour
         }
 
         boatComp.SetupWakeParticlesTemplate(cachedBubbleMat, cachedBubbleTex);
-        boatComp.SetupAudio(s_CachedEngineClip);
+        boatComp.SetupAudio(riverBoatEngineSound);
         boatComp.WarmUpParticles();
 
         if (boatSprite != null && boatSprite.texture != null)
@@ -632,23 +700,28 @@ public class GridController : MonoBehaviour
         // --- Dynamic Hazard Director: Boat Hazard ---
         if (levelCfg.enableFishingRod)
         {
-            bool isBoatActive = (currentBoat != null && currentBoat.gameObject.activeInHierarchy) ||
-                                (currentRiverBoat != null && currentRiverBoat.gameObject.activeInHierarchy) ||
-                                activeHazards.Count > 0 || isSpawningHazards;
+            bool isOceanHarpoonBoatDisabled = !levelCfg.isLake && RiverBoat.IsPermanentlyDepartedThisSession;
 
-            if (!isBoatActive)
+            if (!isOceanHarpoonBoatDisabled)
             {
-                boatCooldownTimer -= Time.deltaTime;
-                if (boatCooldownTimer <= 0f)
+                bool isBoatActive = (currentBoat != null && currentBoat.gameObject.activeInHierarchy) ||
+                                    (currentRiverBoat != null && currentRiverBoat.gameObject.activeInHierarchy) ||
+                                    activeHazards.Count > 0 || isSpawningHazards;
+
+                if (!isBoatActive)
                 {
-                    boatCooldownTimer = Random.Range(boatCooldownRange.x, boatCooldownRange.y);
-                    StartCoroutine(SpawnHazardsRoutine());
+                    boatCooldownTimer -= Time.deltaTime;
+                    if (boatCooldownTimer <= 0f)
+                    {
+                        boatCooldownTimer = Random.Range(boatCooldownRange.x, boatCooldownRange.y);
+                        StartCoroutine(SpawnHazardsRoutine());
+                    }
                 }
             }
         }
 
-        // --- Dynamic Hazard Director: Shark / Predator Hazard (Ocean only) ---
-        if (levelCfg.enableShark && !levelCfg.isLake)
+        // --- Dynamic Hazard Director: Shark / Predator Hazard ---
+        if (levelCfg.enableShark && !levelCfg.isLake && !SharkHazard.IsPermanentlyDefeatedThisSession)
         {
             bool isSharkActive = (activeShark != null && activeShark.activeSelf);
             if (!isSharkActive)
@@ -658,6 +731,21 @@ public class GridController : MonoBehaviour
                 {
                     sharkCooldownTimer = Random.Range(sharkCooldownRange.x, sharkCooldownRange.y);
                     SpawnShark();
+                }
+            }
+        }
+
+        // --- Dynamic Cuttlefish Hazard Spawning (Ocean Only, Controlled by LevelConfig) ---
+        if (!levelCfg.isLake && levelCfg.enableCuttlefish)
+        {
+            bool isCuttlefishActive = (activeCuttlefish != null && activeCuttlefish.activeSelf);
+            if (!isCuttlefishActive)
+            {
+                cuttlefishCooldownTimer -= Time.deltaTime;
+                if (cuttlefishCooldownTimer <= 0f)
+                {
+                    cuttlefishCooldownTimer = Random.Range(cuttlefishCooldownRange.x, cuttlefishCooldownRange.y);
+                    SpawnCuttlefish();
                 }
             }
         }
@@ -709,7 +797,7 @@ public class GridController : MonoBehaviour
     private void SpawnArenaFish(int playerLevel, int[] activeCounts, int totalActive)
     {
         int count = 1;
-        if (Fish.AllFish.Count < 10) count = 2;
+        if (Fish.AllFish.Count < 14) count = 2;
         
         // Calculate Camera View Boundaries
         if (_cam == null) return;
@@ -771,7 +859,7 @@ public class GridController : MonoBehaviour
 
             LevelConfig currentCfg = LevelManager.GetCurrentConfig();
 
-            if (!currentCfg.isLake && Random.value < goldenChance)
+            if (!currentCfg.isLake && currentCfg.enableGoldenFish && Random.value < goldenChance)
             {
                 Fish goldenPrefab = null;
                 if (goldenFishPrefab != null)
@@ -821,8 +909,9 @@ public class GridController : MonoBehaviour
                 // Level 1 fish (both Ocean and River) spawn in small schools
                 if (spawnLevel == 1)
                 {
-                    // If minnows already exist in abundance (>= 4), spawn only 1-2 fish to prevent minnow swamping
-                    int schoolSize = (activeCounts != null && activeCounts[1] >= 4) ? Random.Range(1, 3) : Random.Range(2, 4);
+                    // Every new regular level 1 spawn arrives as a naturally formed school
+                    // Varying from 3 to 5 fish with diverse organic formations (Cluster, Wedge, Stream, Diamond, Crescent)
+                    int schoolSize = Random.Range(3, 6);
                     
                     GameObject schoolObj = new GameObject("FishSchool");
                     schoolObj.transform.position = spawnPos;
@@ -830,12 +919,13 @@ public class GridController : MonoBehaviour
                     bool movingRight = (spawnX < _camPos.x); 
                     school.Initialize(movingRight);
                     
+                    Vector2[] formationOffsets = FishSchool.GenerateSchoolFormation(schoolSize, movingRight);
+                    
                     for (int s = 0; s < schoolSize; s++)
                     {
-                        Vector2 schoolOffset = Random.insideUnitCircle * Random.Range(0.35f, 0.95f);
-                        schoolOffset.x *= 1.3f; 
-                        if (spawnOnRight) schoolOffset.x = Mathf.Abs(schoolOffset.x);
-                        else schoolOffset.x = -Mathf.Abs(schoolOffset.x);
+                        Vector2 schoolOffset = (formationOffsets != null && s < formationOffsets.Length)
+                            ? formationOffsets[s]
+                            : Vector2.zero;
 
                         Vector2 finalPos = spawnPos + schoolOffset;
                         finalPos.y = Mathf.Clamp(finalPos.y, minY, maxY);
@@ -857,7 +947,17 @@ public class GridController : MonoBehaviour
                     Fish fish = enemyLibrary.SpawnSpecific(prefabToSpawn, spawnPos, 0f, 0f, -1);
                     if (fish != null)
                     {
-                        if (spawnLevel == 2 && !currentCfg.isLake && Random.value < sickFishChance)
+                        bool alreadyHasSickFish = false;
+                        for (int fIdx = 0; fIdx < Fish.AllFish.Count; fIdx++)
+                        {
+                            if (Fish.AllFish[fIdx] != null && Fish.AllFish[fIdx].IsSickFish && !Fish.AllFish[fIdx].IsDead && Fish.AllFish[fIdx] != fish)
+                            {
+                                alreadyHasSickFish = true;
+                                break;
+                            }
+                        }
+
+                        if (spawnLevel == 2 && !currentCfg.isLake && currentCfg.enableSickFish && !alreadyHasSickFish && Random.value < sickFishChance)
                         {
                             fish.SetSickStatus(true);
                             float deepMinY = worldFloor + 0.8f;
@@ -889,132 +989,154 @@ public class GridController : MonoBehaviour
 
         float[] weights = new float[7];
 
-        // 1. Stage Baseline Distribution
+        // 1. Stage Baseline Distribution - Eatable fish (<= playerLevel) maintained at high majority (75-90%+)
+        // The player's CURRENT LEVEL always receives the highest eatable share among prey.
         if (effectiveMax == 2)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.42f;
-                weights[2] = 0.58f;
+                weights[1] = 0.78f; // Eatable Lv1 minnows (78%)
+                weights[2] = 0.22f; // Danger Lv2 (22%)
             }
             else // Lv 2+
             {
-                weights[1] = 0.25f;
-                weights[2] = 0.75f;
+                weights[1] = 0.25f; // Eatable Lv1
+                weights[2] = 0.75f; // Eatable Lv2 (User's current level!)
             }
         }
         else if (effectiveMax == 3)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.32f;
-                weights[2] = 0.40f;
-                weights[3] = 0.28f;
+                weights[1] = 0.76f; // Eatable Lv1 minnows (76%)
+                weights[2] = 0.16f; // Danger Lv2 (16%)
+                weights[3] = 0.08f; // Danger Lv3 (8%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.18f;
-                weights[2] = 0.44f;
-                weights[3] = 0.38f;
+                weights[1] = 0.25f; // Eatable Lv1 (25%)
+                weights[2] = 0.55f; // Eatable Lv2 (User's current level! 55% - Total eatable: 80%)
+                weights[3] = 0.20f; // Danger Lv3 (20%)
             }
             else // Lv 3+
             {
-                weights[1] = 0.12f;
-                weights[2] = 0.36f;
-                weights[3] = 0.52f;
+                weights[1] = 0.15f; // Eatable Lv1
+                weights[2] = 0.25f; // Eatable Lv2
+                weights[3] = 0.60f; // Eatable Lv3 (User's current level! All 100% eatable)
             }
         }
         else if (effectiveMax == 4)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.25f;
-                weights[2] = 0.32f;
-                weights[3] = 0.26f;
-                weights[4] = 0.17f;
+                weights[1] = 0.76f; // Eatable Lv1 minnows (76%)
+                weights[2] = 0.14f; // Danger Lv2 (14%)
+                weights[3] = 0.06f; // Danger Lv3 (6%)
+                weights[4] = 0.04f; // Danger Lv4 (4%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.15f;
-                weights[2] = 0.34f;
-                weights[3] = 0.31f;
-                weights[4] = 0.20f;
+                weights[1] = 0.25f; // Eatable Lv1
+                weights[2] = 0.55f; // Eatable Lv2 (User's current level! - Total eatable: 80%)
+                weights[3] = 0.13f; // Danger Lv3 (13%)
+                weights[4] = 0.07f; // Danger Lv4 (7%)
             }
             else if (playerLevel == 3)
             {
-                weights[1] = 0.10f;
-                weights[2] = 0.22f;
-                weights[3] = 0.40f;
-                weights[4] = 0.28f;
+                weights[1] = 0.15f; // Eatable Lv1
+                weights[2] = 0.25f; // Eatable Lv2
+                weights[3] = 0.45f; // Eatable Lv3 (User's current level! - Total eatable: 85%)
+                weights[4] = 0.15f; // Danger Lv4 (15%)
             }
             else // Lv 4+
             {
-                weights[1] = 0.06f;
-                weights[2] = 0.16f;
-                weights[3] = 0.34f;
-                weights[4] = 0.44f;
+                weights[1] = 0.10f; // Eatable Lv1
+                weights[2] = 0.18f; // Eatable Lv2
+                weights[3] = 0.27f; // Eatable Lv3
+                weights[4] = 0.45f; // Eatable Lv4 (User's current level! All 100% eatable)
             }
         }
         else // effectiveMax >= 5
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.22f;
-                weights[2] = 0.28f;
-                weights[3] = 0.24f;
-                weights[4] = 0.16f;
-                weights[5] = 0.10f;
+                weights[1] = 0.75f; // Eatable Lv1 minnows (75%)
+                weights[2] = 0.13f; // Danger Lv2 (13%)
+                weights[3] = 0.06f; // Danger Lv3 (6%)
+                weights[4] = 0.04f; // Danger Lv4 (4%)
+                weights[5] = 0.02f; // Danger Lv5 (2%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.14f;
-                weights[2] = 0.28f;
-                weights[3] = 0.28f;
-                weights[4] = 0.18f;
-                weights[5] = 0.12f;
+                weights[1] = 0.25f; // Eatable Lv1
+                weights[2] = 0.55f; // Eatable Lv2 (User's current level! - Total eatable: 80%)
+                weights[3] = 0.10f; // Danger Lv3 (10%)
+                weights[4] = 0.06f; // Danger Lv4 (6%)
+                weights[5] = 0.04f; // Danger Lv5 (4%)
             }
             else if (playerLevel == 3)
             {
-                weights[1] = 0.08f;
-                weights[2] = 0.18f;
-                weights[3] = 0.34f;
-                weights[4] = 0.24f;
-                weights[5] = 0.16f;
+                weights[1] = 0.15f; // Eatable Lv1
+                weights[2] = 0.25f; // Eatable Lv2
+                weights[3] = 0.45f; // Eatable Lv3 (User's current level! - Total eatable: 85%)
+                weights[4] = 0.09f; // Danger Lv4 (9%)
+                weights[5] = 0.06f; // Danger Lv5 (6%)
             }
             else if (playerLevel == 4)
             {
-                weights[1] = 0.05f;
-                weights[2] = 0.12f;
-                weights[3] = 0.22f;
-                weights[4] = 0.36f;
-                weights[5] = 0.25f;
+                weights[1] = 0.10f; // Eatable Lv1
+                weights[2] = 0.15f; // Eatable Lv2
+                weights[3] = 0.25f; // Eatable Lv3
+                weights[4] = 0.40f; // Eatable Lv4 (User's current level! - Total eatable: 90%)
+                weights[5] = 0.10f; // Danger Lv5 (10%)
             }
             else // Lv 5+
             {
-                weights[1] = 0.03f;
-                weights[2] = 0.08f;
-                weights[3] = 0.17f;
-                weights[4] = 0.32f;
-                weights[5] = 0.40f;
+                weights[1] = 0.08f;
+                weights[2] = 0.12f;
+                weights[3] = 0.20f;
+                weights[4] = 0.25f;
+                weights[5] = 0.35f; // User's current level! All 100% eatable
             }
         }
 
-        // 2. Active Diversity Compensation
+        // 2. Dynamic Eatable Majority & Danger Suppression
         if (activeCounts != null)
         {
-            // If any level is missing from the water (0 active fish), strongly boost its weight (+80%)
+            int eatableCount = 0;
+            int dangerCount = 0;
             for (int lvl = 1; lvl <= effectiveMax; lvl++)
             {
-                if (activeCounts[lvl] == 0)
+                if (lvl <= playerLevel) eatableCount += activeCounts[lvl];
+                else dangerCount += activeCounts[lvl];
+            }
+
+            // CRITICAL REQUIREMENT: Eatable fish must always heavily outnumber danger fish.
+            // If danger fish reach 3 or take up >= 18% of total fish in water, strictly shut down danger spawns.
+            if (dangerCount >= 3 || (totalActive > 3 && dangerCount >= totalActive * 0.18f) || dangerCount >= eatableCount)
+            {
+                for (int lvl = playerLevel + 1; lvl <= effectiveMax; lvl++)
                 {
-                    weights[lvl] *= 1.80f;
+                    weights[lvl] = 0f;
+                }
+            }
+            else
+            {
+                // Moderate diversity boost (+30%) if an eatable level is missing from water
+                for (int lvl = 1; lvl <= playerLevel; lvl++)
+                {
+                    if (activeCounts[lvl] == 0)
+                    {
+                        weights[lvl] *= 1.30f;
+                    }
                 }
             }
 
-            // If minnows (Level 1) already account for >= 30% of population or >= 5 fish, throttle Level 1 down
-            if (activeCounts[1] >= 5 || (totalActive > 5 && activeCounts[1] >= totalActive * 0.30f))
+            // Priority Boost: Ensure user's current level fish are always plentiful in the water
+            int currentLevelActive = (playerLevel >= 1 && playerLevel <= effectiveMax) ? activeCounts[playerLevel] : 0;
+            if (currentLevelActive <= 2)
             {
-                weights[1] *= 0.25f;
+                weights[playerLevel] *= 1.6f;
             }
         }
 
@@ -1026,7 +1148,7 @@ public class GridController : MonoBehaviour
             totalWeight += weights[i];
         }
 
-        if (totalWeight <= 0.0001f) return 1;
+        if (totalWeight <= 0.0001f) return Mathf.Clamp(playerLevel, 1, effectiveMax);
 
         float roll = Random.value * totalWeight;
         float cumulative = 0f;
@@ -1059,15 +1181,42 @@ public class GridController : MonoBehaviour
             }
         }
 
-        // 2. Population Full Recycle:
+        // 2. Proactive Danger Fish Culling:
+        // If active danger fish exceed 3 or >= 18% of the active fish, cull off-screen danger fish to guarantee space for eatable prey
+        int activeEatable = 0;
+        int activeDanger = 0;
+        for (int i = 0; i < Fish.AllFish.Count; i++)
+        {
+            Fish f = Fish.AllFish[i];
+            if (f != null && !f.IsDead)
+            {
+                if (f.Level <= playerLevel) activeEatable++;
+                else activeDanger++;
+            }
+        }
+        if (activeDanger >= 3 || (activeEatable + activeDanger > 3 && activeDanger >= (activeEatable + activeDanger) * 0.18f))
+        {
+            for (int i = 0; i < Fish.AllFish.Count; i++)
+            {
+                Fish fish = Fish.AllFish[i];
+                if (fish == null || fish.IsDead) continue;
+                if (fish.Level > playerLevel && Time.time - fish.SpawnTime >= 2.0f && !viewBounds.Contains(fish.transform.position))
+                {
+                    fish.DespawnSelf();
+                    return true;
+                }
+            }
+        }
+
+        // 3. Population Full Recycle:
         if (forceRecycle)
         {
-            // First priority: recycle off-screen Level 1 fish if minnows are plentiful
+            // First priority: recycle off-screen fish smaller than player level
             for (int i = 0; i < Fish.AllFish.Count; i++)
             {
                 Fish fish = Fish.AllFish[i];
                 if (fish == null) continue;
-                if (fish.Level == 1 && Time.time - fish.SpawnTime >= 3.0f && !viewBounds.Contains(fish.transform.position))
+                if (fish.Level < playerLevel && Time.time - fish.SpawnTime >= 2.5f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
@@ -1079,7 +1228,7 @@ public class GridController : MonoBehaviour
             {
                 Fish fish = Fish.AllFish[i];
                 if (fish == null) continue;
-                if (Time.time - fish.SpawnTime >= 3.5f && !viewBounds.Contains(fish.transform.position))
+                if (Time.time - fish.SpawnTime >= 3.0f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
@@ -1138,6 +1287,12 @@ public class GridController : MonoBehaviour
         float stopX = Random.Range(cachedWorldBgLeft + inset, cachedWorldBgRight - inset);
 
         bool isRiver = LevelManager.IsCurrentLakeLevel;
+
+        if (!isRiver && RiverBoat.IsPermanentlyDepartedThisSession)
+        {
+            isSpawningHazards = false;
+            yield break;
+        }
 
         if (cachedPlayerController == null)
         {
@@ -1375,7 +1530,8 @@ public class GridController : MonoBehaviour
 
                 SpriteRenderer sr = harpoonTemplate.AddComponent<SpriteRenderer>();
                 sr.sprite = harpoonSprite;
-                sr.sortingOrder = 6;
+                sr.sortingLayerName = "ParallaxForeground";
+                sr.sortingOrder = 130;
 
                 BoxCollider2D box = harpoonTemplate.AddComponent<BoxCollider2D>();
                 box.isTrigger = true;
@@ -1407,6 +1563,19 @@ public class GridController : MonoBehaviour
             {
                 if (bMat == null) bMat = cachedPlayerController.BubbleMaterial;
                 if (bTex == null) bTex = cachedPlayerController.BubbleTexture;
+            }
+
+            if (harpoonShootSound == null)
+            {
+#if UNITY_EDITOR
+                harpoonShootSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Firing_Harpoon.mp3");
+                if (harpoonShootSound == null)
+                {
+                    harpoonShootSound = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/firing_harpoon.mp3");
+                }
+#endif
+                if (harpoonShootSound == null) harpoonShootSound = Resources.Load<AudioClip>("Firing_Harpoon");
+                if (harpoonShootSound == null) harpoonShootSound = Resources.Load<AudioClip>("firing_harpoon");
             }
 
             if (harpoonStabSound == null)
@@ -1579,6 +1748,143 @@ public class GridController : MonoBehaviour
         }
     }
 
+    private void InitCuttlefishTemplate()
+    {
+        if (cuttlefishTemplate != null) return;
+
+#if UNITY_EDITOR
+        if (cuttlefishSprite == null)
+        {
+            var allAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Hazard/cuttle_fish.png");
+            if (allAssets != null)
+            {
+                foreach (var a in allAssets)
+                {
+                    if (a is Sprite s)
+                    {
+                        cuttlefishSprite = s;
+                        break;
+                    }
+                }
+            }
+        }
+#endif
+        if (cuttlefishSprite == null)
+        {
+            cuttlefishSprite = Resources.Load<Sprite>("cuttle_fish") ?? Resources.Load<Sprite>("cuttle_fish_0");
+        }
+
+        cuttlefishTemplate = new GameObject("Cuttlefish_Template");
+        cuttlefishTemplate.tag = "Enemy";
+        cuttlefishTemplate.SetActive(false);
+        cuttlefishTemplate.transform.SetParent(transform);
+        cuttlefishTemplate.transform.localScale = new Vector3(0.08f, 0.08f, 1f);
+
+        GameObject gfx = new GameObject("PlayerGraphics");
+        gfx.transform.SetParent(cuttlefishTemplate.transform, false);
+        gfx.transform.localPosition = Vector3.zero;
+
+        SpriteRenderer sr = gfx.AddComponent<SpriteRenderer>();
+        if (cuttlefishSprite != null) sr.sprite = cuttlefishSprite;
+        sr.sortingLayerName = "ParallaxForeground";
+        sr.sortingOrder = 90;
+
+        CapsuleCollider2D col = cuttlefishTemplate.AddComponent<CapsuleCollider2D>();
+        col.isTrigger = true;
+        col.direction = CapsuleDirection2D.Horizontal;
+        if (cuttlefishSprite != null)
+        {
+            col.size = new Vector2(cuttlefishSprite.bounds.size.x * 0.85f, cuttlefishSprite.bounds.size.y * 0.70f);
+        }
+        else
+        {
+            col.size = new Vector2(5.0f, 2.0f);
+        }
+
+        Rigidbody2D rb = cuttlefishTemplate.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Dynamic;
+        rb.gravityScale = 0f;
+        rb.angularDamping = 0f;
+        rb.linearDamping = 0f;
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+        rb.interpolation = RigidbodyInterpolation2D.Interpolate;
+
+        Fish fish = cuttlefishTemplate.AddComponent<Fish>();
+        fish.SetCuttlefishStatus(true);
+        typeof(Fish).GetField("level", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(fish, 1);
+        typeof(Fish).GetField("xp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(fish, 15);
+
+        FishAI ai = cuttlefishTemplate.AddComponent<FishAI>();
+        ai.moveSpeed = 3.5f;
+        ai.graphicsTransform = gfx.transform;
+
+        cuttlefishTemplate.AddComponent<Cuttlefish>();
+    }
+
+    private void SpawnCuttlefish(bool nearPlayer = false)
+    {
+        EnsureWorldBoundsCached();
+        if (cuttlefishTemplate == null)
+        {
+            InitCuttlefishTemplate();
+        }
+
+        Vector3 spawnPos;
+        Vector2 targetPos;
+
+        if (nearPlayer)
+        {
+            Camera cam = _cam != null ? _cam : Camera.main;
+            Vector3 playerPos = (player != null) ? player.transform.position : (cam != null ? cam.transform.position : Vector3.zero);
+            bool spawnOnLeft = (Random.value > 0.5f);
+            float spawnX = spawnOnLeft ? (playerPos.x - 6.5f) : (playerPos.x + 6.5f);
+            float spawnY = Mathf.Clamp(playerPos.y + Random.Range(-0.8f, 0.8f), cachedWorldFloorY + 1.2f, cachedWorldSurfaceY - 1.5f);
+            spawnPos = new Vector3(spawnX, spawnY, 0f);
+            targetPos = new Vector2(playerPos.x, spawnY);
+        }
+        else
+        {
+            bool spawnOnLeft = (Random.value > 0.5f);
+            float spawnX = spawnOnLeft ? (cachedWorldBgLeft - 2.5f) : (cachedWorldBgRight + 2.5f);
+            float spawnY = Random.Range(cachedWorldFloorY + 1.2f, cachedWorldSurfaceY - 1.5f);
+            spawnPos = new Vector3(spawnX, spawnY, 0f);
+            targetPos = new Vector2(spawnOnLeft ? cachedWorldBgRight : cachedWorldBgLeft, spawnY);
+        }
+
+        GameObject cuttleObj = Instantiate(cuttlefishTemplate, spawnPos, Quaternion.identity);
+        cuttleObj.transform.SetParent(null);
+        cuttleObj.transform.position = new Vector3(spawnPos.x, spawnPos.y, 0f);
+        cuttleObj.transform.localScale = new Vector3(0.08f, 0.08f, 1f);
+
+        if (cuttleObj != null)
+        {
+            cuttleObj.name = "Cuttlefish_Hazard";
+            cuttleObj.SetActive(true);
+            activeCuttlefish = cuttleObj;
+
+            SpriteRenderer sr = cuttleObj.GetComponentInChildren<SpriteRenderer>();
+            if (sr != null)
+            {
+                if (sr.sprite == null && cuttlefishSprite != null) sr.sprite = cuttlefishSprite;
+                sr.color = Color.white;
+                sr.sortingLayerName = "ParallaxForeground";
+                sr.sortingOrder = 90;
+            }
+
+            Cuttlefish cf = cuttleObj.GetComponent<Cuttlefish>();
+            if (cf != null)
+            {
+                cf.Initialize(cachedBubbleMat, cachedBubbleTex);
+            }
+
+            Fish f = cuttleObj.GetComponent<Fish>();
+            if (f != null)
+            {
+                OrientFish(f, spawnPos, targetPos);
+            }
+        }
+    }
+
     private void OrientFish(Fish fish, Vector2 spawnPos, Vector2 targetPos)
     {
         if (fish == null) return;
@@ -1607,6 +1913,94 @@ public class GridController : MonoBehaviour
             fish.FlipTowardsDestination(targetPos, false);
         }
     }
+
+    #region Cheat / Testing Helpers
+
+    public void CheatSpawnShark()
+    {
+        SharkHazard.ResetSessionState();
+        SpawnShark();
+    }
+
+    public void CheatSpawnCuttlefish()
+    {
+        SpawnCuttlefish(true);
+    }
+
+    public void CheatSpawnBoat()
+    {
+        RiverBoat.ResetSessionState();
+        StartCoroutine(SpawnHazardsRoutine());
+    }
+
+    public void CheatSpawnFish(int level, bool isGolden = false, bool isSick = false, bool isSpiked = false)
+    {
+        EnsureWorldBoundsCached();
+        Camera cam = _cam != null ? _cam : Camera.main;
+        Vector3 playerPos = (player != null) ? player.transform.position : (cam != null ? cam.transform.position : Vector3.zero);
+        
+        bool spawnOnLeft = (Random.value > 0.5f);
+        float spawnX = spawnOnLeft ? (playerPos.x - 7.5f) : (playerPos.x + 7.5f);
+        float spawnY = Mathf.Clamp(playerPos.y + Random.Range(-1.5f, 1.5f), cachedWorldFloorY + 1.2f, cachedWorldSurfaceY - 1.2f);
+        Vector3 spawnPos = new Vector3(spawnX, spawnY, 0f);
+
+        if (isGolden && goldenFishPrefab != null)
+        {
+            GameObject gfObj = Instantiate(goldenFishPrefab, spawnPos, Quaternion.identity);
+            Fish gf = gfObj.GetComponent<Fish>();
+            if (gf != null)
+            {
+                OrientFish(gf, spawnPos, new Vector2(playerPos.x, spawnY));
+            }
+            return;
+        }
+
+        if (enemyLibrary != null)
+        {
+            Fish prefab = enemyLibrary.GetRandomPrefab(level, LevelManager.IsCurrentLakeLevel);
+            if (prefab != null)
+            {
+                Fish fish = enemyLibrary.SpawnSpecific(prefab, spawnPos, 0f, 0f, -1);
+                if (fish != null)
+                {
+                    if (isSick) fish.SetSickStatus(true);
+                    if (isSpiked) fish.SetSpikeMode(true);
+                    OrientFish(fish, spawnPos, new Vector2(playerPos.x, spawnY));
+                }
+            }
+        }
+    }
+
+    public void CheatClearAllFish()
+    {
+        if (Fish.AllFish != null)
+        {
+            var copy = new List<Fish>(Fish.AllFish);
+            for (int i = 0; i < copy.Count; i++)
+            {
+                if (copy[i] != null && !copy[i].IsDead)
+                {
+                    copy[i].Die();
+                }
+            }
+        }
+    }
+
+    public void CheatOpenAllClams()
+    {
+        if (Clam.AllClams != null)
+        {
+            for (int i = 0; i < Clam.AllClams.Count; i++)
+            {
+                if (Clam.AllClams[i] != null)
+                {
+                    Clam.AllClams[i].SetState(Clam.ClamState.FullyOpened);
+                }
+            }
+        }
+    }
+
+    #endregion
 
     #endregion
 }

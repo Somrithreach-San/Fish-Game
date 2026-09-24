@@ -163,7 +163,9 @@ public class PlayerSpawn : MonoBehaviour
         {
             src = p.AddComponent<AudioSource>();
             src.playOnAwake = false;
+            src.spatialBlend = 0f;
         }
+        AudioSettingsManager.RouteToSfx(src);
         src.PlayOneShot(spawnSound, 1.0f);
     }
 
@@ -176,7 +178,9 @@ public class PlayerSpawn : MonoBehaviour
         {
             src = p.AddComponent<AudioSource>();
             src.playOnAwake = false;
+            src.spatialBlend = 0f;
         }
+        AudioSettingsManager.RouteToSfx(src);
         
         AudioClip clip = bubbleClips[Random.Range(0, bubbleClips.Length)];
         if (clip != null)
@@ -188,6 +192,12 @@ public class PlayerSpawn : MonoBehaviour
     private System.Collections.IEnumerator DropToPosition(GameObject obj, Vector3 target, float duration)
     {
         if (obj == null) yield break;
+        PlayerController pc = obj.GetComponent<PlayerController>();
+        if (pc != null)
+        {
+            pc.IsDropping = true;
+        }
+
         float elapsed = 0f;
         Vector3 start = obj.transform.position;
         while (elapsed < duration)
@@ -204,9 +214,13 @@ public class PlayerSpawn : MonoBehaviour
         {
             obj.transform.position = target;
             
-            // Stop speed particles after drop
-            PlayerController pc = obj.GetComponent<PlayerController>();
-            if (pc != null) pc.StopSpeedEffect();
+            // Stop speed particles and unlock control after drop
+            if (pc != null)
+            {
+                pc.SetTargetPosition(target);
+                pc.IsDropping = false;
+                pc.StopSpeedEffect();
+            }
         }
         activeDropCoroutine = null;
     }

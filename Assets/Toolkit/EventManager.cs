@@ -132,7 +132,23 @@ namespace Rhinotap.Toolkit
                 thisEvent = instance.events.GetValue<Action<ActionType>>(eventName);
                 if( thisEvent != null)
                 {
-                    thisEvent.Invoke(param);
+                    Delegate[] invocationList = thisEvent.GetInvocationList();
+                    for (int i = 0; i < invocationList.Length; i++)
+                    {
+                        try
+                        {
+                            var target = invocationList[i].Target;
+                            if (target is UnityEngine.Object unityObj && unityObj == null)
+                            {
+                                continue; // Skip destroyed Unity object
+                            }
+                            ((Action<ActionType>)invocationList[i]).Invoke(param);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogWarning($"[EventManager] Error invoking '{eventName}': {ex.Message}");
+                        }
+                    }
                     Debug.Log($"Event Triggered [{eventName}]");
                 }
             } else
@@ -187,9 +203,25 @@ namespace Rhinotap.Toolkit
             }
 
             Action thisEvent = null;
-            if (instance.voidEvents.TryGetValue(eventName, out thisEvent))
+            if (instance.voidEvents.TryGetValue(eventName, out thisEvent) && thisEvent != null)
             {
-                thisEvent.Invoke();
+                Delegate[] invocationList = thisEvent.GetInvocationList();
+                for (int i = 0; i < invocationList.Length; i++)
+                {
+                    try
+                    {
+                        var target = invocationList[i].Target;
+                        if (target is UnityEngine.Object unityObj && unityObj == null)
+                        {
+                            continue; // Skip destroyed Unity object
+                        }
+                        ((Action)invocationList[i]).Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[EventManager] Error invoking '{eventName}': {ex.Message}");
+                    }
+                }
             }
             // If no void event exists for this name, just return silently.
         }

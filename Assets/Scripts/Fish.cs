@@ -73,7 +73,7 @@ public class Fish : MonoBehaviour
     public FishSchool GroupSchool { get; set; }
     private bool isEaten = false;
     public float SpawnTime { get; private set; }
-    public bool IsDead { get; private set; } = false;
+    public bool IsDead { get; set; } = false;
 
     [Header("Mouth Bite Animation")]
     [SerializeField] private Sprite closedSprite;
@@ -94,7 +94,7 @@ public class Fish : MonoBehaviour
     public bool IsPufferFish => isPufferFish;
     [SerializeField] private Sprite normalSprite;
     [SerializeField] private Sprite spikeSprite;
-    [SerializeField] private float spikeDetectRadius = 5.0f;
+    [SerializeField] private float spikeDetectRadius = 8.5f;
     public float SpikeDetectRadius { get => spikeDetectRadius; set => spikeDetectRadius = value; }
     [SerializeField] private float spikeDuration = 3.5f;
     [SerializeField] private float deflateCooldown = 3.0f;
@@ -112,6 +112,18 @@ public class Fish : MonoBehaviour
     public bool IsSickFish => isSickFish;
     [SerializeField] private Sprite sickFishSprite;
     private bool defaultSickConfig = false;
+    private float poisonTimer = 0f;
+    public bool IsPoisoned => poisonTimer > 0f;
+
+    [Header("Cuttlefish Settings")]
+    [SerializeField] private bool isCuttlefish = false;
+    public bool IsCuttlefish => isCuttlefish;
+    public Transform GfxTransform => gfx != null ? gfx : transform;
+
+    public void SetCuttlefishStatus(bool active)
+    {
+        isCuttlefish = active;
+    }
 
     private Vector3 initialScale;
     private bool initialized = false;
@@ -237,6 +249,10 @@ public class Fish : MonoBehaviour
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 1f);
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f);
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Color (Transparent fade)
@@ -344,7 +360,17 @@ public class Fish : MonoBehaviour
         ResetBiteState();
         ConfigureAiFishRendering();
         ConfigurePufferfish();
-        // Don't reset 'initialized' as that tracks initialScale which is constant
+        
+        var stateCtrl = GetComponent<StateController>();
+        if (stateCtrl != null) stateCtrl.enabled = false;
+        var movement = GetComponent<FishMovement>();
+        if (movement != null) movement.enabled = false;
+        
+        // Restore scale in case it was shrunk by a clam or death animation
+        if (initialized && initialScale != Vector3.zero)
+        {
+            transform.localScale = initialScale;
+        }
     }
 
     private void OnDisable()
@@ -393,8 +419,13 @@ public class Fish : MonoBehaviour
         var ai = GetComponent<FishAI>();
         if (ai == null) ai = gameObject.AddComponent<FishAI>();
         ai.enabled = true;
+        
+        // Disable legacy AI scripts to prevent them from constantly overriding FishAI's movement (e.g. StateController setting velocity to wander)
         var movement = GetComponent<FishMovement>();
         if (movement != null) movement.enabled = false;
+        var stateCtrl = GetComponent<StateController>();
+        if (stateCtrl != null) stateCtrl.enabled = false;
+        
         SetupRigidbody();
 
         // Setup Manual Collision Check (Bypasses Physics Matrix "Enemy vs Enemy" ignore)
@@ -558,13 +589,19 @@ public class Fish : MonoBehaviour
             heightRatio = 0.365f;
             centerOffsetNorm = new Vector2(0.001f, 0.012f);
         }
+        else if (spriteName.Contains("river level 4"))
+        {
+            widthRatio = 0.96f;
+            heightRatio = 0.78f;
+            centerOffsetNorm = new Vector2(0.002f, 0.005f);
+        }
         else if (spriteName.Contains("level 5") && !spriteName.Contains("river"))
         {
             widthRatio = 0.95f;
             heightRatio = 0.57f;
             centerOffsetNorm = new Vector2(-0.006f, 0.012f);
         }
-        else if (spriteName.Contains("level 4") || spriteName.Contains("river level 4"))
+        else if (spriteName.Contains("level 4") && !spriteName.Contains("river"))
         {
             widthRatio = 0.98f;
             heightRatio = 0.90f;
@@ -649,6 +686,8 @@ public class Fish : MonoBehaviour
             capsule.direction = CapsuleDirection2D.Horizontal;
         else
             capsule.direction = CapsuleDirection2D.Vertical;
+
+        myCollider = capsule;
     }
 
     private void Update()
@@ -658,6 +697,16 @@ public class Fish : MonoBehaviour
 
         // Mouth bite animation update
         UpdateBiteAnimation();
+
+        // Poison Debuff timer (from consuming a sick fish)
+        if (poisonTimer > 0f)
+        {
+            poisonTimer -= Time.deltaTime;
+            if (poisonTimer <= 0f && cachedGfxSr != null && !isSickFish)
+            {
+                cachedGfxSr.color = Color.white;
+            }
+        }
 
         // Bobbing Animation (only fallback if no Animator is controlling Gfx)
         if (gfx != null && gfx != transform && GetComponent<Animator>() == null)
@@ -759,12 +808,24 @@ public class Fish : MonoBehaviour
                   // I am bigger. I eat the smaller fish.
                   if (this.level > otherFish.Level)
                   {
+                      // SICK FISH & CUTTLEFISH REFUSE FOOD
+                      if (this.isSickFish || this.IsCuttlefish)
+                      {
+                          continue;
+                      }
+
+                      bool wasSick = otherFish.IsSickFish;
                       otherFish.OnEatenByPredator();
                       otherFish.Die();
                       PlayEatEffect();
                       TriggerBite();
-                     var ai = GetComponent<FishAI>();
-                     if (ai != null) ai.OnAteFish(otherFish);
+                      var ai = GetComponent<FishAI>();
+                      if (ai != null) ai.OnAteFish(otherFish);
+
+                      if (wasSick)
+                      {
+                          ApplyPoisonDebuff(3.5f);
+                      }
                   }
              }
         }
@@ -791,6 +852,84 @@ public class Fish : MonoBehaviour
             if (closedSprite != null && cachedGfxSr != null && !isSpiked && !isSickFish)
             {
                 cachedGfxSr.sprite = closedSprite;
+            }
+
+            if (openSprite == null && cachedGfxSr != null)
+            {
+                string baseName = gameObject.name.Replace("(Clone)", "").Trim();
+#if UNITY_EDITOR
+                string[] possiblePaths = new string[]
+                {
+                    $"Assets/Graphics/fish/{baseName}_mouth open.png",
+                    $"Assets/Graphics/fish/{baseName}_mouth_open.png",
+                    $"Assets/Graphics/fish/{baseName} mouth open.png",
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_mouth open.png" : "",
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_mouth_open.png" : ""
+                };
+
+                foreach (var path in possiblePaths)
+                {
+                    if (string.IsNullOrEmpty(path)) continue;
+                    var sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    if (sprite == null)
+                    {
+                        var allAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath(path);
+                        if (allAssets != null)
+                        {
+                            foreach (var asset in allAssets)
+                            {
+                                if (asset is Sprite s)
+                                {
+                                    sprite = s;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (sprite != null)
+                    {
+                        openSprite = sprite;
+                        break;
+                    }
+                }
+#endif
+                if (openSprite == null)
+                {
+                    openSprite = Resources.Load<Sprite>($"{baseName}_mouth open") ??
+                                 Resources.Load<Sprite>($"{baseName}_mouth_open") ??
+                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth open") : null) ??
+                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth_open") : null);
+                }
+            }
+
+            if (sickFishSprite == null)
+            {
+                string baseName = gameObject.name.Replace("(Clone)", "").Trim();
+#if UNITY_EDITOR
+                string[] sickPaths = new string[]
+                {
+                    $"Assets/Graphics/fish/{baseName} sick.png",
+                    $"Assets/Graphics/fish/{baseName}_sick.png",
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name} sick.png" : "",
+                    "Assets/Graphics/fish/level 2 fish sick.png"
+                };
+                foreach (var path in sickPaths)
+                {
+                    if (string.IsNullOrEmpty(path)) continue;
+                    var sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    if (sprite != null)
+                    {
+                        sickFishSprite = sprite;
+                        break;
+                    }
+                }
+#endif
+                if (sickFishSprite == null)
+                {
+                    sickFishSprite = Resources.Load<Sprite>($"{baseName} sick") ??
+                                     Resources.Load<Sprite>($"{baseName}_sick") ??
+                                     Resources.Load<Sprite>("level 2 fish sick");
+                }
             }
         }
         else
@@ -835,8 +974,8 @@ public class Fish : MonoBehaviour
         {
             goldenStatusActive = true;
             CreateGoldenParticles();
-            // Golden fish are slightly faster
-            speed *= 1.2f; 
+            // Golden fish are fast and agile
+            speed = 5.5f; 
 
             // ENSURE IT CAN BE EATEN
             // Golden fish level is 1 so player can eat it right from Level 1
@@ -856,22 +995,28 @@ public class Fish : MonoBehaviour
             // Use FishAI (Add if missing)
             var ai = GetComponent<FishAI>();
             if (ai == null) ai = gameObject.AddComponent<FishAI>();
+            ai.enabled = true;
             
-            if (ai != null)
-            {
-                ai.enabled = true; // Ensure it's enabled
-                // Adjust stats for Golden Fish
-                ai.moveSpeed = 3.5f; // Calm, normal speed
-                ai.turnSpeed = 120f; // Relaxed turning
-                ai.stayOnScreen = true; // Enable boundary logic
-                ai.fleeRadius = 0f; // DISABLE FLEEING (User Request: "completely remove the fleeing")
-            }
-
-            // Remove FishMovement if it exists (Legacy cleanup)
+            // Disable old legacy movement/state controllers to prevent conflicts
             var movement = GetComponent<FishMovement>();
             if (movement != null)
             {
+                movement.enabled = false;
                 Destroy(movement);
+            }
+            
+            var stateCtrl = GetComponent<StateController>();
+            if (stateCtrl != null) stateCtrl.enabled = false;
+            if (ai != null)
+            {
+                ai.enabled = true; // Ensure it's enabled
+                // Adjust stats for Golden Fish - Fast and agile
+                ai.moveSpeed = 5.5f; 
+                ai.minSpeed = 4.2f;
+                ai.maxSpeed = 7.0f;
+                ai.turnSpeed = 180f; 
+                ai.stayOnScreen = true; // Enable boundary logic
+                ai.fleeRadius = 0f; // DISABLE FLEEING
             }
         }
         else
@@ -1031,19 +1176,25 @@ public class Fish : MonoBehaviour
             // I am bigger. I eat the smaller fish.
             if (this.level > otherFish.Level)
             {
-                // SICK FISH REFUSES FOOD:
-                // Sick fish refuse food and will not eat anything.
-                if (this.isSickFish)
+                // SICK FISH & CUTTLEFISH REFUSE FOOD:
+                // Sick fish refuse food, and Cuttlefish is a neutral hazard that does not eat fish.
+                if (this.isSickFish || this.IsCuttlefish)
                 {
                     return;
                 }
 
+                bool wasSick = otherFish.IsSickFish;
                 otherFish.OnEatenByPredator();
                 otherFish.Die();
                 PlayEatEffect();
                 TriggerBite();
                 var ai = GetComponent<FishAI>();
                 if (ai != null) ai.OnAteFish(otherFish);
+
+                if (wasSick)
+                {
+                    ApplyPoisonDebuff(3.5f);
+                }
             }
         }
     }
@@ -1154,7 +1305,7 @@ public class Fish : MonoBehaviour
         }
         if (biteClip != null && AudioSettingsManager.IsSfxEnabled)
         {
-            AudioSource.PlayClipAtPoint(biteClip, transform.position, 1.0f);
+            SFXPool.Play3D(biteClip, transform.position, 1.0f, 3.0f, 25.0f);
         }
 
         // 5. Disable animator if present
@@ -1309,10 +1460,19 @@ public class Fish : MonoBehaviour
 
     public void ConfigurePufferfish()
     {
+        string objName = gameObject.name.ToLower();
+        // River fish are never pufferfish
+        if (objName.Contains("river") || (normalSprite != null && normalSprite.name.ToLower().Contains("river")))
+        {
+            isPufferFish = false;
+            return;
+        }
+
         // Level 4 ocean fish or any fish configured with spikeSprite is a Pufferfish
         if (isPufferFish || (level == 4 && !LevelManager.IsCurrentLakeLevel) || spikeSprite != null)
         {
             isPufferFish = true;
+            if (spikeDetectRadius < 8.5f) spikeDetectRadius = 8.5f;
             if (gfx == null) gfx = transform.Find("Graphics") ?? transform.Find("Gfx") ?? transform;
             if (cachedGfxSr == null && gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
             if (normalSprite == null && cachedGfxSr != null) normalSprite = cachedGfxSr.sprite;
@@ -1334,7 +1494,7 @@ public class Fish : MonoBehaviour
             }
             else
             {
-                PlayerController pc = FindObjectOfType<PlayerController>();
+                PlayerController pc = FindAnyObjectByType<PlayerController>();
                 if (pc != null) cachedPlayerTransform = pc.transform;
             }
         }
@@ -1375,25 +1535,31 @@ public class Fish : MonoBehaviour
             }
         }
 
-        if (threatDetected)
+        if (isSpiked)
         {
-            // Keep spikes deployed while player or predator is within detection radius
-            spikeActiveTimer = spikeDuration;
-            if (!isSpiked)
+            // Once spiked, count down fixed spike duration.
+            // Do NOT reset or extend the timer while threat remains inside radius.
+            spikeActiveTimer -= Time.deltaTime;
+            if (spikeActiveTimer <= 0f)
             {
-                SetSpikeMode(true);
+                // Spike duration ended -> deflate back to normal and start mandatory 3s cooldown
+                SetSpikeMode(false);
+                deflateCooldownTimer = Mathf.Max(3.0f, deflateCooldown);
             }
         }
         else
         {
-            if (isSpiked)
+            // Count down cooldown after deflating
+            if (deflateCooldownTimer > 0f)
             {
-                // Threat has backed away; count down to safely deflate back to normal
-                spikeActiveTimer -= Time.deltaTime;
-                if (spikeActiveTimer <= 0f)
-                {
-                    SetSpikeMode(false);
-                }
+                deflateCooldownTimer -= Time.deltaTime;
+            }
+
+            // Only spike if cooldown has fully expired and a threat is detected
+            if (deflateCooldownTimer <= 0f && threatDetected)
+            {
+                spikeActiveTimer = spikeDuration > 0f ? spikeDuration : 3.5f;
+                SetSpikeMode(true);
             }
         }
     }
@@ -1539,6 +1705,8 @@ public class Fish : MonoBehaviour
 
     #region Sick Fish Logic
 
+    private static readonly Color SICK_FISH_COLOR = new Color(0.72f, 1f, 0.72f, 1f);
+
     public void SetSickStatus(bool sick)
     {
         isSickFish = sick;
@@ -1547,13 +1715,21 @@ public class Fish : MonoBehaviour
 
         if (cachedGfxSr != null)
         {
-            if (sick && sickFishSprite != null)
+            if (sick)
             {
-                cachedGfxSr.sprite = sickFishSprite;
+                if (sickFishSprite != null)
+                {
+                    cachedGfxSr.sprite = sickFishSprite;
+                }
+                cachedGfxSr.color = SICK_FISH_COLOR;
             }
-            else if (!sick && normalSprite != null)
+            else
             {
-                cachedGfxSr.sprite = normalSprite;
+                if (normalSprite != null)
+                {
+                    cachedGfxSr.sprite = normalSprite;
+                }
+                cachedGfxSr.color = Color.white;
             }
         }
         UpdateCollision();
@@ -1561,6 +1737,7 @@ public class Fish : MonoBehaviour
 
     public void ResetSickState()
     {
+        poisonTimer = 0f;
         if (!defaultSickConfig)
         {
             SetSickStatus(false);
@@ -1571,7 +1748,38 @@ public class Fish : MonoBehaviour
         }
     }
 
+    public void ApplyPoisonDebuff(float duration = 3.5f)
+    {
+        poisonTimer = duration;
+        if (cachedGfxSr != null)
+        {
+            cachedGfxSr.color = SICK_FISH_COLOR; // Green tint
+        }
+    }
+
+    public void ReducePoisonTime(float amount = 0.65f)
+    {
+        if (poisonTimer > 0f)
+        {
+            poisonTimer = Mathf.Max(0f, poisonTimer - amount);
+            if (poisonTimer <= 0f && cachedGfxSr != null && !isSickFish)
+            {
+                cachedGfxSr.color = Color.white;
+            }
+        }
+    }
+
     #endregion
+
+    public void ApplyInkDisorientation(float duration = 3.5f)
+    {
+        if (IsCuttlefish || IsDead) return;
+        FishAI ai = GetComponent<FishAI>();
+        if (ai != null)
+        {
+            ai.ApplyInkDisorientation(duration);
+        }
+    }
 
     /// <summary>
     /// AI fish share the player's foreground sorting layer so reef art never
@@ -1582,7 +1790,7 @@ public class Fish : MonoBehaviour
         if (cachedGfxSr == null) return;
 
         cachedGfxSr.sortingLayerName = "ParallaxForeground";
-        cachedGfxSr.sortingOrder = 59; // Player is 60; keep AI fish just behind it.
+        cachedGfxSr.sortingOrder = 90; // Well in front of reef elements (50-55) and behind player (120).
     }
 
     #region Mouth Bite Animation Logic

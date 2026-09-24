@@ -69,6 +69,11 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
             Debug.Log($"MobileBoostButton: Auto-synced size to {targetSize}px.");
         }
 
+        if (MobileAbilityButton.Instance != null)
+        {
+            MobileAbilityButton.Instance.SyncLayoutWithBoostButton();
+        }
+
         // Scale and perfectly center the icon inside the joystick-style button
         if (transform.childCount > 0)
         {

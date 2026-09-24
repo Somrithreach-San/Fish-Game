@@ -75,11 +75,11 @@ public class FishAI : MonoBehaviour
     public float chaseSpeedMultiplier = 1.2f;
     // Removed chase burst parameters
     public float hungerMax = 1f;
-    public float hungerChaseThreshold = 0.25f;
-    public float hungerDecayPerSecond = 0.015f;
-    public float eatHungerGain = 0.8f;
-    public float postEatCooldown = 10f;
-    public float hungerChaseChance = 0.4f;
+    public float hungerChaseThreshold = 0.40f;
+    public float hungerDecayPerSecond = 0.05f;
+    public float eatHungerGain = 0.6f;
+    public float postEatCooldown = 3.5f;
+    public float hungerChaseChance = 0.85f;
     private float lastDistToPlayer;
     // Removed chase burst timer
 
@@ -87,6 +87,30 @@ public class FishAI : MonoBehaviour
     private float sickRestTimer = 0f;
     private bool isSickResting = false;
     private float nextSickCycleDuration = 6f;
+    private float fleeCommitTimer = 0f;
+
+    // Ink Disorientation (from Cuttlefish ink)
+    private float inkDisorientTimer = 0f;
+    public bool IsDisorientedByInk => inkDisorientTimer > 0f;
+
+    public void ApplyInkDisorientation(float duration = 3.5f)
+    {
+        inkDisorientTimer = duration;
+        chaseTarget = null;
+        currentState = State.Wander;
+    }
+
+    // Individualized Organic Schooling & Swimming Dynamics
+    private Vector2 laggedSchoolTarget;
+    private float followResponsiveness = 3.5f;
+    private float personalSpeedMultiplier = 1.0f;
+    private float personalTurnMultiplier = 1.0f;
+    private float personalFlipDeadzone = 0.22f;
+    private float schoolSpeedMod = 1.0f;
+    private float personalWobblePhaseX = 0f;
+    private float personalWobblePhaseY = 0f;
+    private float personalWobbleSpeedX = 1.0f;
+    private float personalWobbleSpeedY = 1.0f;
 
     // Conflicting script handling
     void Awake()
@@ -136,10 +160,12 @@ public class FishAI : MonoBehaviour
         leaveTimer = 0f;
         isLeaving = false;
         lifeTime = 0f;
+        fleeCommitTimer = 0f;
         currentState = State.Wander;
         sickRestTimer = Random.Range(1f, 4f);
         isSickResting = false;
         nextSickCycleDuration = Random.Range(5f, 8f);
+        InitPersonality();
     }
 
     void Start()
@@ -157,7 +183,22 @@ public class FishAI : MonoBehaviour
         sickRestTimer = Random.Range(1f, 4f);
         isSickResting = false;
         nextSickCycleDuration = Random.Range(5f, 8f);
+        InitPersonality();
         // No head pivot setup
+    }
+
+    private void InitPersonality()
+    {
+        personalSpeedMultiplier = Random.Range(0.88f, 1.14f);
+        personalTurnMultiplier = Random.Range(0.84f, 1.20f);
+        personalFlipDeadzone = Random.Range(0.18f, 0.26f);
+        followResponsiveness = Random.Range(2.2f, 4.6f);
+        schoolSpeedMod = 1.0f;
+        personalWobblePhaseX = Random.Range(0f, Mathf.PI * 2f);
+        personalWobblePhaseY = Random.Range(0f, Mathf.PI * 2f);
+        personalWobbleSpeedX = Random.Range(1.1f, 1.7f);
+        personalWobbleSpeedY = Random.Range(1.0f, 1.6f);
+        laggedSchoolTarget = transform.position;
     }
 
     void FixedUpdate()
@@ -169,6 +210,13 @@ public class FishAI : MonoBehaviour
             hunger = Mathf.Max(0f, hunger - hungerDecayPerSecond * Time.fixedDeltaTime);
         if (postEatCooldownTimer > 0f)
             postEatCooldownTimer = Mathf.Max(0f, postEatCooldownTimer - Time.fixedDeltaTime);
+
+        if (inkDisorientTimer > 0f)
+        {
+            inkDisorientTimer = Mathf.Max(0f, inkDisorientTimer - Time.fixedDeltaTime);
+            chaseTarget = null;
+            if (currentState == State.Chase) currentState = State.Wander;
+        }
 
         // Sick fish resting cycle logic
         if (fishData != null && fishData.IsSickFish)
@@ -204,32 +252,70 @@ public class FishAI : MonoBehaviour
         // New: Handle "Leaving" state logic (randomly decide to swim away)
         HandleLeavingLogic();
 
+        bool isSchoolFish = (fishData != null && (fishData.school != null || fishData.GroupSchool != null || fishData.Level == 1));
+        bool inActiveSchool = (fishData != null && fishData.school != null && currentState == State.Wander);
+
         // 1. Determine Desired Direction based on State
         Vector2 targetDir = currentDirection;
 
-        // SCHOOLING OVERRIDE (If part of a school, and just wandering, follow the school)
-        if (fishData != null && fishData.school != null && currentState == State.Wander)
-        {
-             // Add organic drift to the formation so it's not a rigid grid
-             // Using InstanceID as a random seed for unique wobble per fish
-             float wobbleSpeed = 2.0f;
-             float wobbleAmount = 0.5f;
-             float time = Time.fixedTime * wobbleSpeed + GetInstanceID();
-             Vector2 organicDrift = new Vector2(Mathf.Sin(time), Mathf.Cos(time * 0.7f)) * wobbleAmount;
+        schoolSpeedMod = 1.0f;
 
-             Vector2 schoolTarget = fishData.school.CurrentDestination + fishData.formationOffset + organicDrift;
-             Vector2 toTarget = schoolTarget - (Vector2)transform.position;
-             
-             // Prevent jitter when very close to target
-             if (toTarget.sqrMagnitude < 0.25f) // 0.5f distance squared
-             {
-                 // Just drift with current direction to avoid snapping
-                 targetDir = currentDirection;
-             }
-             else
-             {
-                 targetDir = toTarget.normalized;
-             }
+        // SCHOOLING OVERRIDE (If part of a school, and just wandering, follow the school with smooth formation spring)
+        if (inActiveSchool)
+        {
+            FishSchool school = fishData.school;
+            Vector2 schoolCenter = (Vector2)school.transform.position;
+            Vector2 schoolTravelDir = school.TravelDirection;
+
+            // Individualized subtle floating undulation
+            float driftX = Mathf.Sin(Time.time * personalWobbleSpeedX + personalWobblePhaseX) * 0.12f;
+            float driftY = Mathf.Cos(Time.time * personalWobbleSpeedY + personalWobblePhaseY) * 0.12f;
+            Vector2 organicDrift = new Vector2(driftX, driftY);
+
+            // Compute ideal formation slot position in world space
+            Vector2 slotOffset = fishData.formationOffset;
+            if (!school.MovingRight)
+            {
+                slotOffset.x = -Mathf.Abs(slotOffset.x);
+            }
+            else
+            {
+                slotOffset.x = Mathf.Abs(slotOffset.x);
+            }
+
+            Vector2 idealSlotPos = schoolCenter + slotOffset + organicDrift;
+            Vector2 toSlot = idealSlotPos - (Vector2)transform.position;
+
+            // Soft mutual separation between schoolmates to avoid overlapping
+            Vector2 separation = Vector2.zero;
+            foreach (var mate in school.RegisteredFishList)
+            {
+                if (mate != null && mate != fishData && mate.gameObject.activeInHierarchy && !mate.IsDead)
+                {
+                    Vector2 diff = (Vector2)transform.position - (Vector2)mate.transform.position;
+                    float distSqr = diff.sqrMagnitude;
+                    if (distSqr > 0.0001f && distSqr < 0.64f) // within 0.80m
+                    {
+                        float dist = Mathf.Sqrt(distSqr);
+                        separation += (diff / dist) * ((0.80f - dist) / 0.80f) * 0.45f;
+                    }
+                }
+            }
+
+            // Desired heading blends school travel direction + gentle spring pull toward slot + separation
+            Vector2 desiredHeading = schoolTravelDir + toSlot * 1.5f + separation;
+            if (desiredHeading.sqrMagnitude > 0.001f)
+            {
+                targetDir = desiredHeading.normalized;
+            }
+            else
+            {
+                targetDir = schoolTravelDir;
+            }
+
+            // Smooth speed modulation: slight speed adjustment if lagging behind or ahead of assigned slot
+            float slotDistanceAhead = Vector2.Dot(toSlot, schoolTravelDir);
+            schoolSpeedMod = Mathf.Clamp(1.0f + slotDistanceAhead * 0.22f, 0.85f, 1.25f);
         }
         // If we are "leaving", override normal behavior unless we are fleeing/chasing intensely
         else if (isLeaving && currentState == State.Wander)
@@ -250,10 +336,46 @@ public class FishAI : MonoBehaviour
                         targetDir = (player.position - transform.position).normalized;
                     break;
                 case State.Flee:
+                    Vector2 rawFlee = Vector2.zero;
                     if (chaseTarget != null)
-                        targetDir = (transform.position - chaseTarget.position).normalized;
+                    {
+                        // Check if fleeing from Shark Hazard
+                        if (chaseTarget.GetComponent<SharkHazard>() != null)
+                        {
+                            // Evade vertically away from the shark's horizontal charge path
+                            float dodgeY = (transform.position.y >= chaseTarget.position.y) ? 1.0f : -1.0f;
+                            Vector2 awayFromShark = ((Vector2)transform.position - (Vector2)chaseTarget.position).normalized;
+                            rawFlee = new Vector2(awayFromShark.x * 0.4f, dodgeY * 1.6f);
+                        }
+                        else
+                        {
+                            rawFlee = (Vector2)transform.position - (Vector2)chaseTarget.position;
+                        }
+                    }
                     else if (player != null)
-                        targetDir = (transform.position - player.position).normalized;
+                    {
+                        rawFlee = (Vector2)transform.position - (Vector2)player.position;
+                    }
+
+                    if (rawFlee.sqrMagnitude > 0.001f)
+                    {
+                        // Add individual organic scatter perturbation for school minnows
+                        if (isSchoolFish)
+                        {
+                            float scatterAngle = Mathf.Sin(GetInstanceID() * 59.3f + Time.time * 0.6f) * 32f * Mathf.Deg2Rad;
+                            float cs = Mathf.Cos(scatterAngle);
+                            float sn = Mathf.Sin(scatterAngle);
+                            rawFlee = new Vector2(rawFlee.x * cs - rawFlee.y * sn, rawFlee.x * sn + rawFlee.y * cs);
+                        }
+
+                        targetDir = rawFlee.normalized;
+                        // Avoid vertical indecision (jittering left/right when threat is directly above/below)
+                        if (Mathf.Abs(targetDir.x) < 0.25f && (chaseTarget == null || chaseTarget.GetComponent<SharkHazard>() == null))
+                        {
+                            float escapeX = (currentDirection.x >= 0f) ? 0.45f : -0.45f;
+                            targetDir = new Vector2(targetDir.x + escapeX, targetDir.y).normalized;
+                        }
+                    }
                     break;
             }
         }
@@ -276,19 +398,28 @@ public class FishAI : MonoBehaviour
             targetDir += cachedAvoidanceDir * 3.0f; 
         }
 
-        // 3. Separation (Nudge away from neighbors)
-        if (cachedSeparationDir != Vector2.zero)
+        // 3. Flocking forces (Only apply to non-school wandering fish; school fish have dedicated formation logic)
+        if (!inActiveSchool)
         {
-             targetDir += cachedSeparationDir * 1.5f;
-        }
-        if (cachedAlignmentDir != Vector2.zero)
-        {
-            targetDir += cachedAlignmentDir * 1.0f;
-        }
-        if (cachedCohesionDir != Vector2.zero)
-        {
-            float cohesionWeight = (fishData != null && fishData.Level == 1) ? 1.5f : 0.8f;
-            targetDir += cachedCohesionDir * cohesionWeight;
+            if (cachedSeparationDir != Vector2.zero)
+            {
+                 // When fleeing, separation should be minimized so they focus purely on running away
+                 float sepMult = (currentState == State.Flee) ? 0.5f : 1.5f;
+                 targetDir += cachedSeparationDir * sepMult;
+            }
+
+            if (currentState != State.Flee)
+            {
+                if (cachedAlignmentDir != Vector2.zero)
+                {
+                    targetDir += cachedAlignmentDir * 1.0f;
+                }
+                if (cachedCohesionDir != Vector2.zero)
+                {
+                    float cohesionWeight = (fishData != null && fishData.Level == 1) ? 1.5f : 0.8f;
+                    targetDir += cachedCohesionDir * cohesionWeight;
+                }
+            }
         }
 
         // 4. Boundary Avoidance (If enabled)
@@ -339,7 +470,7 @@ public class FishAI : MonoBehaviour
         // 4. Steer Current Direction towards Target Direction
         if (targetDir != Vector2.zero)
         {
-            float activeTurnSpeed = turnSpeed;
+            float activeTurnSpeed = turnSpeed * personalTurnMultiplier;
             if (fishData != null && fishData.IsSpiked)
             {
                 activeTurnSpeed = 60f; // Turn sluggishly while bloated with water
@@ -348,24 +479,28 @@ public class FishAI : MonoBehaviour
             {
                 activeTurnSpeed = 70f; // Sluggish, weak turns for sick fish
             }
-            else if (fishData != null && fishData.Level == 1 && currentState == State.Flee)
+            else if (currentState == State.Flee)
             {
-                activeTurnSpeed = 180f;
+                activeTurnSpeed = (isSchoolFish ? 260f : 220f) * personalTurnMultiplier; // Smooth, natural evasion turns
+            }
+            else if (inActiveSchool)
+            {
+                activeTurnSpeed = 175f * personalTurnMultiplier; // Cohesive, fluid schooling turns without snappy twitching
             }
 
             // Check if this is a horizontal reversal (changing from swimming right to left, or left to right)
-            bool isReversingHorizontal = (currentDirection.x * targetDir.x < 0f) && Mathf.Abs(targetDir.x) > 0.15f;
+            bool isReversingHorizontal = (currentDirection.x * targetDir.x < -0.1f) && Mathf.Abs(targetDir.x) > 0.25f && Mathf.Abs(currentDirection.x) > 0.25f;
 
             if (isReversingHorizontal)
             {
                 // Reversal turnaround:
                 // Smoothly and rapidly interpolate horizontal direction across 0 without ballooning Y upwards or rotating into 3D Z!
-                float turnRate = Mathf.Max(activeTurnSpeed * 2.5f, 450f) * Mathf.Deg2Rad;
+                float turnRate = Mathf.Max(activeTurnSpeed * 1.5f, 300f) * Mathf.Deg2Rad;
                 currentDirection.x = Mathf.MoveTowards(currentDirection.x, targetDir.x, turnRate * Time.fixedDeltaTime);
-                currentDirection.y = Mathf.MoveTowards(currentDirection.y, targetDir.y, turnRate * 0.6f * Time.fixedDeltaTime);
+                currentDirection.y = Mathf.MoveTowards(currentDirection.y, targetDir.y, turnRate * 0.7f * Time.fixedDeltaTime);
 
                 // If horizontal direction has crossed and aligned with targetDir, normalize to full unit length
-                if (Mathf.Sign(currentDirection.x) == Mathf.Sign(targetDir.x) && Mathf.Abs(currentDirection.x) > 0.35f)
+                if (Mathf.Sign(currentDirection.x) == Mathf.Sign(targetDir.x) && Mathf.Abs(currentDirection.x) > 0.30f)
                 {
                     currentDirection = currentDirection.normalized;
                 }
@@ -373,7 +508,6 @@ public class FishAI : MonoBehaviour
             else
             {
                 // Normal directional steering via direct 2D vector interpolation:
-                // Smoothly adjusts heading without ever looping around into 3D Z-axis or ballooning vertically.
                 currentDirection = Vector2.MoveTowards(currentDirection, targetDir, activeTurnSpeed * Mathf.Deg2Rad * Time.fixedDeltaTime);
                 if (currentDirection.sqrMagnitude > 0.001f)
                 {
@@ -385,27 +519,22 @@ public class FishAI : MonoBehaviour
         // Safety check
         if (currentDirection == Vector2.zero) currentDirection = transform.right;
 
-        // Level 1 fish speed increased back a bit for a fun group wipe out challenge
-        float baseSpeed = (fishData != null && fishData.Level == 1) ? 3.2f : moveSpeed;
-        float targetSpeed = baseSpeed;
+        // Fluid swimming stroke wave (gentle 5% oscillation mimicking realistic tail fin strokes, without jerky discrete speed jumps)
+        float swimStroke = 1.0f + Mathf.Sin(Time.time * 3.8f + personalWobblePhaseX) * 0.05f;
+        float baseSpeed = (fishData != null && fishData.Level == 1) 
+            ? (2.8f * personalSpeedMultiplier * swimStroke) 
+            : (moveSpeed * personalSpeedMultiplier);
+
+        float targetSpeed = inActiveSchool ? (baseSpeed * schoolSpeedMod) : baseSpeed;
         if (currentState == State.Flee)
         {
-            float activeFleeRadius = (fishData != null && fishData.Level == 1) ? 3.2f : fleeRadius;
-            float proximity = Mathf.InverseLerp(activeFleeRadius, 0f, lastDistToPlayer);
-            
-            // Level 1 fish gain a flee burst when player closes in
-            float activeFleeMult = (fishData != null && fishData.Level == 1) ? 1.2f : fleeSpeedMultiplier;
-            float mult = Mathf.Lerp(1.0f, activeFleeMult, proximity);
-            targetSpeed *= mult;
-
-            if (fishData != null && fishData.Level == 1)
-            {
-                // Cap fleeing speed of Level 1 fish to 3.85f so player (speed 5.0f) has to actively chase
-                targetSpeed = Mathf.Min(targetSpeed, 3.85f);
-            }
+            // School fish dart and flee with a balanced, natural boost (~3.4 m/s vs player's 5.75 m/s)
+            float fleeMult = isSchoolFish ? 1.30f : 1.22f;
+            targetSpeed = baseSpeed * fleeMult;
         }
         if (currentState == State.Chase) targetSpeed *= chaseSpeedMultiplier;
         if (fishData != null && fishData.IsSpiked) targetSpeed *= 0.25f; // User request: swim and move a lot slower while spiked
+        if (fishData != null && fishData.IsPoisoned) targetSpeed *= 0.65f; // Sick fish penalty: 65% speed for 3.5s
         if (fishData != null && fishData.IsSickFish)
         {
             if (isSickResting)
@@ -421,12 +550,24 @@ public class FishAI : MonoBehaviour
                 targetSpeed = baseSpeed * 0.35f; // User request: sick fish swims very slow
             }
         }
-        float activeMinSpeed = (fishData != null && fishData.IsSpiked) ? 0.3f : 
+        if (inkDisorientTimer > 0f) targetSpeed *= 0.35f; // Disoriented by blinding ink
+        float activeMinSpeed = (fishData != null && (fishData.IsSpiked || fishData.IsPoisoned)) ? 0.3f : 
                                ((fishData != null && fishData.IsSickFish) ? 0f : 
                                ((fishData != null && fishData.Level == 1) ? 1.5f : minSpeed));
         targetSpeed = Mathf.Clamp(targetSpeed, activeMinSpeed, maxSpeed);
         float rate = targetSpeed > currentSpeed ? accel : decel;
-        if (fishData != null && fishData.IsSickFish) rate = 1.5f;
+        if (currentState == State.Flee && isSchoolFish)
+        {
+            rate = 4.0f; // Smooth, natural burst acceleration away from danger (reduced from 7.0f)
+        }
+        else if (inActiveSchool)
+        {
+            rate = 3.5f; // Smooth, continuous acceleration matching school speed
+        }
+        else if (fishData != null && fishData.IsSickFish)
+        {
+            rate = 1.5f;
+        }
         currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.fixedDeltaTime);
         KeepVerticalInBounds();
 
@@ -449,20 +590,17 @@ public class FishAI : MonoBehaviour
             rb.rotation = 0f;
         }
 
-        // 6. Physics Rotation (Standard 2D Flipping)
-        // User Request: "make it swim normamlly not special swim shit"
-        // Standard behavior: No Rotation, Flip X based on direction.
-
-        // Flip X if moving left / right with clean deadzone (0.08f) to prevent swimming backwards
+        // 6. Physics Rotation (Standard 2D Flipping with robust personal hysteresis to prevent flickering)
         Vector3 scale = transform.localScale;
-        float flipThreshold = 0.08f; 
+        bool currentlyFacingRight = (fishData != null) ? fishData.IsFacingRight : (scale.x > 0);
+        float flipThreshold = personalFlipDeadzone > 0f ? personalFlipDeadzone : 0.22f;
 
-        if (currentDirection.x < -flipThreshold)
+        if (currentlyFacingRight && currentDirection.x < -flipThreshold)
         {
             scale.x = -Mathf.Abs(scale.x);
             if (fishData != null) fishData.IsFacingRight = false;
         }
-        else if (currentDirection.x > flipThreshold)
+        else if (!currentlyFacingRight && currentDirection.x > flipThreshold)
         {
             scale.x = Mathf.Abs(scale.x);
             if (fishData != null) fishData.IsFacingRight = true;
@@ -496,7 +634,21 @@ public class FishAI : MonoBehaviour
 
     void UpdateState()
     {
-        if (player == null || fishData == null) return;
+        if (player == null && GameManager.instance?.playerGameObject != null)
+        {
+            player = GameManager.instance.playerGameObject.transform;
+        }
+
+        if (fishData == null) return;
+
+        // Cuttlefish never chases or hunts any fish (neutral autonomous hazard)
+        if (fishData.IsCuttlefish)
+        {
+            hunger = 0f;
+            currentState = State.Wander;
+            chaseTarget = null;
+            return;
+        }
 
         if (currentState == State.Chase)
         {
@@ -520,54 +672,112 @@ public class FishAI : MonoBehaviour
             return;
         }
 
-        float distToPlayer = Vector2.Distance(transform.position, player.position);
-        lastDistToPlayer = distToPlayer;
-        int playerLevel = GameManager.PlayerLevel;
-
-        // 1. FLEE PLAYER (Priority: Survival)
-        bool playerCanEatMe = playerLevel >= fishData.Level;
-        float currentFleeRadius = fleeRadius;
-        
-        // Smallest fish (Level 1 / grouped together): flee radius increased back a bit for wipe-out challenge
-        if (fishData != null && fishData.Level == 1)
+        if (player == null)
         {
-            currentFleeRadius = 3.2f;
-        }
-
-        if (distToPlayer < currentFleeRadius && playerCanEatMe)
-        {
-            currentState = State.Flee;
-            chaseTarget = null;
-            currentChaseTimer = 0f;
-
-            // Break formation when player closes in (within 3.0f) so higher-level schools scatter
-            // Level 1 minnow schools stay together as a tight group per user requirement
-            if (distToPlayer < 3.0f && fishData.school != null && fishData.Level > 1)
+            if (GameManager.instance != null && GameManager.instance.playerGameObject != null)
+                player = GameManager.instance.playerGameObject.transform;
+            else
             {
-                fishData.school = null;
-                fishData.formationOffset = Vector2.zero;
+                var pc = Object.FindFirstObjectByType<PlayerController>();
+                if (pc != null) player = pc.transform;
             }
-            return;
         }
 
-        // Player chase disabled
+        float distToPlayer = (player != null) ? Vector2.Distance(transform.position, player.position) : 999f;
+        lastDistToPlayer = distToPlayer;
 
-        // 2. FLEE PREDATOR AI FISH (Priority: Survival)
-        for (int i = 0; i < Fish.AllFish.Count; i++)
+        int playerLevel = 1;
+        if (player != null)
         {
-            Fish other = Fish.AllFish[i];
-            if (other == null || other == fishData || other.IsHooked) continue;
-            if (other.Level > fishData.Level)
+            var pc = player.GetComponent<PlayerController>();
+            if (pc != null) playerLevel = pc.Level;
+            else playerLevel = GameManager.PlayerLevel;
+        }
+        else
+        {
+            playerLevel = GameManager.PlayerLevel;
+        }
+        if (playerLevel < 1) playerLevel = 1;
+
+        // 1. Flee State Commitment & Hysteresis (Prevents rapid border flickering)
+        if (fleeCommitTimer > 0f)
+        {
+            fleeCommitTimer -= Time.fixedDeltaTime;
+            if (chaseTarget != null && chaseTarget.gameObject.activeInHierarchy)
             {
-                float d = Vector2.Distance(transform.position, other.transform.position);
-                if (d < fleeRadius)
+                currentState = State.Flee;
+                return;
+            }
+        }
+
+        // Flee Detection Radii (Balanced sensitivity: 4.2f for schools, 3.8f for normal)
+        bool isSchoolFishThreat = (fishData != null && (fishData.school != null || fishData.GroupSchool != null || fishData.Level == 1));
+        float enterFleeRadius = isSchoolFishThreat ? 4.2f : Mathf.Max(fleeRadius, 3.8f);
+        float exitFleeRadius = enterFleeRadius + 1.2f;
+        float currentFleeRadius = (currentState == State.Flee) ? exitFleeRadius : enterFleeRadius;
+
+        Transform nearestThreat = null;
+        float nearestThreatDist = float.MaxValue;
+
+        // 0. Shark Hazard Detection (All AI fish of all levels flee and dodge charging sharks!)
+        if (SharkHazard.ActiveSharks != null)
+        {
+            for (int i = 0; i < SharkHazard.ActiveSharks.Count; i++)
+            {
+                SharkHazard shark = SharkHazard.ActiveSharks[i];
+                if (shark == null || !shark.gameObject.activeInHierarchy || !shark.IsCharging) continue;
+
+                float d = Vector2.Distance(transform.position, shark.transform.position);
+                float sharkFleeRadius = 9.0f; // Detect massive shark hazard early
+                if (d < sharkFleeRadius && d < nearestThreatDist)
                 {
-                    currentState = State.Flee;
-                    chaseTarget = other.transform;
-                    currentChaseTimer = 0f;
-                    return;
+                    nearestThreat = shark.transform;
+                    nearestThreatDist = d;
                 }
             }
+        }
+
+        // Spiked pufferfish is immune to normal bites, but vulnerable to sharks
+        bool canBeEatenByBites = (fishData == null || !fishData.IsSpiked);
+
+        if (canBeEatenByBites)
+        {
+            // Check if player can eat this fish
+            bool playerCanEatMe = player != null && playerLevel >= fishData.Level;
+            if (playerCanEatMe && distToPlayer < currentFleeRadius && distToPlayer < nearestThreatDist)
+            {
+                nearestThreat = player;
+                nearestThreatDist = distToPlayer;
+            }
+
+            // Check if any bigger AI predator fish can eat this fish (Applies to Level 1, 2, 3, 4, 5)
+            if (Fish.AllFish != null)
+            {
+                for (int i = 0; i < Fish.AllFish.Count; i++)
+                {
+                    Fish other = Fish.AllFish[i];
+                    if (other == null || !other.gameObject.activeInHierarchy || other.IsDead || other == fishData || other.IsHooked) continue;
+                    if (other.Level > fishData.Level)
+                    {
+                        float d = Vector2.Distance(transform.position, other.transform.position);
+                        if (d < currentFleeRadius && d < nearestThreatDist)
+                        {
+                            nearestThreat = other.transform;
+                            nearestThreatDist = d;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If a predator, shark hazard, or dangerous player is within flee radius, FLEE!
+        if (nearestThreat != null)
+        {
+            currentState = State.Flee;
+            chaseTarget = nearestThreat;
+            fleeCommitTimer = 0.5f; // Commit to fleeing for at least 0.5s to prevent state flickering
+            currentChaseTimer = 0f;
+            return;
         }
 
         // 3. CHASE OTHER FISH (Priority: Hunger)
@@ -578,10 +788,9 @@ public class FishAI : MonoBehaviour
             Fish nearestFood = null;
             float nearestDist = chaseRadius; // Only look within chase radius
 
-            // Optimization: Only scan every few frames or if we are wandering
             foreach (var f in Fish.AllFish)
             {
-                if (f == null || f == fishData) continue;
+                if (f == null || f == fishData || f.IsDead || !f.gameObject.activeInHierarchy || f.IsHooked) continue;
                 
                 // Can I eat it?
                 if (f.Level < fishData.Level)
@@ -743,7 +952,7 @@ public class FishAI : MonoBehaviour
                 // TryGetComponent is faster
                 if (hit.collider.TryGetComponent<Fish>(out Fish otherFish))
                 {
-                    if (fishData.Level > otherFish.Level)
+                    if (fishData.Level > otherFish.Level && !otherFish.IsSpiked)
                     {
                         // It's prey! Charge!
                         return Vector2.zero;
@@ -765,7 +974,7 @@ public class FishAI : MonoBehaviour
         {
             if (fishData != null && !fishData.IsSickFish && hitLeft.collider.TryGetComponent<Fish>(out Fish otherFish))
             {
-                if (fishData.Level > otherFish.Level) return Vector2.zero;
+                if (fishData.Level > otherFish.Level && !otherFish.IsSpiked) return Vector2.zero;
             }
             return Quaternion.Euler(0, 0, -45) * currentDirection; // Turn right
         }
@@ -776,7 +985,7 @@ public class FishAI : MonoBehaviour
         {
             if (fishData != null && !fishData.IsSickFish && hitRight.collider.TryGetComponent<Fish>(out Fish otherFish))
             {
-                if (fishData.Level > otherFish.Level) return Vector2.zero;
+                if (fishData.Level > otherFish.Level && !otherFish.IsSpiked) return Vector2.zero;
             }
             return Quaternion.Euler(0, 0, 45) * currentDirection; // Turn left
         }
@@ -794,29 +1003,27 @@ public class FishAI : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             var c = neighborBuffer[i];
-            // Skip self
-            if (c.gameObject == gameObject) continue;
+            // Skip self or null
+            if (c == null || c.gameObject == gameObject) continue;
 
-            // Optimization: TryGetComponent is faster and safer
             if (c.TryGetComponent<Fish>(out Fish otherFish))
             {
-                // CRITICAL FIX: Don't separate from things we can eat!
-                // If I am bigger than the other fish, I should NOT push away from it.
-                // I want to collide with it to eat it (unless sick, in which case separate normally).
+                // Don't push away from prey if I am hunting it
                 if (fishData != null && !fishData.IsSickFish && fishData.Level > otherFish.Level)
                 {
-                    continue; // Skip separation force for food
+                    continue;
                 }
 
-                Vector2 toNeighbor = transform.position - c.transform.position;
-                // Protect against zero magnitude (division by zero)
-                float sqrMag = toNeighbor.sqrMagnitude;
+                // Vector from neighbor to me (pushes me AWAY from neighbor)
+                Vector2 awayFromNeighbor = (Vector2)transform.position - (Vector2)c.transform.position;
+                float sqrMag = awayFromNeighbor.sqrMagnitude;
                 if (sqrMag > 0.001f)
                 {
-                    // Math Optimization: 
-                    // normalized / magnitude  ==  (vector / magnitude) / magnitude  == vector / magnitude^2
-                    // This removes TWO square root calculations per neighbor.
-                    separation -= toNeighbor / sqrMag; // Push away
+                    // Strong anti-overlap repulsion if closer than minimum gap (1.1 units for school fish)
+                    float dist = Mathf.Sqrt(sqrMag);
+                    float minGap = (fishData != null && (fishData.school != null || fishData.GroupSchool != null || fishData.Level == 1)) ? 1.15f : 0.85f;
+                    float pushFactor = (dist < minGap) ? (minGap - dist) * 4.5f + 1.0f : 1.0f;
+                    separation += (awayFromNeighbor / sqrMag) * pushFactor;
                     separationCount++;
                 }
             }
@@ -833,7 +1040,14 @@ public class FishAI : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             var c = neighborBuffer[i];
-            if (c.gameObject == gameObject) continue;
+            if (c == null || c.gameObject == gameObject) continue;
+
+            // Only align with fish of the same level/species, never predators
+            if (c.TryGetComponent<Fish>(out Fish otherFish))
+            {
+                if (fishData != null && otherFish.Level != fishData.Level) continue;
+            }
+
             var otherAI = c.GetComponent<FishAI>();
             if (otherAI != null)
             {
@@ -849,6 +1063,7 @@ public class FishAI : MonoBehaviour
         hunger = Mathf.Min(hungerMax, hunger + eatHungerGain);
         postEatCooldownTimer = postEatCooldown;
     }
+
     Vector2 GetCohesionDirection()
     {
         int count = Physics2D.OverlapCircle(transform.position, separationRadius, new ContactFilter2D { layerMask = separationMask, useLayerMask = true }, neighborBuffer);
@@ -857,7 +1072,18 @@ public class FishAI : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             var c = neighborBuffer[i];
-            if (c.gameObject == gameObject) continue;
+            if (c == null || c.gameObject == gameObject) continue;
+
+            // Only group with fish of the exact same level, never predators or the player!
+            if (c.TryGetComponent<Fish>(out Fish otherFish))
+            {
+                if (fishData != null && otherFish.Level != fishData.Level) continue;
+            }
+            else
+            {
+                continue; // Ignore non-fish (player, hazards, boats) in cohesion
+            }
+
             center += (Vector2)c.transform.position;
             n++;
         }
@@ -895,7 +1121,7 @@ public class FishAI : MonoBehaviour
 
     private void UpdateMouthAnticipation()
     {
-        if (fishData == null || !fishData.HasBiteSprites || fishData.IsSpiked || fishData.IsSickFish) return;
+        if (fishData == null || !fishData.HasBiteSprites || fishData.IsSpiked || fishData.IsSickFish || fishData.IsCuttlefish) return;
 
         // 1. If chasing prey, open mouth when within snapping distance
         if (currentState == State.Chase && chaseTarget != null)

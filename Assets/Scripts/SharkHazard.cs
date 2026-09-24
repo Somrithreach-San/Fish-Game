@@ -57,10 +57,47 @@ public class SharkHazard : MonoBehaviour
     private float chargeY;
     private Rigidbody2D rb;
 
+    // --- SESSION STATE (Single Harpoon Hit Defeats & Reels Shark) ---
+    public static bool IsPermanentlyDefeatedThisSession { get; set; } = false;
+
+    public static void ResetSessionState()
+    {
+        IsPermanentlyDefeatedThisSession = false;
+    }
+
+    private static void OnSessionResetEvent()
+    {
+        ResetSessionState();
+    }
+
+    private static void OnLevelUpReset(int level)
+    {
+        ResetSessionState();
+    }
+
+    private bool isDead = false;
+    public bool IsDead => isDead;
+    public int Direction => direction;
+    private float poisonTimer = 0f;
+    public bool IsPoisoned => poisonTimer > 0f;
+    public float CurrentMoveSpeed => (poisonTimer > 0f) ? (moveSpeed * 0.65f) : moveSpeed;
+
+    public void ApplyPoisonDebuff(float duration = 3.5f)
+    {
+        poisonTimer = duration;
+        if (cachedSr != null)
+        {
+            cachedSr.color = new Color(0.72f, 1f, 0.72f, 1f); // Sickly green tint
+        }
+    }
+
     // Cache
     private static Shader cachedParticleShader;
 
     // --- STATIC WARNING UI SYSTEM ---
+    public static System.Collections.Generic.List<SharkHazard> ActiveSharks { get; } = new System.Collections.Generic.List<SharkHazard>();
+    public bool IsCharging => isCharging;
+
     private static Canvas _sharedCanvas;
     private static Image _sharedIconImage;
     private static RectTransform _sharedIconRect;
@@ -88,9 +125,80 @@ public class SharkHazard : MonoBehaviour
             openSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/predator_hazard_mouth open.png");
 #endif
 
-        if (cachedSr != null && closedSprite != null)
+        if (cachedSr != null)
         {
-            cachedSr.sprite = closedSprite;
+            cachedSr.sortingLayerName = "ParallaxForeground";
+            cachedSr.sortingOrder = 95; // Always render in front of reef elements (50-55) and AI fish (90)
+
+            if (closedSprite != null)
+            {
+                cachedSr.sprite = closedSprite;
+            }
+        }
+    }
+
+    public void SetVisualsVisible(bool visible)
+    {
+        if (cachedSr != null) cachedSr.enabled = visible;
+        var allSrs = GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < allSrs.Length; i++)
+        {
+            if (allSrs[i] != null) allSrs[i].enabled = visible;
+        }
+    }
+
+    public void OnHarpoonHit(HarpoonHazard harpoon, Vector3 hitWorldPos, Vector2 launchDir)
+    {
+        if (isDead) return;
+
+        if (harpoon != null)
+        {
+            harpoon.ImpaleShark(this);
+        }
+    }
+
+    public void OnHarpoonImpaled(HarpoonHazard harpoon)
+    {
+        isDead = true;
+        isCharging = false;
+        isBiting = false;
+
+        BoxCollider2D box = GetComponent<BoxCollider2D>();
+        if (box != null) box.enabled = false;
+
+        if (swimSource != null && swimSource.isPlaying)
+        {
+            swimSource.Stop();
+        }
+
+        if (trailEffect != null && trailEffect.isPlaying)
+        {
+            trailEffect.Stop();
+        }
+
+        if (animator != null)
+        {
+            animator.speed = 0f;
+        }
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.simulated = false;
+        }
+    }
+
+    public void OnReeledToBoat(RiverBoat boat)
+    {
+        isDead = true;
+        IsPermanentlyDefeatedThisSession = true;
+        if (ObjectPoolManager.Instance != null)
+        {
+            ObjectPoolManager.Instance.Despawn(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
         }
     }
 
@@ -98,10 +206,26 @@ public class SharkHazard : MonoBehaviour
 
     private void OnEnable()
     {
+        if (!ActiveSharks.Contains(this)) ActiveSharks.Add(this);
         hasPassedScreen = false;
         isCharging = false;
         isBiting = false;
+        isDead = false;
         biteTimer = 0f;
+        poisonTimer = 0f;
+        BoxCollider2D box = GetComponent<BoxCollider2D>();
+        if (box != null) box.enabled = true;
+
+        if (cachedSr != null)
+        {
+            cachedSr.color = Color.white;
+            if (closedSprite != null)
+            {
+                cachedSr.sprite = closedSprite;
+            }
+        }
+        SetVisualsVisible(true);
+
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
         AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
         if (!isEventSubscribed)
@@ -112,6 +236,9 @@ public class SharkHazard : MonoBehaviour
                 EventManager.StartListening("playerDeath", StopAudioForGameEnd);
                 EventManager.StartListening("GameLoss", StopAudioForGameEnd);
                 EventManager.StartListening("GameWin", StopAudioForGameEnd);
+                EventManager.StartListening("GameStart", OnSessionResetEvent);
+                EventManager.StartListening("GameOver", OnSessionResetEvent);
+                EventManager.StartListening<int>("onLevelUp", OnLevelUpReset);
                 isEventSubscribed = true;
             }
             catch { }
@@ -137,6 +264,7 @@ public class SharkHazard : MonoBehaviour
 
     private void OnDestroy()
     {
+        ActiveSharks.Remove(this);
         if (isEventSubscribed)
         {
             try
@@ -174,6 +302,7 @@ public class SharkHazard : MonoBehaviour
 
     private void OnDisable()
     {
+        ActiveSharks.Remove(this);
         if (isEventSubscribed)
         {
             try
@@ -248,22 +377,25 @@ public class SharkHazard : MonoBehaviour
         
         // FIX: Warning sound should be 2D (Global) so it's always heard regardless of shark distance
         audioSource.spatialBlend = 0.0f; // 2D Sound
-        audioSource.rolloffMode = AudioRolloffMode.Linear;
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        AudioSettingsManager.RouteToSfx(audioSource);
 
         // Setup Swim Source
         if (swimSource == null)
         {
             swimSource = gameObject.AddComponent<AudioSource>();
             swimSource.spatialBlend = 1.0f; // 3D Sound (Swim sound stays 3D)
-            swimSource.minDistance = 5.0f;
-            swimSource.maxDistance = 25.0f;
+            swimSource.minDistance = 8.0f;
+            swimSource.maxDistance = 45.0f;
             swimSource.rolloffMode = AudioRolloffMode.Linear;
+            swimSource.dopplerLevel = 0.5f;
+            swimSource.spread = 45f;
             swimSource.loop = true;
             swimSource.playOnAwake = false;
-            swimSource.volume = 0.9f;
+            swimSource.volume = 1.0f;
         }
         swimSource.mute = !AudioSettingsManager.IsSfxEnabled;
+        AudioSettingsManager.RouteToSfx(swimSource);
         
         // Setup Eat Particles
         if (eatEffect == null)
@@ -402,7 +534,7 @@ public class SharkHazard : MonoBehaviour
 
         // HIDE THE SHARK during the warning phase so the player cannot see it
         // parked off-screen. Move it to a guaranteed invisible world position.
-        if (cachedSr != null) cachedSr.enabled = false;
+        SetVisualsVisible(false);
         transform.position = new Vector3(transform.position.x, -9999f, 0f);
 
         // WAIT FOR WARNING (4 Seconds)
@@ -512,8 +644,8 @@ public class SharkHazard : MonoBehaviour
             transform.position = new Vector3(entryX, spawnY, 0f);
         }
 
-        // Re-enable the sprite NOW that the shark is safely just off-screen
-        if (cachedSr != null) cachedSr.enabled = true;
+        // Re-enable visuals NOW that the shark is safely just off-screen
+        SetVisualsVisible(true);
 
         // 3. Start Moving
         StartCharging();
@@ -522,6 +654,7 @@ public class SharkHazard : MonoBehaviour
         if (swimSource != null && swimSound != null)
         {
             swimSource.clip = swimSound;
+            swimSource.pitch = 1.0f;
             swimSource.Play();
         }
     }
@@ -530,19 +663,37 @@ public class SharkHazard : MonoBehaviour
     {
         isCharging = true;
         chargeY = transform.position.y;
-        // Always ensure the shark is visible when it starts charging
-        if (cachedSr != null) cachedSr.enabled = true;
+        
+        SetVisualsVisible(true);
+
+        if (animator != null)
+        {
+            animator.speed = 1.0f;
+        }
+
         if (trailEffect != null) trailEffect.Play();
-        if (swimSource != null && swimSound != null && !swimSource.isPlaying)
+        if (swimSource != null && swimSound != null)
         {
             swimSource.clip = swimSound;
-            swimSource.Play();
+            swimSource.pitch = 1.0f;
+            if (!swimSource.isPlaying) swimSource.Play();
         }
     }
 
     private void Update()
     {
+        if (isDead) return;
         UpdateBiteAnimation();
+
+        // Poison Debuff timer (from consuming a sick fish)
+        if (poisonTimer > 0f)
+        {
+            poisonTimer -= Time.deltaTime;
+            if (poisonTimer <= 0f && cachedSr != null)
+            {
+                cachedSr.color = Color.white;
+            }
+        }
 
         if (!isCharging) return;
         if (GameManager.instance != null && GameManager.Paused) return;
@@ -559,8 +710,8 @@ public class SharkHazard : MonoBehaviour
             }
         }
 
-        // Move across screen (Strictly Horizontal)
-        float newX = transform.position.x + (direction * moveSpeed * Time.deltaTime);
+        // Move across screen (Strictly Horizontal, scaled by CurrentMoveSpeed)
+        float newX = transform.position.x + (direction * CurrentMoveSpeed * Time.deltaTime);
         transform.position = new Vector3(newX, chargeY, 0f);
 
         // Check bounds to destroy after passing
@@ -649,6 +800,7 @@ public class SharkHazard : MonoBehaviour
 
     private bool TryConsumeTarget(Collider2D other)
     {
+        if (isDead) return false;
         if (other == null || other.transform.IsChildOf(transform) || other.gameObject == gameObject)
             return false;
 
@@ -667,9 +819,10 @@ public class SharkHazard : MonoBehaviour
         PlayerController pc = other.GetComponent<PlayerController>() ?? other.GetComponentInParent<PlayerController>();
         if (pc != null)
         {
-            if (pc.IsAlive && !pc.IsHooked)
+            if (pc.IsAlive && !pc.IsHooked && !PlayerAbilitySystem.IsPlayerInvulnerable)
             {
-                pc.Death();
+                Sprite sharkSprite = closedSprite != null ? closedSprite : (cachedSr != null ? cachedSr.sprite : GetComponentInChildren<SpriteRenderer>()?.sprite);
+                pc.Death(sharkSprite);
                 PlayEatEffect();
                 return true;
             }
@@ -679,9 +832,14 @@ public class SharkHazard : MonoBehaviour
         Fish fish = other.GetComponent<Fish>() ?? other.GetComponentInParent<Fish>();
         if (fish != null && !fish.IsDead && !fish.IsHooked && fish.gameObject.activeInHierarchy)
         {
+            bool wasSick = fish.IsSickFish;
             fish.OnEatenByPredator();
             fish.Die();
             PlayEatEffect();
+            if (wasSick)
+            {
+                ApplyPoisonDebuff(3.5f);
+            }
             return true;
         }
 
@@ -824,6 +982,10 @@ public class SharkHazard : MonoBehaviour
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 0f); // Random Between Constants
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f); // Random Between Constants
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);   // Explicitly set Z to match mode!
+        vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Size over Lifetime: Bubbles shrink or pop? Or grow?
@@ -922,6 +1084,10 @@ public class SharkHazard : MonoBehaviour
         vel.x = new ParticleSystem.MinMaxCurve(-1f, 1f);
         vel.y = new ParticleSystem.MinMaxCurve(0.5f, 2f);
         vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
+        vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
         vel.space = ParticleSystemSimulationSpace.World;
 
         // Color

@@ -1,0 +1,1014 @@
+fileFormatVersion: 2
+guid: 0b8d775f0b3f03944aae3051ec3159de
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: 9072720866611355649
+    second: Volume_Slider_0
+  - first:
+      213: -2474299022980436883
+    second: Volume_Slider_1
+  - first:
+      213: -4602227965991307884
+    second: Volume_Slider_2
+  - first:
+      213: -1726353778686706887
+    second: Volume_Slider_3
+  - first:
+      213: 1342674488207104053
+    second: Volume_Slider_4
+  - first:
+      213: -901258259993446065
+    second: Volume_Slider_5
+  - first:
+      213: -6084409076523123578
+    second: Volume_Slider_6
+  - first:
+      213: 8801232988326890019
+    second: Volume_Slider_7
+  - first:
+      213: -4280099950747800681
+    second: Volume_Slider_8
+  - first:
+      213: 3630408571006698025
+    second: Volume_Slider_9
+  - first:
+      213: 1477532429083284316
+    second: Volume_Slider_10
+  - first:
+      213: 4396377803997581708
+    second: Volume_Slider_11
+  - first:
+      213: 1623593579109094261
+    second: Volume_Slider_12
+  - first:
+      213: 1091005663588637756
+    second: Volume_Slider_13
+  - first:
+      213: 6513966129035103275
+    second: Volume_Slider_14
+  - first:
+      213: -6901228825514086600
+    second: Volume_Slider_15
+  - first:
+      213: -5759670769156391824
+    second: Volume_Slider_16
+  - first:
+      213: -4026710064656252669
+    second: Volume_Slider_17
+  - first:
+      213: -3908638488532093635
+    second: Volume_Slider_18
+  - first:
+      213: 5708108137037433058
+    second: Volume_Slider_19
+  - first:
+      213: 1732244692403443210
+    second: Volume_Slider_20
+  - first:
+      213: -7791336697395923657
+    second: Volume_Slider_21
+  - first:
+      213: 1986341261506688073
+    second: Volume_Slider_22
+  - first:
+      213: 1392006375336965580
+    second: Volume_Slider_23
+  - first:
+      213: -1374611128320302462
+    second: Volume_Slider_24
+  - first:
+      213: 8156325216003549328
+    second: Volume_Slider_25
+  - first:
+      213: 5120750573365545467
+    second: Volume_Slider_26
+  - first:
+      213: -6493607082082270193
+    second: Volume_Slider_27
+  - first:
+      213: -5569967785012072342
+    second: Volume_Slider_28
+  - first:
+      213: 2459939379320291669
+    second: Volume_Slider_29
+  - first:
+      213: -217646041235278296
+    second: Volume_Slider_30
+  - first:
+      213: 9021635741592739179
+    second: Volume_Slider_31
+  - first:
+      213: 8764110281431904579
+    second: Volume_Slider_32
+  - first:
+      213: -6436304635463664978
+    second: Volume_Slider_33
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: WebGL
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: Volume_Slider_0
+      rect:
+        serializedVersion: 2
+        x: 564
+        y: 856
+        width: 62
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 100e4a01f87c8ed70800000000000000
+      internalID: 9072720866611355649
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_1
+      rect:
+        serializedVersion: 2
+        x: 22
+        y: 403
+        width: 1735
+        height: 449
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: d6ca723e52689add0800000000000000
+      internalID: -2474299022980436883
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_2
+      rect:
+        serializedVersion: 2
+        x: 395
+        y: 742
+        width: 6
+        height: 6
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 49538bf6c0a9120c0800000000000000
+      internalID: -4602227965991307884
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_3
+      rect:
+        serializedVersion: 2
+        x: 1724
+        y: 644
+        width: 21
+        height: 30
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 93bb9b88262ca08e0800000000000000
+      internalID: -1726353778686706887
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_4
+      rect:
+        serializedVersion: 2
+        x: 16
+        y: 563
+        width: 7
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 538509e455322a210800000000000000
+      internalID: 1342674488207104053
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_5
+      rect:
+        serializedVersion: 2
+        x: 75
+        y: 0
+        width: 1251
+        height: 413
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: f49343a33661e73f0800000000000000
+      internalID: -901258259993446065
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_6
+      rect:
+        serializedVersion: 2
+        x: 523
+        y: 403
+        width: 6
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 68c3da57e26df8ba0800000000000000
+      internalID: -6084409076523123578
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_7
+      rect:
+        serializedVersion: 2
+        x: 556
+        y: 402
+        width: 26
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 32a8cae95c2442a70800000000000000
+      internalID: 8801232988326890019
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_8
+      rect:
+        serializedVersion: 2
+        x: 592
+        y: 402
+        width: 38
+        height: 33
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 79ba28095c70a94c0800000000000000
+      internalID: -4280099950747800681
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_9
+      rect:
+        serializedVersion: 2
+        x: 780
+        y: 404
+        width: 25
+        height: 29
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 92243605c5dc16230800000000000000
+      internalID: 3630408571006698025
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_10
+      rect:
+        serializedVersion: 2
+        x: 1048
+        y: 404
+        width: 9
+        height: 8
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c5311ab7aef318410800000000000000
+      internalID: 1477532429083284316
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_11
+      rect:
+        serializedVersion: 2
+        x: 1056
+        y: 404
+        width: 7
+        height: 7
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c8110b9d152130d30800000000000000
+      internalID: 4396377803997581708
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_12
+      rect:
+        serializedVersion: 2
+        x: 1100
+        y: 404
+        width: 16
+        height: 42
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 573176e02c9288610800000000000000
+      internalID: 1623593579109094261
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_13
+      rect:
+        serializedVersion: 2
+        x: 1401
+        y: 69
+        width: 267
+        height: 386
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c3cd322eed7042f00800000000000000
+      internalID: 1091005663588637756
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_14
+      rect:
+        serializedVersion: 2
+        x: 822
+        y: 104
+        width: 11
+        height: 9
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: b2c40109ea1466a50800000000000000
+      internalID: 6513966129035103275
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_15
+      rect:
+        serializedVersion: 2
+        x: 304
+        y: 63
+        width: 12
+        height: 18
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 83feb8d82f8e930a0800000000000000
+      internalID: -6901228825514086600
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_16
+      rect:
+        serializedVersion: 2
+        x: 320
+        y: 71
+        width: 6
+        height: 10
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 07c7b3593f98110b0800000000000000
+      internalID: -5759670769156391824
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_17
+      rect:
+        serializedVersion: 2
+        x: 411
+        y: 64
+        width: 7
+        height: 16
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 3018ca6d7804e18c0800000000000000
+      internalID: -4026710064656252669
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_18
+      rect:
+        serializedVersion: 2
+        x: 631
+        y: 76
+        width: 7
+        height: 7
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: d35ff97e00ab1c9c0800000000000000
+      internalID: -3908638488532093635
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_19
+      rect:
+        serializedVersion: 2
+        x: 653
+        y: 48
+        width: 44
+        height: 44
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 2e802a79b16473f40800000000000000
+      internalID: 5708108137037433058
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_20
+      rect:
+        serializedVersion: 2
+        x: 976
+        y: 80
+        width: 7
+        height: 9
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: a0653c2be5b2a0810800000000000000
+      internalID: 1732244692403443210
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_21
+      rect:
+        serializedVersion: 2
+        x: 982
+        y: 71
+        width: 15
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 7353042dd8c9fd390800000000000000
+      internalID: -7791336697395923657
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_22
+      rect:
+        serializedVersion: 2
+        x: 431
+        y: 65
+        width: 12
+        height: 10
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 944bece6ad6e09b10800000000000000
+      internalID: 1986341261506688073
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_23
+      rect:
+        serializedVersion: 2
+        x: 572
+        y: 72
+        width: 6
+        height: 7
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: cc5f9075c66615310800000000000000
+      internalID: 1392006375336965580
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_24
+      rect:
+        serializedVersion: 2
+        x: 957
+        y: 63
+        width: 6
+        height: 14
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 2826b2836766cece0800000000000000
+      internalID: -1374611128320302462
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_25
+      rect:
+        serializedVersion: 2
+        x: 46
+        y: 46
+        width: 20
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 098e374e196113170800000000000000
+      internalID: 8156325216003549328
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_26
+      rect:
+        serializedVersion: 2
+        x: 677
+        y: 47
+        width: 16
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: bf9c4dcf38f801740800000000000000
+      internalID: 5120750573365545467
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_27
+      rect:
+        serializedVersion: 2
+        x: 982
+        y: 55
+        width: 7
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: f04868173c212e5a0800000000000000
+      internalID: -6493607082082270193
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_28
+      rect:
+        serializedVersion: 2
+        x: 1016
+        y: 47
+        width: 11
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: a607cfb7fcf73b2b0800000000000000
+      internalID: -5569967785012072342
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_29
+      rect:
+        serializedVersion: 2
+        x: 1086
+        y: 53
+        width: 16
+        height: 18
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 551816905d5732220800000000000000
+      internalID: 2459939379320291669
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_30
+      rect:
+        serializedVersion: 2
+        x: 403
+        y: 33
+        width: 7
+        height: 13
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 826b6612414cafcf0800000000000000
+      internalID: -217646041235278296
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_31
+      rect:
+        serializedVersion: 2
+        x: 1089
+        y: 33
+        width: 11
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: b6d5a9688e9433d70800000000000000
+      internalID: 9021635741592739179
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_32
+      rect:
+        serializedVersion: 2
+        x: 1330
+        y: 29
+        width: 40
+        height: 19
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 341f811eddf50a970800000000000000
+      internalID: 8764110281431904579
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Volume_Slider_33
+      rect:
+        serializedVersion: 2
+        x: 323
+        y: 15
+        width: 13
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: eaafcf8f807ada6a0800000000000000
+      internalID: -6436304635463664978
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    customData: 
+    physicsShape: []
+    bones: []
+    spriteID: 
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    spriteCustomMetadata:
+      entries: []
+    nameFileIdTable:
+      Volume_Slider_0: 9072720866611355649
+      Volume_Slider_1: -2474299022980436883
+      Volume_Slider_10: 1477532429083284316
+      Volume_Slider_11: 4396377803997581708
+      Volume_Slider_12: 1623593579109094261
+      Volume_Slider_13: 1091005663588637756
+      Volume_Slider_14: 6513966129035103275
+      Volume_Slider_15: -6901228825514086600
+      Volume_Slider_16: -5759670769156391824
+      Volume_Slider_17: -4026710064656252669
+      Volume_Slider_18: -3908638488532093635
+      Volume_Slider_19: 5708108137037433058
+      Volume_Slider_2: -4602227965991307884
+      Volume_Slider_20: 1732244692403443210
+      Volume_Slider_21: -7791336697395923657
+      Volume_Slider_22: 1986341261506688073
+      Volume_Slider_23: 1392006375336965580
+      Volume_Slider_24: -1374611128320302462
+      Volume_Slider_25: 8156325216003549328
+      Volume_Slider_26: 5120750573365545467
+      Volume_Slider_27: -6493607082082270193
+      Volume_Slider_28: -5569967785012072342
+      Volume_Slider_29: 2459939379320291669
+      Volume_Slider_3: -1726353778686706887
+      Volume_Slider_30: -217646041235278296
+      Volume_Slider_31: 9021635741592739179
+      Volume_Slider_32: 8764110281431904579
+      Volume_Slider_33: -6436304635463664978
+      Volume_Slider_4: 1342674488207104053
+      Volume_Slider_5: -901258259993446065
+      Volume_Slider_6: -6084409076523123578
+      Volume_Slider_7: 8801232988326890019
+      Volume_Slider_8: -4280099950747800681
+      Volume_Slider_9: 3630408571006698025
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

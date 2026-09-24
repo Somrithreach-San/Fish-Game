@@ -1,4 +1,5 @@
 using UnityEngine;
+using Rhinotap;
 
 namespace Rhinotap.Toolkit
 {
@@ -138,78 +139,86 @@ namespace Rhinotap.Toolkit
             cachedOceanSprite = null;
         }
 
+        private static Sprite LoadSpriteAsset(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return null;
+
+#if UNITY_EDITOR
+            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath(relativePath);
+            if (assets != null && assets.Length > 0)
+            {
+                Sprite best = null;
+                float maxArea = 0f;
+                foreach (var a in assets)
+                {
+                    if (a is Sprite s && s != null)
+                    {
+                        float area = s.rect.width * s.rect.height;
+                        if (area > maxArea)
+                        {
+                            maxArea = area;
+                            best = s;
+                        }
+                    }
+                }
+                if (best != null) return best;
+            }
+
+            Sprite direct = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(relativePath);
+            if (direct != null) return direct;
+#endif
+            string fn = System.IO.Path.GetFileNameWithoutExtension(relativePath);
+            Sprite res = Resources.Load<Sprite>(fn);
+            if (res != null) return res;
+
+            Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
+            if (all != null && all.Length > 0)
+            {
+                Sprite best = null;
+                float maxArea = 0f;
+                foreach (var s in all)
+                {
+                    if (s != null && s.name.Contains(fn))
+                    {
+                        float area = s.rect.width * s.rect.height;
+                        if (area > maxArea)
+                        {
+                            maxArea = area;
+                            best = s;
+                        }
+                    }
+                }
+                if (best != null) return best;
+            }
+
+            try
+            {
+                string fullPath = relativePath.StartsWith("Assets")
+                    ? System.IO.Path.Combine(Application.dataPath, relativePath.Substring("Assets/".Length))
+                    : relativePath;
+                if (System.IO.File.Exists(fullPath))
+                {
+                    byte[] bytes = System.IO.File.ReadAllBytes(fullPath);
+                    Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    if (tex.LoadImage(bytes))
+                    {
+                        return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
         public Sprite GetLakeSprite()
         {
             if (lakeBackgroundSprite != null) return lakeBackgroundSprite;
             if (cachedLakeSprite != null) return cachedLakeSprite;
 
-#if UNITY_EDITOR
-            // 1. In Editor, prioritize river_background.png
-            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/river_background.png");
-            if (assets != null)
-            {
-                foreach (var a in assets)
-                {
-                    if (a is Sprite s)
-                    {
-                        cachedLakeSprite = s;
-                        break;
-                    }
-                }
-            }
-            if (cachedLakeSprite == null)
-            {
-                assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_lake.png");
-                if (assets != null)
-                {
-                    foreach (var a in assets)
-                    {
-                        if (a is Sprite s)
-                        {
-                            cachedLakeSprite = s;
-                            break;
-                        }
-                    }
-                }
-            }
-#endif
-
-            // 2. Resources.Load<Sprite>
-            if (cachedLakeSprite == null)
-            {
-                cachedLakeSprite = Resources.Load<Sprite>("river_background");
-            }
-            if (cachedLakeSprite == null)
-            {
-                Sprite[] sprites = Resources.LoadAll<Sprite>("river_background");
-                if (sprites != null && sprites.Length > 0)
-                {
-                    cachedLakeSprite = sprites[0];
-                }
-            }
-            if (cachedLakeSprite == null)
-            {
-                cachedLakeSprite = Resources.Load<Sprite>("Game_bg_lake");
-            }
-            if (cachedLakeSprite == null)
-            {
-                Sprite[] sprites = Resources.LoadAll<Sprite>("Game_bg_lake");
-                if (sprites != null && sprites.Length > 0)
-                {
-                    cachedLakeSprite = sprites[0];
-                }
-            }
-
-            // 3. Texture2D from Resources
-            if (cachedLakeSprite == null)
-            {
-                Texture2D tex = Resources.Load<Texture2D>("river_background");
-                if (tex == null) tex = Resources.Load<Texture2D>("Game_bg_lake");
-                if (tex != null)
-                {
-                    cachedLakeSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
-                }
-            }
+            cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Lost_Lake_BG.png");
+            if (cachedLakeSprite == null) cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/river_background.png");
+            if (cachedLakeSprite == null) cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Game_bg_lake.png");
 
             return cachedLakeSprite;
         }
@@ -219,87 +228,10 @@ namespace Rhinotap.Toolkit
             if (oceanBackgroundSprite != null) return oceanBackgroundSprite;
             if (cachedOceanSprite != null) return cachedOceanSprite;
 
-#if UNITY_EDITOR
-            // 1. In Editor, prioritize ocean_background.png
-            var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/ocean_background.png");
-            if (assets != null)
-            {
-                foreach (var a in assets)
-                {
-                    if (a is Sprite s)
-                    {
-                        cachedOceanSprite = s;
-                        break;
-                    }
-                }
-            }
-            if (cachedOceanSprite == null)
-            {
-                assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
-                if (assets != null)
-                {
-                    foreach (var a in assets)
-                    {
-                        if (a is Sprite s)
-                        {
-                            cachedOceanSprite = s;
-                            break;
-                        }
-                    }
-                }
-            }
-#endif
-
-            // 2. Resources.Load<Sprite>
-            if (cachedOceanSprite == null)
-            {
-                cachedOceanSprite = Resources.Load<Sprite>("ocean_background");
-            }
-            if (cachedOceanSprite == null)
-            {
-                Sprite[] sprites = Resources.LoadAll<Sprite>("ocean_background");
-                if (sprites != null && sprites.Length > 0)
-                {
-                    cachedOceanSprite = sprites[0];
-                }
-            }
-            if (cachedOceanSprite == null)
-            {
-                cachedOceanSprite = Resources.Load<Sprite>("Game_bg_ocean");
-            }
-            if (cachedOceanSprite == null)
-            {
-                Sprite[] sprites = Resources.LoadAll<Sprite>("Game_bg_ocean");
-                if (sprites != null && sprites.Length > 0)
-                {
-                    cachedOceanSprite = sprites[0];
-                }
-            }
-
-            // 3. Texture2D from Resources
-            if (cachedOceanSprite == null)
-            {
-                Texture2D tex = Resources.Load<Texture2D>("ocean_background");
-                if (tex == null) tex = Resources.Load<Texture2D>("Game_bg_ocean");
-                if (tex != null)
-                {
-                    cachedOceanSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 31.311f);
-                }
-            }
-
-            // 4. Fallback to legacy game_bg if ocean_background is missing
-            if (cachedOceanSprite == null)
-            {
-                cachedOceanSprite = Resources.Load<Sprite>("game_bg");
-                if (cachedOceanSprite == null)
-                {
-                    Sprite[] sprites = Resources.LoadAll<Sprite>("game_bg");
-                    if (sprites != null && sprites.Length > 0)
-                    {
-                        cachedOceanSprite = sprites[0];
-                    }
-                }
-            }
+            cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Coral_Coast_BG.png");
+            if (cachedOceanSprite == null) cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/ocean_background.png");
+            if (cachedOceanSprite == null) cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
+            if (cachedOceanSprite == null) cachedOceanSprite = Resources.Load<Sprite>("game_bg");
 
             return cachedOceanSprite;
         }
@@ -345,6 +277,68 @@ namespace Rhinotap.Toolkit
             // Remove/hide ocean reef elements from river levels and enable river elements
             SetOceanReefElementsActive(!isLake);
             SetRiverElementsActive(isLake);
+
+            // Configure ambient background bubble particle flows (Ocean: Right-to-Left horizontal flow; River: vertical flow)
+            ConfigureBackgroundBubbles(isLake);
+
+            // Refresh horizontal ocean ambient bubbles
+            OceanBackgroundBubbles.Refresh();
+        }
+
+        public void ConfigureBackgroundBubbles(bool isLake)
+        {
+            ParticleSystem[] allBubbles = GetComponentsInChildren<ParticleSystem>(true);
+            if (allBubbles == null || allBubbles.Length == 0) return;
+
+            foreach (var ps in allBubbles)
+            {
+                if (ps == null) continue;
+                if (!ps.name.Contains("bubbleParticles") && !ps.name.Contains("bgParticles")) continue;
+
+                var main = ps.main;
+                var shape = ps.shape;
+                var emission = ps.emission;
+
+                // Subtle emission rate and smaller delicate bubble size (0.05 - 0.10) to keep the screen crisp and uncluttered
+                emission.enabled = true;
+                emission.rateOverTime = new ParticleSystem.MinMaxCurve(3.5f);
+
+                if (!isLake)
+                {
+                    // === Ocean Levels: Horizontal Flow (Right to Left) ===
+                    ps.transform.localEulerAngles = new Vector3(0f, -90f, 0f);
+
+                    shape.shapeType = ParticleSystemShapeType.Rectangle;
+                    shape.scale = new Vector3(2.0f, 24.0f, 0.0f);
+                    shape.position = new Vector3(0f, 0f, -6.5f); // Spawns along the right side of the screen
+                    shape.rotation = Vector3.zero;
+
+                    main.startSpeed = new ParticleSystem.MinMaxCurve(1.0f);
+                    main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.10f);
+                    main.startLifetime = new ParticleSystem.MinMaxCurve(14.0f);
+                    main.simulationSpace = ParticleSystemSimulationSpace.World;
+                }
+                else
+                {
+                    // === River / Lake Levels: Vertical Flow (Bottom to Top) ===
+                    ps.transform.localEulerAngles = new Vector3(90f, 0f, 0f);
+
+                    shape.shapeType = ParticleSystemShapeType.Rectangle;
+                    shape.scale = new Vector3(12.96f, 4.13f, 0.0f);
+                    shape.position = new Vector3(0f, 0f, -1.56f);
+                    shape.rotation = new Vector3(270f, 0f, 0f);
+
+                    main.startSpeed = new ParticleSystem.MinMaxCurve(1.0f);
+                    main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.10f);
+                    main.startLifetime = new ParticleSystem.MinMaxCurve(10.0f);
+                    main.simulationSpace = ParticleSystemSimulationSpace.World;
+                }
+
+                if (!ps.isPlaying && ps.gameObject.activeInHierarchy)
+                {
+                    ps.Play();
+                }
+            }
         }
 
         public static void SetOceanReefElementsActive(bool active)
@@ -360,7 +354,7 @@ namespace Rhinotap.Toolkit
                         // Extra procedural rocks removed; ocean strictly uses Ocean_reef_element_1, Ocean_reef_element_3 and Clam
                         root.SetActive(false);
                     }
-                    else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_"))
+                    else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_") || root.name.Contains("Coral_Coast_element"))
                     {
                         root.SetActive(active);
                     }
@@ -455,6 +449,13 @@ namespace Rhinotap.Toolkit
             {
                 item.Initialize(camStartPos, i);
                 i++;
+            }
+
+            // Auto-attach OceanBackgroundBubbles to ambient ocean bubble particles if present
+            var bubbleObj = GameObject.Find("bubbleParticles");
+            if (bubbleObj != null && bubbleObj.GetComponent<OceanBackgroundBubbles>() == null)
+            {
+                bubbleObj.AddComponent<OceanBackgroundBubbles>();
             }
 
             ApplyLevelBackground();

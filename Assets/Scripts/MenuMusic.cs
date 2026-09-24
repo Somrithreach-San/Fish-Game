@@ -19,12 +19,29 @@ public class MenuMusic : MonoBehaviour
         DontDestroyOnLoad(gameObject);
 
         audioSource = GetComponent<AudioSource>();
-        if (audioSource != null && audioSource.volume > 0f)
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+
+        if (audioSource != null)
         {
-            defaultVolume = audioSource.volume;
+            if (audioSource.clip == null)
+            {
+                #if UNITY_EDITOR
+                audioSource.clip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/menu_theme.ogg");
+                if (audioSource.clip == null) audioSource.clip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/music_theme.mp3");
+                #endif
+                if (audioSource.clip == null) audioSource.clip = Resources.Load<AudioClip>("menu_theme");
+                if (audioSource.clip == null) audioSource.clip = Resources.Load<AudioClip>("music_theme");
+            }
+
+            audioSource.loop = true;
+            audioSource.playOnAwake = true;
+            audioSource.spatialBlend = 0f;
+            defaultVolume = 0.5f;
+            AudioSettingsManager.RouteToMusic(audioSource);
         }
 
         AudioSettingsManager.OnMusicSettingChanged += ApplyMusicSetting;
+        AudioSettingsManager.OnMusicVolumeChanged += HandleMusicVolumeChanged;
     }
 
     private void Start()
@@ -35,6 +52,12 @@ public class MenuMusic : MonoBehaviour
     private void OnDestroy()
     {
         AudioSettingsManager.OnMusicSettingChanged -= ApplyMusicSetting;
+        AudioSettingsManager.OnMusicVolumeChanged -= HandleMusicVolumeChanged;
+    }
+
+    private void HandleMusicVolumeChanged(float vol)
+    {
+        ApplyMusicSetting(AudioSettingsManager.IsMusicEnabled);
     }
 
     public void ApplyMusicSetting(bool isEnabled)
@@ -42,9 +65,10 @@ public class MenuMusic : MonoBehaviour
         if (audioSource == null) audioSource = GetComponent<AudioSource>();
         if (audioSource != null)
         {
-            audioSource.mute = !isEnabled;
-            audioSource.volume = isEnabled ? defaultVolume : 0f;
-            if (!isEnabled)
+            bool shouldPlay = isEnabled && AudioSettingsManager.MusicVolume > 0.001f;
+            audioSource.mute = !shouldPlay;
+            audioSource.volume = shouldPlay ? defaultVolume * AudioSettingsManager.MusicVolume : 0f;
+            if (!shouldPlay)
             {
                 audioSource.Pause();
             }
