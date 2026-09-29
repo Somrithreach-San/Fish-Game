@@ -274,6 +274,22 @@ namespace Rhinotap.Toolkit
                 }
             }
 
+            // Toggle ocean-specific background occluders (e.g. Whale_Background_Elements)
+            if (items != null)
+            {
+                for (int i = 0; i < items.Length; i++)
+                {
+                    if (items[i] != null && items[i].Item != null)
+                    {
+                        Transform whaleElem = items[i].Item.transform.Find("Whale_Background_Elements");
+                        if (whaleElem != null)
+                        {
+                            whaleElem.gameObject.SetActive(!isLake);
+                        }
+                    }
+                }
+            }
+
             // Remove/hide ocean reef elements from river levels and enable river elements
             SetOceanReefElementsActive(!isLake);
             SetRiverElementsActive(isLake);
@@ -354,7 +370,7 @@ namespace Rhinotap.Toolkit
                         // Extra procedural rocks removed; ocean strictly uses Ocean_reef_element_1, Ocean_reef_element_3 and Clam
                         root.SetActive(false);
                     }
-                    else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_") || root.name.Contains("Coral_Coast_element"))
+                    else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_") || root.name.Contains("Coral_Coast_element") || root.name.Contains("Whale_Background_Elements"))
                     {
                         root.SetActive(active);
                     }
@@ -373,11 +389,14 @@ namespace Rhinotap.Toolkit
                     Transform[] allTransforms = root.GetComponentsInChildren<Transform>(true);
                     foreach (var t in allTransforms)
                     {
-                        if (t.name.Contains("RiverEnvironment") || t.name.Contains("RiverElement") || t.name.StartsWith("River_") || t.name.Equals("River_Element1"))
+                        if (t.name.Contains("LostLake") || t.name.Contains("Lost_Lake") || t.name.Contains("RiverEnvironment") || t.name.Contains("RiverElement") || t.name.StartsWith("River_") || t.name.Equals("River_Element1"))
                         {
-                            // Elements in the river removed per user request (clean river background only)
-                            t.gameObject.SetActive(false);
+                            t.gameObject.SetActive(active);
                         }
+                    }
+                    if (root.name.Contains("LostLake") || root.name.Contains("Lost_Lake"))
+                    {
+                        root.SetActive(active);
                     }
                 }
             }
@@ -770,6 +789,10 @@ namespace Rhinotap.Toolkit
                 {
                     //Skip parent obj
                     if (childSprite.gameObject == item)
+                        continue;
+
+                    // If child sprite is explicitly designated on ParallaxForeground (e.g. occluders), preserve its custom sorting!
+                    if (childSprite.sortingLayerName == Parallax.SortingLayerForeground || childSprite.sortingOrder >= 100)
                         continue;
 
                     childSprite.sortingLayerName = sortLayer;

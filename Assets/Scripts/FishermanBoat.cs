@@ -15,6 +15,11 @@ public class FishermanBoat : MonoBehaviour
     [SerializeField] private float bobAmplitude = 0.04f;
     [SerializeField] private float tiltAmplitude = 1.2f;
 
+    [Header("Propeller Hazard Collision")]
+    [Tooltip("Radius around the spinning outboard motor propeller that shreds any fish on contact")]
+    [SerializeField] private float propellerKillRadius = 0.90f;
+    [SerializeField] private AudioClip propellerChopClip;
+
     [Header("Bubble Particle Materials")]
     [SerializeField] private Material bubbleMaterial;
     [SerializeField] private Texture2D bubbleTexture;
@@ -272,6 +277,7 @@ public class FishermanBoat : MonoBehaviour
         PolygonCollider2D[] allPolys = FindObjectsByType<PolygonCollider2D>(FindObjectsSortMode.None);
         foreach (var poly in allPolys)
         {
+            if (poly == null || poly.gameObject == null) continue;
             if (poly.pathCount > 0)
             {
                 Vector2[] pts = poly.GetPath(0);
@@ -520,6 +526,7 @@ public class FishermanBoat : MonoBehaviour
         }
 
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer == null) spriteRenderer = gameObject.AddComponent<SpriteRenderer>();
         if (boatSprite != null)
         {
             if (spriteRenderer.sprite != boatSprite)
@@ -661,6 +668,86 @@ public class FishermanBoat : MonoBehaviour
         wakeParticleSystem.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
     }
 
+    /// <summary>
+    /// Computes the exact current world position of the spinning outboard motor propeller.
+    /// </summary>
+    public Vector3 GetPropellerWorldPosition()
+    {
+        float localPropellerX = (facingRight ? -7.30f : 7.30f) * boatScale;
+        float localPropellerY = -2.80f * boatScale;
+        return transform.position + new Vector3(localPropellerX, localPropellerY, 0f);
+    }
+
+    /// <summary>
+    /// Shreds any colliding fish (player, AI) on propeller impact while the motor is active and driving.
+    /// When stopped/parked in fishing mode, the propeller is stationary and safe.
+    /// Excludes fish that are currently hooked/reeled on fishing lines so line catches are never disrupted.
+    /// </summary>
+    private void UpdatePropellerHazard()
+    {
+        // Propeller is only lethal while active and driving (Arriving or Departing).
+        // When stopped/parked in fishing mode, the motor is stationary and safe.
+        bool isPropellerActive = (currentState == BoatState.Arriving || currentState == BoatState.Departing);
+        if (!isPropellerActive) return;
+
+        Vector3 propellerPos = GetPropellerWorldPosition();
+        float radius = propellerKillRadius * boatScale;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(propellerPos, radius);
+        if (hits == null || hits.Length == 0) return;
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D col = hits[i];
+            if (col == null || !col.gameObject.activeInHierarchy) continue;
+
+            // 1. Check Player Fish
+            PlayerController pc = col.GetComponentInParent<PlayerController>();
+            if (pc != null && pc.IsAlive)
+            {
+                // CRUCIAL: If the fish is already hooked, do not kill via propeller!
+                if (pc.IsHooked) continue;
+
+                PlayPropellerChopSound(propellerPos);
+                FishBloodCloud.Spawn(pc.transform.position, 1.6f, Vector2.down * 1.5f);
+                if (GameManager.instance != null) GameManager.instance.CameraShake(0.25f, 8f, 3f);
+                pc.Death(killerSprite: spriteRenderer != null ? spriteRenderer.sprite : null, spawnBlood: true);
+                continue;
+            }
+
+            // 2. Check AI Fish
+            Fish fish = col.GetComponentInParent<Fish>();
+            if (fish != null && !fish.IsDead)
+            {
+                // CRUCIAL: If the fish is already hooked, do not kill via propeller!
+                if (fish.IsHooked) continue;
+
+                PlayPropellerChopSound(propellerPos);
+                float bloodScale = Mathf.Clamp(0.5f + fish.Level * 0.25f, 0.6f, 2.0f);
+                FishBloodCloud.Spawn(fish.transform.position, bloodScale, Vector2.down * 1.2f);
+                fish.Die();
+                continue;
+            }
+        }
+    }
+
+    private void PlayPropellerChopSound(Vector3 pos)
+    {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
+        AudioClip clip = propellerChopClip;
+        if (clip == null)
+        {
+            #if UNITY_EDITOR
+            clip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Stab.mp3");
+            #endif
+            if (clip == null) clip = Resources.Load<AudioClip>("Harpoon_Stab");
+        }
+        if (clip != null)
+        {
+            SFXPool.Play3D(clip, pos, 0.9f, 3.0f, 30.0f);
+        }
+    }
+
     public void SetupWakeParticlesTemplate(Material bMat, Texture2D bTex)
     {
         if (bMat != null)
@@ -788,6 +875,7 @@ public class FishermanBoat : MonoBehaviour
     {
         // Update audio attenuation & distance checks dynamically every frame
         UpdateAudio();
+        UpdatePropellerHazard();
 
         if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
 
@@ -857,7 +945,7 @@ public class FishermanBoat : MonoBehaviour
 
         for (int round = 0; round < totalTries; round++)
         {
-            if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
+            if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
 
             // Deploy a randomized 3-4 rod wall so the pattern is challenging but fair.
             currentState = BoatState.Fishing;
@@ -903,6 +991,8 @@ public class FishermanBoat : MonoBehaviour
 
             for (int r = 0; r < offsets.Length; r++)
             {
+                if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
+
                 float dropX = transform.position.x + offsets[r];
                 float hookTargetY = depthTargets[r];
 
@@ -919,6 +1009,7 @@ public class FishermanBoat : MonoBehaviour
                     float st = 0f;
                     while (st < staggerDelay)
                     {
+                        if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
                         if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
                         {
                             st += Time.deltaTime;
@@ -935,8 +1026,8 @@ public class FishermanBoat : MonoBehaviour
                 yield return null;
             }
 
-            // If game is over, stop further fishing rounds
-            if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
+            // If game is over or level won, stop further fishing rounds
+            if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
 
             // If there is another round, stay in place and pause before dropping lines again
             if (round < totalTries - 1)
@@ -945,6 +1036,7 @@ public class FishermanBoat : MonoBehaviour
                 float betweenWait = 0f;
                 while (betweenWait < betweenRoundsPause)
                 {
+                    if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
                     if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
                     {
                         betweenWait += Time.deltaTime;
@@ -1161,7 +1253,7 @@ public class FishermanBoat : MonoBehaviour
 
                 if (dist <= minEngineDistance)
                 {
-                    targetAudioVolume = maxEngineVolume;
+                    targetAudioVolume = maxEngineVolume * AudioSettingsManager.SfxVolume;
                 }
                 else if (dist >= maxEngineDistance)
                 {
@@ -1171,7 +1263,7 @@ public class FishermanBoat : MonoBehaviour
                 {
                     // Smooth linear distance rolloff over extended range
                     float t = (dist - minEngineDistance) / (maxEngineDistance - minEngineDistance);
-                    targetAudioVolume = (1f - t) * maxEngineVolume;
+                    targetAudioVolume = (1f - t) * maxEngineVolume * AudioSettingsManager.SfxVolume;
                 }
 
                 // Dynamic stereo panning based on horizontal offset relative to the player
@@ -1180,7 +1272,7 @@ public class FishermanBoat : MonoBehaviour
             }
             else
             {
-                targetAudioVolume = maxEngineVolume * 0.5f;
+                targetAudioVolume = maxEngineVolume * 0.5f * AudioSettingsManager.SfxVolume;
             }
         }
 
@@ -1210,6 +1302,14 @@ public class FishermanBoat : MonoBehaviour
                 engineAudioSource.Stop();
             }
         }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = new Color(1f, 0.2f, 0.2f, 0.45f);
+        Gizmos.DrawSphere(GetPropellerWorldPosition(), propellerKillRadius * boatScale);
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(GetPropellerWorldPosition(), propellerKillRadius * boatScale);
     }
 }
 

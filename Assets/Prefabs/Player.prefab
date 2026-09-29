@@ -25,9 +25,9 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8469209948311385844}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.69, y: 0.69, z: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0.0046774657, w: 0.9999891}
+  m_LocalPosition: {x: -0.0005359635, y: 0.002947798, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 8469209948450142917}
@@ -86,10 +86,10 @@ SpriteRenderer:
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
-  m_Size: {x: 3.04, y: 1.3}
+  m_Size: {x: 6.355, y: 6.19}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
-  m_WasSpriteAssigned: 1
+  m_WasSpriteAssigned: 0
   m_SpriteSortPoint: 0
 --- !u!1 &8469209948450142919
 GameObject:
@@ -105,7 +105,6 @@ GameObject:
   - component: {fileID: 8469209948450142913}
   - component: {fileID: 8469209948450142942}
   - component: {fileID: 8086354160144913815}
-  - component: {fileID: 7483502240461975301}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -185,36 +184,30 @@ MonoBehaviour:
   eatBubbleVariants: []
   idleSprite: {fileID: 21300000, guid: 9df542ed039c35641b2f9e0c5c68984b, type: 3}
   halfBiteSprite: {fileID: 21300000, guid: 426b2be7f9404df43b4dd942e6f31102, type: 3}
-  eatSprite: {fileID: 21300000, guid: 797cf22f5d8c0a84c9b2602ce0b3998c, type: 3}
-  riverPlayerSprite: {fileID: 21300000, guid: b23d2ce4ed63fff4fa21ac0c3610e2d6, type: 3}
-  riverIdleSprite: {fileID: 21300000, guid: 8b1c72ef84fef0340b5069f8dfd87852, type: 3}
-  riverHalfBiteSprite: {fileID: 21300000, guid: c3db7a48e83247c4fb12c6a998e658de,
-    type: 3}
-  riverEatSprite: {fileID: 21300000, guid: 537562de2f2065e47ad80c653ec098ab, type: 3}
+  eatSprite: {fileID: 21300000, guid: a5b690a8f09d27142a16546b46a968dc, type: 3}
   levelScales:
-  - 0.42
+  - 0.26
+  - 0.43
   - 0.58
-  - 0.78
-  - 1.02
-  - 1.3
-  - 1.6
+  - 0.74
+  - 1
+  - 1.35
   riverLevelScales:
   - 0.6
   - 0.78
   - 0.98
-  - 1.2
-  - 1.45
-  - 1.7
-  cameraZoomPerLevel: 0
+  - 1.4
+  - 1.8
+  - 2.1
   isAlive: 1
   isPaused: 0
   currentLevelXp: 100
   boostMultiplier: 1.6
   boostDuration: 0.6
-  smoothTime: 0.15
+  swimAcceleration: 42
+  waterDrag: 14
   tiltAngle: 20
   tiltSpeed: 10
-  gameOverDelay: 1.8
 --- !u!50 &8469209948450142913
 Rigidbody2D:
   serializedVersion: 5
@@ -346,7 +339,7 @@ PolygonCollider2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8469209948450142919}
-  m_Enabled: 0
+  m_Enabled: 1
   serializedVersion: 3
   m_Density: 1
   m_Material: {fileID: 0}
@@ -429,49 +422,3 @@ PolygonCollider2D:
       - {x: 1.3616421, y: -0.1867615}
       - {x: 1.5533409, y: -0.0495949}
   m_UseDelaunayMesh: 1
---- !u!61 &7483502240461975301
-BoxCollider2D:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8469209948450142919}
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Density: 1
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_ForceSendLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ForceReceiveLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ContactCaptureLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_CallbackLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_IsTrigger: 0
-  m_UsedByEffector: 0
-  m_CompositeOperation: 0
-  m_CompositeOrder: 0
-  m_Offset: {x: 0.1242308, y: -0.07800537}
-  m_SpriteTilingProperty:
-    border: {x: 0, y: 0, z: 0, w: 0}
-    pivot: {x: 0, y: 0}
-    oldSize: {x: 0, y: 0}
-    newSize: {x: 0, y: 0}
-    adaptiveTilingThreshold: 0
-    drawMode: 0
-    adaptiveTiling: 0
-  m_AutoTiling: 0
-  m_Size: {x: 2.897019, y: 1.4062487}
-  m_EdgeRadius: 0

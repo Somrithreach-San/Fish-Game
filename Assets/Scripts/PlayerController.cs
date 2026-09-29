@@ -74,11 +74,19 @@ public class PlayerController : MonoBehaviour
     private Sprite halfBiteSprite; // Half-open mouth
     [SerializeField]
     private Sprite eatSprite; // Fully open mouth
+
+    private Sprite lakeIdleSprite;
+    private Sprite lakeHalfBiteSprite;
+    private Sprite lakeEatSprite;
+
+    private Sprite oceanDefaultIdleSprite;
+    private Sprite oceanDefaultHalfBiteSprite;
+    private Sprite oceanDefaultEatSprite;
     
     [Header("Manual Level Scaling")]
     [Tooltip("Define exact scale for each level in Ocean levels (Index 0 = Level 1, Index 1 = Level 2, etc.)")]
     [SerializeField]
-    private float[] levelScales = new float[] { 0.42f, 0.58f, 0.78f, 1.02f, 1.30f, 1.60f };
+    private float[] levelScales = new float[] { 0.26f, 0.43f, 0.58f, 0.74f, 1.00f, 1.35f };
 
     [Tooltip("Define exact scale for each level in River levels")]
     [SerializeField]
@@ -136,6 +144,7 @@ public class PlayerController : MonoBehaviour
     private float boostDuration = 0.45f;
     private float currentSpeedMultiplier = 1f;
     private float boostTimer = 0f;
+    public bool IsBoosting => boostTimer > 0f;
 
     // XP Multiplier (Golden Fish Bonus)
     private float xpMultiplier = 1f;
@@ -313,6 +322,7 @@ public class PlayerController : MonoBehaviour
         // If GameManager isn't ready yet, GameManager.Start will handle it or we update in Start
 
         AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged += HandleSfxVolumeChanged;
     }
 
     void OnDisable()
@@ -328,14 +338,28 @@ public class PlayerController : MonoBehaviour
         }
 
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
-        EventManager.StopListening("GameWin", StopMovementForGameEnd);
+        AudioSettingsManager.OnSfxVolumeChanged -= HandleSfxVolumeChanged;
+        EventManager.StopListening("GameWin", OnGameWinCelebration);
         EventManager.StopListening("GameLoss", StopMovementForGameEnd);
         EventManager.StopListening("playerDeath", StopMovementForGameEnd);
     }
 
     private void HandleSfxSettingChanged(bool enabled)
     {
-        if (audioSource != null) audioSource.mute = !enabled;
+        if (audioSource != null)
+        {
+            audioSource.mute = !enabled;
+            audioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
+        }
+    }
+
+    private void HandleSfxVolumeChanged(float vol)
+    {
+        if (audioSource != null)
+        {
+            audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            audioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
+        }
     }
 
     // Start is called before the first frame update
@@ -386,53 +410,7 @@ public class PlayerController : MonoBehaviour
         if (playerGraphics != null)
         {
              spriteRenderer = playerGraphics.GetComponent<SpriteRenderer>();
-
-             if (LevelManager.IsCurrentLakeLevel)
-             {
-#if UNITY_EDITOR
-                 var closedAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_closed mouth.png");
-                 foreach (var a in closedAssets) { if (a is Sprite s) { idleSprite = s; break; } }
-                 var halfAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_half-open mouth.png");
-                 foreach (var a in halfAssets) { if (a is Sprite s) { halfBiteSprite = s; break; } }
-                 var openAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/river player_fish_ open mouth.png");
-                 foreach (var a in openAssets) { if (a is Sprite s) { eatSprite = s; break; } }
-#endif
-                 if (idleSprite == null) idleSprite = Resources.Load<Sprite>("river player_fish_closed mouth");
-                 if (halfBiteSprite == null) halfBiteSprite = Resources.Load<Sprite>("river player_fish_half-open mouth");
-                 if (eatSprite == null) eatSprite = Resources.Load<Sprite>("river player_fish_ open mouth");
-             }
-             else
-             {
-#if UNITY_EDITOR
-                 if (idleSprite == null)
-                 {
-                     var closedAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Mouth Closed.png");
-                     foreach (var a in closedAssets) { if (a is Sprite s) { idleSprite = s; break; } }
-                 }
-                 if (halfBiteSprite == null)
-                 {
-                     var halfAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Mouth_Half_Open.png");
-                     foreach (var a in halfAssets) { if (a is Sprite s) { halfBiteSprite = s; break; } }
-                 }
-                 if (eatSprite == null)
-                 {
-                     var openAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/fish/Ocean_Player_Fish_Full_Mouth_Open.png");
-                     foreach (var a in openAssets) { if (a is Sprite s) { eatSprite = s; break; } }
-                 }
-                 if (eatSprite == null)
-                 {
-                     eatSprite = halfBiteSprite;
-                 }
-#endif
-                 if (idleSprite == null) idleSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Mouth Closed") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Mouth Closed");
-                 if (halfBiteSprite == null) halfBiteSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Mouth_Half_Open") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Mouth_Half_Open");
-                 if (eatSprite == null) eatSprite = Resources.Load<Sprite>("Ocean_Player_Fish_Full_Mouth_Open") ?? Resources.Load<Sprite>("fish/Ocean_Player_Fish_Full_Mouth_Open") ?? halfBiteSprite;
-             }
-
-             if (spriteRenderer != null && idleSprite != null)
-             {
-                 spriteRenderer.sprite = idleSprite;
-             }
+             UpdatePlayerSprites(false);
         }
 
         trail = GetComponent<TrailRenderer>();
@@ -471,7 +449,7 @@ public class PlayerController : MonoBehaviour
 
         //Listen to game pause event to update isPaused
         EventManager.StartListening<bool>("gamePaused", (param) => { isPaused = param; });
-        EventManager.StartListening("GameWin", StopMovementForGameEnd);
+        EventManager.StartListening("GameWin", OnGameWinCelebration);
         EventManager.StartListening("GameLoss", StopMovementForGameEnd);
         EventManager.StartListening("playerDeath", StopMovementForGameEnd);
 
@@ -550,6 +528,37 @@ public class PlayerController : MonoBehaviour
         {
             speedEffect.Stop();
         }
+    }
+
+    private void OnGameWinCelebration()
+    {
+        StopSpeedEffect();
+        if (gameObject.activeInHierarchy)
+        {
+            StartCoroutine(VictoryCelebrationSwimRoutine());
+        }
+    }
+
+    private IEnumerator VictoryCelebrationSwimRoutine()
+    {
+        float elapsed = 0f;
+        float duration = 2.0f;
+        transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+
+        while (elapsed < duration && LevelManager.IsLevelCompleted)
+        {
+            elapsed += Time.deltaTime;
+            float swimSpeed = 3.5f;
+            float bobY = Mathf.Sin(elapsed * 5f) * 0.75f;
+            Vector2 victoryVel = new Vector2(swimSpeed, bobY);
+            if (rb != null)
+            {
+                rb.linearVelocity = victoryVel;
+            }
+            yield return null;
+        }
+
+        if (rb != null) rb.linearVelocity = Vector2.zero;
     }
 
     private void StopMovementForGameEnd()
@@ -1127,97 +1136,151 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private Sprite LoadSpriteSafe(string assetPath, string resourcePath)
+    {
+        Sprite sp = null;
+#if UNITY_EDITOR
+        var assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        if (assets != null)
+        {
+            foreach (var a in assets)
+            {
+                if (a is Sprite s) { sp = s; break; }
+            }
+        }
+#endif
+        if (sp == null)
+        {
+            sp = Resources.Load<Sprite>(resourcePath);
+            if (sp == null && !resourcePath.StartsWith("fish/"))
+            {
+                sp = Resources.Load<Sprite>("fish/" + resourcePath);
+            }
+        }
+        return sp;
+    }
+
+    private void LoadAllSprites()
+    {
+        lakeIdleSprite = LoadSpriteSafe("Assets/Graphics/fish/river player_fish_closed mouth.png", "river player_fish_closed mouth");
+        lakeHalfBiteSprite = LoadSpriteSafe("Assets/Graphics/fish/river player_fish_half-open mouth.png", "river player_fish_half-open mouth");
+        lakeEatSprite = LoadSpriteSafe("Assets/Graphics/fish/river player_fish_ open mouth.png", "river player_fish_ open mouth");
+
+        oceanDefaultIdleSprite = LoadSpriteSafe("Assets/Graphics/fish/Ocean_Player_Fish_Mouth Closed.png", "Ocean_Player_Fish_Mouth Closed");
+        oceanDefaultHalfBiteSprite = LoadSpriteSafe("Assets/Graphics/fish/Ocean_Player_Fish_Mouth_Half_Open.png", "Ocean_Player_Fish_Mouth_Half_Open");
+        oceanDefaultEatSprite = LoadSpriteSafe("Assets/Graphics/fish/Ocean_Player_Fish_Full_Mouth_Open.png", "Ocean_Player_Fish_Full_Mouth_Open") ?? oceanDefaultHalfBiteSprite;
+    }
+
+    public void UpdatePlayerSprites(bool updateCollider = true)
+    {
+        if (oceanDefaultIdleSprite == null && lakeIdleSprite == null)
+        {
+            LoadAllSprites();
+        }
+
+        if (LevelManager.IsCurrentLakeLevel)
+        {
+            idleSprite = lakeIdleSprite;
+            halfBiteSprite = lakeHalfBiteSprite;
+            eatSprite = lakeEatSprite;
+        }
+        else
+        {
+            idleSprite = oceanDefaultIdleSprite;
+            halfBiteSprite = oceanDefaultHalfBiteSprite;
+            eatSprite = oceanDefaultEatSprite;
+        }
+
+        if (spriteRenderer != null && idleSprite != null)
+        {
+            spriteRenderer.sprite = idleSprite;
+        }
+
+        if (updateCollider)
+        {
+            UpdateCollision();
+        }
+    }
+
     private void UpdateCollision()
     {
-        if (spriteRenderer == null) return;
-        if (spriteRenderer.sprite == null) return;
+        if (spriteRenderer == null || spriteRenderer.sprite == null) return;
+        if (playerGraphics == null) return;
 
-        // "Game Style" / "Feeding Frenzy" Collision for Player
-        // 1. Fit shape to sprite (Capsule is best for fish)
-        // 2. Reduce size slightly (0.75f) - More forgiving for player than enemies
+        // Clean up legacy colliders and maintain PolygonCollider2D for full body shape mapping
+        PolygonCollider2D poly = GetComponent<PolygonCollider2D>();
+        if (poly == null)
+        {
+            poly = gameObject.AddComponent<PolygonCollider2D>();
+        }
 
-        // Check if we already have a CapsuleCollider2D
-        CapsuleCollider2D capsule = GetComponent<CapsuleCollider2D>();
-        
-        // If we have other collider types (Box, Circle, Polygon), remove them to enforce Capsule
+        poly.enabled = true;
+        poly.isTrigger = false;
+
         Collider2D[] allCols = GetComponents<Collider2D>();
-        foreach(var c in allCols)
+        foreach (var c in allCols)
         {
-            if (c != capsule) Destroy(c);
+            if (c != poly) Destroy(c);
         }
 
-        // Add capsule if missing
-        if (capsule == null)
+        Sprite sprite = spriteRenderer.sprite;
+        int shapeCount = sprite.GetPhysicsShapeCount();
+
+        if (shapeCount > 0)
         {
-             capsule = gameObject.AddComponent<CapsuleCollider2D>();
-        }
+            var validPaths = new List<Vector2[]>();
+            float gfxScaleX = Mathf.Abs(playerGraphics.localScale.x);
+            float gfxScaleY = Mathf.Abs(playerGraphics.localScale.y);
+            Vector3 gfxLocalPos = playerGraphics.localPosition;
 
-        // Note: Player collision is NOT a trigger if we want physical bumping, 
-        // BUT current logic uses OnTriggerEnter / OnCollisionEnter interchangeably.
-        // For "Feeding Frenzy" feel, Trigger is usually better to avoid "bumping" walls/fish 
-        // unless we want physics interactions.
-        // Current code handles both. Let's stick to Rigidbody mechanics (Collision) or Trigger?
-        // Feeding Frenzy usually allows passing THROUGH fish you eat.
-        // So Trigger is better for "eating", but maybe Collision for "walls"?
-        // Let's set it to Trigger to ensure smooth movement through fish.
-        // If user wants wall collision, we might need a composite or separate child collider.
-        // For now, let's stick to what Fish.cs does: isTrigger = true.
-        // However, if the player needs to stay in bounds via physics walls, this might be an issue.
-        // The movement logic is Transform-based or Velocity-based? 
-        // It's Velocity based (rb.velocity).
-        // Let's keep isTrigger = false (Solid) so we don't fall out of world if there are walls?
-        // Actually, existing code had no explicit setting in Start(), defaulting to Inspector.
-        // Let's assume Trigger is safer for "eating" game feel.
-        // If we want to eat fish, we must overlap them. Solid collision would "bounce" us off.
-        capsule.isTrigger = false; // Keep it solid for now, but small. 
-        // Wait, if it's solid, we bounce off fish!
-        // Fish.cs sets isTrigger=true.
-        // If Player is solid and Fish is Trigger, we can overlap! Perfect.
-        // So Player = Solid (Physics), Fish = Trigger (Phantom).
-        
-        // Calculate Bounds
-        Bounds b = spriteRenderer.sprite.bounds;
-        Vector2 spriteSize = b.size;
-        Vector2 spriteCenter = b.center;
+            for (int s = 0; s < shapeCount; s++)
+            {
+                var shapePts = new List<Vector2>();
+                sprite.GetPhysicsShape(s, shapePts);
+                if (shapePts.Count < 3) continue;
+                if (shapeCount > 1 && shapePts.Count < 10) continue;
 
-        // Adjust for gfx scale relative to root
-        // PlayerGraphics is a child.
-        float scaleX = Mathf.Abs(playerGraphics.localScale.x);
-        float scaleY = Mathf.Abs(playerGraphics.localScale.y);
+                int targetPts = Mathf.Min(shapePts.Count, 36);
+                int step = Mathf.Max(1, shapePts.Count / targetPts);
+                var path = new List<Vector2>();
 
-        Vector2 finalSize = new Vector2(spriteSize.x * scaleX, spriteSize.y * scaleY);
-        
-        // Calculate Center Offset in Root Local Space
-        Vector3 worldCenter = playerGraphics.TransformPoint(spriteCenter);
-        Vector3 localCenter = transform.InverseTransformPoint(worldCenter);
+                for (int p = 0; p < shapePts.Count; p += step)
+                {
+                    Vector2 pt = shapePts[p];
+                    Vector2 localPt = new Vector2(pt.x * gfxScaleX + gfxLocalPos.x, pt.y * gfxScaleY + gfxLocalPos.y);
+                    path.Add(localPt);
+                }
 
-        // Aspect ratio check:
-        // Ocean fish is elongated (aspect ratio ~1.9:1), while River fish is round (~1:1).
-        float aspectRatio = finalSize.x / Mathf.Max(0.01f, finalSize.y);
-        if (!LevelManager.IsCurrentLakeLevel || aspectRatio > 1.6f)
-        {
-            // Elongated Ocean Fish:
-            // Extend horizontal reach forward to the snout/teeth so bites register naturally on contact.
-            // Keep vertical profile sleek (0.65f) to match the torpedo body without clipping high/low hazards.
-            float forgivenessX = 0.88f;
-            float forgivenessY = 0.65f;
-            float forwardShift = finalSize.x * 0.05f; // shifts collider forward towards the mouth
-            capsule.size = new Vector2(finalSize.x * forgivenessX, finalSize.y * forgivenessY);
-            capsule.offset = new Vector2(localCenter.x + forwardShift, localCenter.y);
+                if (path.Count >= 3)
+                {
+                    validPaths.Add(path.ToArray());
+                }
+            }
+
+            if (validPaths.Count > 0)
+            {
+                poly.pathCount = validPaths.Count;
+                for (int i = 0; i < validPaths.Count; i++)
+                {
+                    poly.SetPath(i, validPaths[i]);
+                }
+            }
         }
         else
         {
-            // Standard / River Fish:
-            float forgiveness = 0.75f;
-            capsule.size = finalSize * forgiveness;
-            capsule.offset = localCenter;
+            Bounds b = spriteRenderer.sprite.bounds;
+            float hx = b.extents.x * Mathf.Abs(playerGraphics.localScale.x);
+            float hy = b.extents.y * Mathf.Abs(playerGraphics.localScale.y);
+            Vector2 c = (Vector2)playerGraphics.localPosition + (Vector2)b.center;
+            poly.pathCount = 1;
+            poly.SetPath(0, new Vector2[]
+            {
+                new Vector2(c.x - hx, c.y - hy * 0.7f),
+                new Vector2(c.x + hx, c.y - hy * 0.4f),
+                new Vector2(c.x + hx, c.y + hy * 0.4f),
+                new Vector2(c.x - hx, c.y + hy * 0.7f)
+            });
         }
-        
-        // Auto-Orientation
-        if (finalSize.x >= finalSize.y)
-            capsule.direction = CapsuleDirection2D.Horizontal;
-        else
-            capsule.direction = CapsuleDirection2D.Vertical;
     }
 
     // Update is called once per frame
@@ -1311,7 +1374,7 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// Run on death event
     /// </summary>
-    public void Death(Sprite killerSprite = null, Color? killerColor = null, bool isSick = false)
+    public void Death(Sprite killerSprite = null, Color? killerColor = null, bool isSick = false, bool spawnBlood = true)
     {
         if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
         if (!isAlive) return;
@@ -1342,7 +1405,15 @@ public class PlayerController : MonoBehaviour
         if (audioSource != null && targetDeathClip != null && AudioSettingsManager.IsSfxEnabled)
             audioSource.PlayOneShot(targetDeathClip, 1.0f);
 
-        GameManager.instance.CameraShake(0.2f, 7f, 2.5f);
+        if (GameManager.instance != null) GameManager.instance.CameraShake(0.2f, 7f, 2.5f);
+
+        // Underwater blood cloud upon fatal bite/death (skipped when crushed by clam)
+        if (spawnBlood)
+        {
+            float bloodScale = Mathf.Clamp(0.7f + (Level - 1) * 0.3f, 0.8f, 2.2f);
+            Vector2 playerVel = (rb != null && rb.linearVelocity.sqrMagnitude > 0.05f) ? rb.linearVelocity : _targetVelocity;
+            FishBloodCloud.Spawn(transform.position, bloodScale, playerVel);
+        }
 
         EventManager.Trigger("playerDeath");
         EventManager.Trigger("GameLoss"); // Trigger Loss Message
@@ -1359,7 +1430,10 @@ public class PlayerController : MonoBehaviour
             if (allCols[i] != null) allCols[i].enabled = false;
         }
 
-        playerGraphics.gameObject.SetActive(false);
+        if (playerGraphics != null)
+        {
+            playerGraphics.gameObject.SetActive(false);
+        }
         Destroy(gameObject, 2.5f);
 
     }
@@ -1620,7 +1694,7 @@ public class PlayerController : MonoBehaviour
         // Check if part of a fish school
         if (fish != null)
         {
-            fish.OnEatenByPlayer();
+            fish.OnEatenByPlayer(this);
         }
 
         bool wasSickFish = (fish != null && fish.IsSickFish);
@@ -1834,6 +1908,8 @@ public class PlayerController : MonoBehaviour
         
         Level++; // Increment level BEFORE updating GUI so we show progress into next level
 
+        UpdatePlayerSprites(false);
+
         GuiManager.instance.SetXp(currentXp, currentLevelXp, Level, maxLevel);
 
         // Scale logic: Use Manual Array for current environment
@@ -1901,10 +1977,10 @@ public class PlayerController : MonoBehaviour
         // Invulnerability Safeguard: during 5s special abilities, ignore all lethal damage from regular predators
         if (PlayerAbilitySystem.IsPlayerInvulnerable)
         {
-            Fish fishTarget = other.GetComponent<Fish>();
+            Fish fishTarget = other.GetComponentInParent<Fish>() ?? other.GetComponent<Fish>();
             if (fishTarget != null && !fishTarget.IsHooked)
             {
-                if (fishTarget.Level <= Level)
+                if (fishTarget.IsGoldenFish || fishTarget.Level <= Level)
                 {
                     Eat(fishTarget);
                     PlayEatEffect();
@@ -1917,11 +1993,19 @@ public class PlayerController : MonoBehaviour
         // Fix: Removed rigid tag check. We check for Fish component directly to be more robust.
         // if (other.CompareTag("Enemy"))
         {
-            Fish collidedFish = other.GetComponent<Fish>();
+            Fish collidedFish = other.GetComponentInParent<Fish>() ?? other.GetComponent<Fish>();
             if (collidedFish != null)
             {
                 // If fish is already hooked by a fishing line, do not interact
                 if (collidedFish.IsHooked) return;
+
+                // SPECIAL: Golden Fish - Always consumed immediately upon contact!
+                if (collidedFish.IsGoldenFish)
+                {
+                    Eat(collidedFish);
+                    PlayEatEffect();
+                    return;
+                }
 
                 // Defense Rule for Spiked Pufferfish:
                 // User requirement: "user or ai fish attemp to eat the spike puffer should died no just being pushed away"
@@ -1954,27 +2038,28 @@ public class PlayerController : MonoBehaviour
                 
                 if (fishLevel > Level)
                 {
-                    if (collidedFish.IsGoldenFish || collidedFish.IsCuttlefish)
+                    if (collidedFish.IsCuttlefish)
                     {
-                        // Golden fish and Cuttlefish are NOT predator fish, so they never bite or kill the player.
-                        if (collidedFish.IsCuttlefish)
-                        {
-                            var cf = collidedFish.GetComponent<Cuttlefish>();
-                            if (cf != null) cf.TriggerInkAndJetEscape((Vector2)transform.position - (Vector2)collidedFish.transform.position, targetPlayer: this);
-                        }
+                        // Cuttlefish is NOT a predator fish, so it never bites or kills the player.
+                        var cf = collidedFish.GetComponent<Cuttlefish>();
+                        if (cf != null) cf.TriggerInkAndJetEscape((Vector2)transform.position - (Vector2)collidedFish.transform.position, targetPlayer: this);
                         return;
                     }
 
-                    // Fair Predator Bite Check:
-                    // A predator fish eats with its mouth / front head.
-                    // If the player touches the predator from behind its tail, the predator doesn't bite!
-                    if (IsPredatorBiteContact(collidedFish, other))
+                    // Blinded & Disoriented predator cannot bite or attack the player!
+                    if (collidedFish.IsDisorientedByInk)
                     {
-                        SpriteRenderer sr = collidedFish.GetComponentInChildren<SpriteRenderer>();
-                        Sprite killerSp = sr != null ? sr.sprite : null;
-                        Color killerCol = (sr != null) ? sr.color : (collidedFish.IsSickFish ? new Color(0.72f, 1f, 0.72f, 1f) : Color.white);
-                        Death(killerSp, killerCol, collidedFish.IsSickFish);
+                        Vector2 bounce = ((Vector2)transform.position - (Vector2)collidedFish.transform.position).normalized;
+                        if (bounce.sqrMagnitude < 0.001f) bounce = Vector2.up;
+                        if (rb != null) rb.linearVelocity = bounce * 3.5f;
+                        return;
                     }
+
+                    // Full body shape collision: predator consumes the player upon contact
+                    SpriteRenderer sr = collidedFish.GetComponentInChildren<SpriteRenderer>();
+                    Sprite killerSp = sr != null ? sr.sprite : null;
+                    Color killerCol = (sr != null) ? sr.color : (collidedFish.IsSickFish ? new Color(0.72f, 1f, 0.72f, 1f) : Color.white);
+                    Death(killerSp, killerCol, collidedFish.IsSickFish);
                 }
                 else
                 {
@@ -2176,6 +2261,7 @@ public class PlayerController : MonoBehaviour
         if (Level > 1)
         {
             Level--;
+            UpdatePlayerSprites(false);
             currentXp = 0;
             currentLevelXp = RequiredXpForLevel(Level, baseXpRequirement);
             if (GuiManager.instance != null)

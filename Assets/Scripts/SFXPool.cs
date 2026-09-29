@@ -31,7 +31,7 @@ public class SFXPool : MonoBehaviour
     [SerializeField] private int initialPoolSize = 12;
 
     private readonly Queue<AudioSource> availableSources = new Queue<AudioSource>();
-    private readonly List<AudioSource> activeSources = new List<AudioSource>();
+    private readonly Dictionary<AudioSource, float> activeSourceBaseVolumes = new Dictionary<AudioSource, float>();
 
     private void Awake()
     {
@@ -47,6 +47,48 @@ public class SFXPool : MonoBehaviour
         }
 
         InitializePool();
+        SubscribeAudioEvents();
+    }
+
+    private void OnDestroy()
+    {
+        UnsubscribeAudioEvents();
+    }
+
+    private void SubscribeAudioEvents()
+    {
+        AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged += HandleSfxVolumeChanged;
+    }
+
+    private void UnsubscribeAudioEvents()
+    {
+        AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged -= HandleSfxVolumeChanged;
+    }
+
+    private void HandleSfxSettingChanged(bool enabled)
+    {
+        foreach (var kvp in activeSourceBaseVolumes)
+        {
+            if (kvp.Key != null)
+            {
+                kvp.Key.mute = !enabled;
+                if (!enabled && kvp.Key.isPlaying) kvp.Key.Stop();
+            }
+        }
+    }
+
+    private void HandleSfxVolumeChanged(float vol)
+    {
+        foreach (var kvp in activeSourceBaseVolumes)
+        {
+            if (kvp.Key != null)
+            {
+                kvp.Key.mute = !AudioSettingsManager.IsSfxEnabled;
+                kvp.Key.volume = AudioSettingsManager.GetScaledSfxVolume(kvp.Value);
+            }
+        }
     }
 
     private void InitializePool()
@@ -59,7 +101,7 @@ public class SFXPool : MonoBehaviour
 
     private AudioSource CreateNewSource()
     {
-        GameObject sourceObj = new GameObject($"Pooled_AudioSource_{availableSources.Count + activeSources.Count}");
+        GameObject sourceObj = new GameObject($"Pooled_AudioSource_{availableSources.Count + activeSourceBaseVolumes.Count}");
         sourceObj.transform.SetParent(transform);
         AudioSource src = sourceObj.AddComponent<AudioSource>();
         src.playOnAwake = false;
@@ -74,10 +116,10 @@ public class SFXPool : MonoBehaviour
         return src;
     }
 
-    private AudioSource GetAvailableSource()
+    private AudioSource GetAvailableSource(float baseVolume)
     {
         AudioSource src = availableSources.Count > 0 ? availableSources.Dequeue() : CreateNewSource();
-        activeSources.Add(src);
+        activeSourceBaseVolumes[src] = baseVolume;
         src.gameObject.SetActive(true);
         return src;
     }
@@ -92,7 +134,7 @@ public class SFXPool : MonoBehaviour
         src.transform.localPosition = Vector3.zero;
         src.gameObject.SetActive(false);
 
-        activeSources.Remove(src);
+        activeSourceBaseVolumes.Remove(src);
         availableSources.Enqueue(src);
     }
 
@@ -101,19 +143,19 @@ public class SFXPool : MonoBehaviour
     /// </summary>
     public static void Play3D(AudioClip clip, Vector3 position, float volume = 1.0f, float minDistance = 8.0f, float maxDistance = 42.0f, float pitch = 1.0f)
     {
-        if (clip == null || !AudioSettingsManager.IsSfxEnabled) return;
+        if (clip == null || !AudioSettingsManager.IsSfxEnabled || AudioSettingsManager.SfxVolume <= 0.001f) return;
 
         SFXPool pool = Instance;
         if (pool == null) return;
 
-        AudioSource src = pool.GetAvailableSource();
+        AudioSource src = pool.GetAvailableSource(volume);
         src.transform.position = position;
         src.spatialBlend = 1.0f; // Pure 3D spatial
         src.minDistance = minDistance;
         src.maxDistance = maxDistance;
         src.rolloffMode = AudioRolloffMode.Linear;
         src.pitch = pitch;
-        src.volume = volume;
+        src.volume = AudioSettingsManager.GetScaledSfxVolume(volume);
         src.clip = clip;
         src.mute = !AudioSettingsManager.IsSfxEnabled;
         src.outputAudioMixerGroup = AudioSettingsManager.SfxMixerGroup;
@@ -127,16 +169,16 @@ public class SFXPool : MonoBehaviour
     /// </summary>
     public static void Play2D(AudioClip clip, float volume = 1.0f, float pitch = 1.0f)
     {
-        if (clip == null || !AudioSettingsManager.IsSfxEnabled) return;
+        if (clip == null || !AudioSettingsManager.IsSfxEnabled || AudioSettingsManager.SfxVolume <= 0.001f) return;
 
         SFXPool pool = Instance;
         if (pool == null) return;
 
-        AudioSource src = pool.GetAvailableSource();
+        AudioSource src = pool.GetAvailableSource(volume);
         src.transform.position = Vector3.zero;
         src.spatialBlend = 0.0f; // 2D Stereo
         src.pitch = pitch;
-        src.volume = volume;
+        src.volume = AudioSettingsManager.GetScaledSfxVolume(volume);
         src.clip = clip;
         src.mute = !AudioSettingsManager.IsSfxEnabled;
         src.outputAudioMixerGroup = AudioSettingsManager.SfxMixerGroup;

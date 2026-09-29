@@ -156,6 +156,17 @@ public class Hazard : MonoBehaviour
         // One catch per hook
         if (HasCatch) return;
 
+        // Solid rock collision: halt downward dropping immediately
+        if (other != null && !other.isTrigger && SharkHazard.IsSolidEnvironmentObstacle(other))
+        {
+            if (currentState == State.Dropping)
+            {
+                targetY = transform.position.y;
+                currentState = State.Roaming;
+            }
+            return;
+        }
+
         // 1. Check Player
         PlayerController pc = other.GetComponentInParent<PlayerController>();
         if (pc != null)
@@ -348,7 +359,15 @@ public class Hazard : MonoBehaviour
         cableLine.textureMode = LineTextureMode.Stretch;
         cableLine.startColor = Color.white;
         cableLine.endColor = Color.white;
-        cableLine.sortingOrder = 7;
+        cableLine.sortingLayerName = "ParallaxForeground";
+        cableLine.sortingOrder = 129; // In front of AI fish (90) and behind top rock (300)
+
+        if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.sortingLayerName = "ParallaxForeground";
+            spriteRenderer.sortingOrder = 130;
+        }
 
         if (cableMaterial != null)
         {
@@ -485,12 +504,30 @@ public class Hazard : MonoBehaviour
         }
     }
 
+    private bool IsGameOverOrPlayerDead()
+    {
+        if (GameManager.instance != null && GameManager.instance.IsGameOver) return true;
+        if (LevelManager.IsLevelCompleted) return true;
+        if (GameManager.instance != null && GameManager.instance.playerGameObject != null)
+        {
+            PlayerController pc = GameManager.instance.playerGameObject.GetComponent<PlayerController>();
+            if (pc != null && !pc.IsAlive) return true;
+        }
+        else
+        {
+            PlayerController pc = FindFirstObjectByType<PlayerController>();
+            if (pc != null && !pc.IsAlive) return true;
+        }
+        return false;
+    }
+
     private void SubscribeToEndAudioEvents()
     {
         if (endAudioEventsSubscribed) return;
         EventManager.StartListening("playerDeath", StopReelSound);
         EventManager.StartListening("GameLoss", StopReelSound);
         EventManager.StartListening("GameWin", StopReelSound);
+        EventManager.StartListening("stageClear", StopReelSound);
         endAudioEventsSubscribed = true;
     }
 
@@ -500,6 +537,7 @@ public class Hazard : MonoBehaviour
         EventManager.StopListening("playerDeath", StopReelSound);
         EventManager.StopListening("GameLoss", StopReelSound);
         EventManager.StopListening("GameWin", StopReelSound);
+        EventManager.StopListening("stageClear", StopReelSound);
         endAudioEventsSubscribed = false;
     }
 
@@ -510,7 +548,7 @@ public class Hazard : MonoBehaviour
             audioSource.mute = !enabled;
             if (enabled && (currentState == State.Dropping || currentState == State.Retracting))
             {
-                if (!audioSource.isPlaying && (GameManager.instance == null || !GameManager.Paused))
+                if (!audioSource.isPlaying && (GameManager.instance == null || !GameManager.Paused) && !IsGameOverOrPlayerDead())
                 {
                     StartReelSound();
                 }
@@ -524,6 +562,11 @@ public class Hazard : MonoBehaviour
 
     private void Update()
     {
+        if (IsGameOverOrPlayerDead())
+        {
+            StopReelSound();
+        }
+
         // Pause Check
         bool currentPaused = (GameManager.instance != null && GameManager.Paused);
 
@@ -541,7 +584,7 @@ public class Hazard : MonoBehaviour
             {
                 if (audioSource != null && (currentState == State.Dropping || currentState == State.Retracting))
                 {
-                    if (AudioSettingsManager.IsSfxEnabled)
+                    if (AudioSettingsManager.IsSfxEnabled && !IsGameOverOrPlayerDead())
                     {
                         audioSource.UnPause();
                         if (!audioSource.isPlaying) StartReelSound();
@@ -550,7 +593,7 @@ public class Hazard : MonoBehaviour
             }
         }
 
-        if (currentPaused) return;
+        if (currentPaused || IsGameOverOrPlayerDead()) return;
 
         UpdateReelAudioPosition();
 
@@ -814,6 +857,7 @@ public class Hazard : MonoBehaviour
     
     private void OnEnable()
     {
+        SubscribeToEndAudioEvents();
         ResetHazardState();
     }
 
@@ -868,6 +912,7 @@ public class Hazard : MonoBehaviour
         if (bubbleTexture == null) bubbleTexture = tex;
 
         EnsureAudioSource();
+        SubscribeToEndAudioEvents();
 
         // Ensure clean state when spawned from pool
         ResetHazardState();
@@ -882,7 +927,11 @@ public class Hazard : MonoBehaviour
     {
         EnsureAudioSource();
         if (audioSource == null) return;
-        if (GameManager.instance != null && GameManager.instance.IsGameOver) return;
+        if (IsGameOverOrPlayerDead())
+        {
+            if (audioSource.isPlaying) audioSource.Stop();
+            return;
+        }
         audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
         if (moveSound != null)
         {

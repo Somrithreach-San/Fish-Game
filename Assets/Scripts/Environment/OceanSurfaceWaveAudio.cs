@@ -130,7 +130,6 @@ public class OceanSurfaceWaveAudio : MonoBehaviour
             if (!isOceanLevel || !sfxEnabled || isGameOver)
             {
                 calculatedProximityFactor = 0f;
-                targetVolume = 0f;
                 currentVolume = Mathf.MoveTowards(currentVolume, 0f, Time.unscaledDeltaTime * (volumeFadeSpeed * 1.5f));
                 if (audioSource != null)
                 {
@@ -193,8 +192,6 @@ public class OceanSurfaceWaveAudio : MonoBehaviour
                 audioSource.volume = currentVolume;
             }
         }
-
-        private float targetVolume = 0f;
 
         private IEnumerator WaveCycleLoop()
         {

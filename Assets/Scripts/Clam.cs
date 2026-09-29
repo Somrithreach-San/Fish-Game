@@ -186,6 +186,9 @@ public class Clam : MonoBehaviour
             return;
         }
 
+        // Adjust clam position up slightly per user request
+        transform.position += new Vector3(0f, 0.2f, 0f);
+
         EnsureInitialized();
         EnsureComponents();
         EnsureBubbleSystems();
@@ -237,14 +240,43 @@ public class Clam : MonoBehaviour
 
     private void OnValidate()
     {
+        EnsureInitialized();
+        EnsureComponents();
         EnsureClamSpritesLoaded();
         EnsurePearlSpritesLoaded();
         EnsureAudioLoaded();
         UpdatePearlVisual();
     }
 
-    private void EnsureInitialized()
+    private Vector3 GetPearlLocalPos()
     {
+        if (clamPearl != null && visualTransform != null && clamPearl.transform.parent == visualTransform)
+        {
+            return initialPearlLocalPos;
+        }
+        Vector3 visualOffset = (visualTransform != null && visualTransform != transform) 
+            ? visualTransform.localPosition 
+            : Vector3.zero;
+        return visualOffset + initialPearlLocalPos;
+    }
+
+    private void ResetPearlTransform()
+    {
+        if (clamPearl != null)
+        {
+            clamPearl.transform.localPosition = GetPearlLocalPos();
+            clamPearl.transform.localScale = initialPearlLocalScale;
+        }
+    }
+
+    public void EnsureInitialized()
+    {
+        if (visualTransform == null)
+        {
+            Transform v = transform.Find("Visuals");
+            if (v != null) visualTransform = v;
+        }
+
         if (spriteRenderer == null) spriteRenderer = GetComponentInChildren<SpriteRenderer>();
         if (spriteRenderer != null)
         {
@@ -255,8 +287,11 @@ public class Clam : MonoBehaviour
         if (clamPearl == null) clamPearl = GetComponentInChildren<ClamPearl>();
         if (clamPearl != null)
         {
-            clamPearl.transform.localPosition = initialPearlLocalPos;
-            clamPearl.transform.localScale = initialPearlLocalScale;
+            if (visualTransform != null && clamPearl.transform.parent != visualTransform)
+            {
+                clamPearl.transform.SetParent(visualTransform, true);
+            }
+            ResetPearlTransform();
             if (pearlRenderer == null)
             {
                 pearlRenderer = clamPearl.GetComponent<SpriteRenderer>();
@@ -279,10 +314,12 @@ public class Clam : MonoBehaviour
 
         if (audioSource == null)
         {
-            audioSource = GetComponent<AudioSource>();
+            audioSource = GetComponentInChildren<AudioSource>();
             if (audioSource == null)
             {
-                audioSource = gameObject.AddComponent<AudioSource>();
+                audioSource = (visualTransform != null) 
+                    ? visualTransform.gameObject.AddComponent<AudioSource>() 
+                    : gameObject.AddComponent<AudioSource>();
                 audioSource.playOnAwake = false;
             }
         }
@@ -338,7 +375,6 @@ public class Clam : MonoBehaviour
         if (openingFrames == null || openingFrames.Length == 0)
         {
             Sprite c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3__no_pearl.png");
-            if (c3 == null) c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3_no_pearl.png");
 
             openingFrames = new Sprite[]
             {
@@ -352,7 +388,6 @@ public class Clam : MonoBehaviour
         if (closingFrames == null || closingFrames.Length == 0)
         {
             Sprite c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3__no_pearl.png");
-            if (c3 == null) c3 = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/clam/clam_closing_3_no_pearl.png");
 
             closingFrames = new Sprite[]
             {
@@ -386,11 +421,7 @@ public class Clam : MonoBehaviour
         {
             isPearlVisualRevealed = false;
         }
-        if (clamPearl != null)
-        {
-            clamPearl.transform.localPosition = initialPearlLocalPos;
-            clamPearl.transform.localScale = initialPearlLocalScale;
-        }
+        ResetPearlTransform();
         UpdatePearlVisual();
     }
 
@@ -487,7 +518,10 @@ public class Clam : MonoBehaviour
         // 2. BoxCollider2D trigger for the mouth chamber
         if (mouthTriggerCollider == null)
         {
-            mouthTriggerCollider = GetComponent<BoxCollider2D>();
+            if (visualTransform != null)
+                mouthTriggerCollider = visualTransform.GetComponent<BoxCollider2D>();
+            if (mouthTriggerCollider == null)
+                mouthTriggerCollider = GetComponent<BoxCollider2D>();
             if (mouthTriggerCollider == null)
             {
                 mouthTriggerCollider = gameObject.AddComponent<BoxCollider2D>();
@@ -499,8 +533,8 @@ public class Clam : MonoBehaviour
         {
             Vector2 worldCenter = GetMouthWorldCenter();
             Vector2 worldSize = GetMouthWorldSize();
-            mouthTriggerCollider.offset = transform.InverseTransformPoint(worldCenter);
-            Vector2 localSize = transform.InverseTransformVector(worldSize);
+            mouthTriggerCollider.offset = mouthTriggerCollider.transform.InverseTransformPoint(worldCenter);
+            Vector2 localSize = mouthTriggerCollider.transform.InverseTransformVector(worldSize);
             mouthTriggerCollider.size = new Vector2(Mathf.Abs(localSize.x), Mathf.Abs(localSize.y));
         }
         else
@@ -644,6 +678,7 @@ public class Clam : MonoBehaviour
         foreach (var col in overlaps)
         {
             if (col == null) continue;
+            if (col.GetComponentInParent<SharkHazard>() != null) continue; // Shark is completely immune to clam
             PlayerController pc = col.GetComponentInParent<PlayerController>();
             if (pc != null && pc.IsAlive)
             {
@@ -658,7 +693,7 @@ public class Clam : MonoBehaviour
 
     private void KillPlayer(PlayerController player)
     {
-        if (player == null || !player.IsAlive || isPlayerBeingCrushed) return;
+        if (player == null || !player.IsAlive || isPlayerBeingCrushed || LevelManager.IsLevelCompleted) return;
         if (PlayerAbilitySystem.IsPlayerInvulnerable) return;
 
         isPlayerBeingCrushed = true;
@@ -711,7 +746,8 @@ public class Clam : MonoBehaviour
         {
             player.transform.localScale = Vector3.zero;
             Sprite clamSp = GetComponentInChildren<SpriteRenderer>()?.sprite;
-            player.Death(clamSp);
+            // No blood particle when crushed inside clam
+            player.Death(clamSp, spawnBlood: false);
         }
 
         isPlayerBeingCrushed = false;
@@ -741,6 +777,7 @@ public class Clam : MonoBehaviour
         foreach (var col in overlaps)
         {
             if (col == null) continue;
+            if (col.GetComponentInParent<SharkHazard>() != null) continue; // Shark is completely immune to clam
             Fish f = col.GetComponent<Fish>() ?? col.GetComponentInParent<Fish>();
             if (f != null && !f.IsDead && f.gameObject.activeInHierarchy)
             {
@@ -770,6 +807,8 @@ public class Clam : MonoBehaviour
         fish.IsDead = true; // Prevents being eaten by other predators during shrinking
         var ai = fish.GetComponent<FishAI>();
         if (ai != null) ai.enabled = false;
+        var hsAI = fish.GetComponent<HungrySharkFishAI>();
+        if (hsAI != null) hsAI.enabled = false;
         var mv = fish.GetComponent<FishMovement>();
         if (mv != null) mv.enabled = false;
 
@@ -811,7 +850,7 @@ public class Clam : MonoBehaviour
         if (fish != null)
         {
             fish.transform.localScale = Vector3.zero;
-            fish.PlayEatEffect();
+            // No blood particle when crushed inside clam
             fish.Die();
         }
 
@@ -823,6 +862,18 @@ public class Clam : MonoBehaviour
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (other == null) return;
+
+        // Shark hazard check: shark is immune, but can trigger clam close if open
+        SharkHazard shark = other.GetComponent<SharkHazard>() ?? other.GetComponentInParent<SharkHazard>();
+        if (shark != null)
+        {
+            if (!isClosing && currentState == ClamState.FullyOpened)
+            {
+                if (cycleCoroutine != null) StopCoroutine(cycleCoroutine);
+                cycleCoroutine = StartCoroutine(PearlEatenRecoveryRoutine());
+            }
+            return;
+        }
 
         // Player check
         PlayerController pc = other.GetComponent<PlayerController>() ?? other.GetComponentInParent<PlayerController>();
@@ -851,6 +902,9 @@ public class Clam : MonoBehaviour
     private void OnTriggerStay2D(Collider2D other)
     {
         if (other == null) return;
+
+        // Shark is immune
+        if (other.GetComponentInParent<SharkHazard>() != null) return;
 
         // Ensure tracked player is valid
         if (insidePlayer == null)
@@ -920,8 +974,7 @@ public class Clam : MonoBehaviour
 
         if (newState == ClamState.Closed && clamPearl != null)
         {
-            clamPearl.transform.localPosition = initialPearlLocalPos;
-            clamPearl.transform.localScale = initialPearlLocalScale;
+            ResetPearlTransform();
         }
 
         // Emit small bubbles from each side of the clam when closing
@@ -1026,11 +1079,7 @@ public class Clam : MonoBehaviour
 
         // Hide pearl visual and trigger immediately
         UpdatePearlVisual();
-        if (clamPearl != null)
-        {
-            clamPearl.transform.localPosition = initialPearlLocalPos;
-            clamPearl.transform.localScale = initialPearlLocalScale;
-        }
+        ResetPearlTransform();
 
         // Award player XP, score, bite animation, VFX, and floating text
         Vector3 pearlWorldPos = (clamPearl != null) ? clamPearl.transform.position : transform.position;
@@ -1183,15 +1232,15 @@ public class Clam : MonoBehaviour
             }
         }
 
-        // Emitter positions adjusted for BottomCenter grounded pivot
+        // Emitter positions adjusted to match the new Visuals offset (-0.76, -4.78)
         if (leftBubbleSystem != null)
         {
-            leftBubbleSystem.transform.localPosition = new Vector3(-1.85f, 0.25f, -0.05f);
+            leftBubbleSystem.transform.localPosition = new Vector3(-2.61f, -4.53f, -0.05f);
             ConfigureBubbleParticleSystem(leftBubbleSystem, true);
         }
         if (rightBubbleSystem != null)
         {
-            rightBubbleSystem.transform.localPosition = new Vector3(1.85f, 0.25f, -0.05f);
+            rightBubbleSystem.transform.localPosition = new Vector3(1.09f, -4.53f, -0.05f);
             ConfigureBubbleParticleSystem(rightBubbleSystem, false);
         }
     }

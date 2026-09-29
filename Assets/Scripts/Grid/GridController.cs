@@ -23,9 +23,9 @@ public class GridController : MonoBehaviour
 
     [Header("Arena Spawning")]
     [SerializeField]
-    private int maxFishCount = 34; // Increased to 34 so waters are lively and filled with eatable prey
+    private int maxFishCount = 26; // Balanced fish population (26) so waters are lively without overwhelming congestion
     [SerializeField]
-    private float spawnInterval = 0.85f; // Fast, responsive spawn interval (0.85s) for smooth combo chaining
+    private float spawnInterval = 1.25f; // Balanced spawn cadence (1.25s) giving old fish time to traverse and despawn cleanly
     [SerializeField]
     private GameObject goldenFishPrefab; // Custom prefab for the rare golden fish
     [SerializeField] private float sickFishChance = 0.08f; // Rare chance for Level 2 fish to spawn as sick (max 1 at a time)
@@ -126,8 +126,11 @@ public class GridController : MonoBehaviour
     [SerializeField] private Sprite cuttlefishSprite;
     private GameObject cuttlefishTemplate;
     private GameObject activeCuttlefish;
-    private float cuttlefishCooldownTimer = 16f;
-    private Vector2 cuttlefishCooldownRange = new Vector2(20f, 32f);
+    [Tooltip("Min and Max delay (seconds) before the first cuttlefish appears after level starts")]
+    [SerializeField] private Vector2 cuttlefishInitialDelayRange = new Vector2(1.5f, 3.5f);
+    [Tooltip("Min and Max cooldown (seconds) between cuttlefish departures and the next cuttlefish arrival")]
+    [SerializeField] private Vector2 cuttlefishCooldownRange = new Vector2(3.5f, 7f);
+    private float cuttlefishCooldownTimer = 3f;
 
     // Templates for Optimization
     private GameObject sharkTemplate;
@@ -314,11 +317,23 @@ public class GridController : MonoBehaviour
         else
         {
             InitRiverBoatTemplate();
+            if (DeepWhaleAmbience.IsEligibleLevel())
+            {
+                if (DeepWhaleAmbience.Instance == null)
+                {
+                    gameObject.AddComponent<DeepWhaleAmbience>();
+                }
+                if (BackgroundWhaleAmbient.Instance == null)
+                {
+                    gameObject.AddComponent<BackgroundWhaleAmbient>();
+                }
+            }
         }
 
         // Initialize dynamic, randomized hazard delays
         boatCooldownTimer = Random.Range(boatInitialDelayRange.x, boatInitialDelayRange.y);
         sharkCooldownTimer = Random.Range(sharkInitialDelayRange.x, sharkInitialDelayRange.y);
+        cuttlefishCooldownTimer = Random.Range(cuttlefishInitialDelayRange.x, cuttlefishInitialDelayRange.y);
 
         if (maxFishCount < 20 || maxFishCount > 45)
         {
@@ -408,6 +423,17 @@ public class GridController : MonoBehaviour
         Sprite s = null;
         #if UNITY_EDITOR
         s = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Hazard/river_fisherman_hazard_boat.png");
+        if (s == null)
+        {
+            var all = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/Graphics/Hazard/river_fisherman_hazard_boat.png");
+            if (all != null)
+            {
+                foreach (var obj in all)
+                {
+                    if (obj is Sprite sp) { s = sp; break; }
+                }
+            }
+        }
         #endif
 
         if (s == null)
@@ -667,6 +693,8 @@ public class GridController : MonoBehaviour
     {
         if (!isActive) return;
         if (player == null) return;
+        if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) return;
+        if (cachedPlayerController != null && !cachedPlayerController.IsAlive) return;
 
         // Arena Mode: Continuous Spawning
         HandleArenaSpawning();
@@ -797,7 +825,7 @@ public class GridController : MonoBehaviour
     private void SpawnArenaFish(int playerLevel, int[] activeCounts, int totalActive)
     {
         int count = 1;
-        if (Fish.AllFish.Count < 14) count = 2;
+        if (Fish.AllFish.Count < 8) count = 2;
         
         // Calculate Camera View Boundaries
         if (_cam == null) return;
@@ -859,7 +887,18 @@ public class GridController : MonoBehaviour
 
             LevelConfig currentCfg = LevelManager.GetCurrentConfig();
 
-            if (!currentCfg.isLake && currentCfg.enableGoldenFish && Random.value < goldenChance)
+            // Guard: STRICTLY max 1 active golden fish in the entire scene, and never spawn immediately at start of the game
+            bool hasActiveGolden = false;
+            for (int f = 0; f < Fish.AllFish.Count; f++)
+            {
+                if (Fish.AllFish[f] != null && Fish.AllFish[f].IsGoldenFish && !Fish.AllFish[f].IsDead)
+                {
+                    hasActiveGolden = true;
+                    break;
+                }
+            }
+
+            if (!currentCfg.isLake && currentCfg.enableGoldenFish && !hasActiveGolden && Time.timeSinceLevelLoad > 8.0f && Random.value < goldenChance)
             {
                 Fish goldenPrefab = null;
                 if (goldenFishPrefab != null)
@@ -906,21 +945,20 @@ public class GridController : MonoBehaviour
                     Debug.LogWarning($"Spawn Mismatch! Intended: {spawnLevel}, Prefab: {prefabToSpawn.name} has Level {prefabToSpawn.Level}");
                 }
 
-                // Level 1 fish (both Ocean and River) spawn in small schools
+                // Level 1 fish (both Ocean and River) ALWAYS spawn in natural schools of 3 to 5 fish
                 if (spawnLevel == 1)
                 {
-                    // Every new regular level 1 spawn arrives as a naturally formed school
-                    // Varying from 3 to 5 fish with diverse organic formations (Cluster, Wedge, Stream, Diamond, Crescent)
-                    int schoolSize = Random.Range(3, 6);
-                    
+                    // USER REQUEST: Make sure school fish ONLY spawns in schools of 3 to 5
+                    int schoolSize = Random.Range(3, 6); // 3, 4, or 5 fish
+
                     GameObject schoolObj = new GameObject("FishSchool");
                     schoolObj.transform.position = spawnPos;
                     FishSchool school = schoolObj.AddComponent<FishSchool>();
-                    bool movingRight = (spawnX < _camPos.x); 
+                    bool movingRight = (spawnX < _camPos.x);
                     school.Initialize(movingRight);
-                    
+
                     Vector2[] formationOffsets = FishSchool.GenerateSchoolFormation(schoolSize, movingRight);
-                    
+
                     for (int s = 0; s < schoolSize; s++)
                     {
                         Vector2 schoolOffset = (formationOffsets != null && s < formationOffsets.Length)
@@ -929,7 +967,7 @@ public class GridController : MonoBehaviour
 
                         Vector2 finalPos = spawnPos + schoolOffset;
                         finalPos.y = Mathf.Clamp(finalPos.y, minY, maxY);
-                        
+
                         Fish fish = enemyLibrary.SpawnSpecific(prefabToSpawn, finalPos, 0f, 0f, -1);
                         if (fish != null)
                         {
@@ -989,118 +1027,119 @@ public class GridController : MonoBehaviour
 
         float[] weights = new float[7];
 
-        // 1. Stage Baseline Distribution - Eatable fish (<= playerLevel) maintained at high majority (75-90%+)
-        // The player's CURRENT LEVEL always receives the highest eatable share among prey.
+        // 1. Stage Baseline Distribution - Balanced, lively ecosystem
+        // The player's CURRENT LEVEL receives a strong eatable share, while higher levels
+        // maintain an active presence across the ocean so waters feel vibrant, realistic, and alive.
         if (effectiveMax == 2)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.78f; // Eatable Lv1 minnows (78%)
-                weights[2] = 0.22f; // Danger Lv2 (22%)
+                weights[1] = 0.58f; // Eatable Lv1 minnows (58%)
+                weights[2] = 0.42f; // Danger Lv2 (42%)
             }
             else // Lv 2+
             {
-                weights[1] = 0.25f; // Eatable Lv1
-                weights[2] = 0.75f; // Eatable Lv2 (User's current level!)
+                weights[1] = 0.28f; // Eatable Lv1
+                weights[2] = 0.72f; // Eatable Lv2
             }
         }
         else if (effectiveMax == 3)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.76f; // Eatable Lv1 minnows (76%)
-                weights[2] = 0.16f; // Danger Lv2 (16%)
-                weights[3] = 0.08f; // Danger Lv3 (8%)
+                weights[1] = 0.48f; // Eatable Lv1 (48%)
+                weights[2] = 0.32f; // Danger Lv2 (32%)
+                weights[3] = 0.20f; // Danger Lv3 (20%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.25f; // Eatable Lv1 (25%)
-                weights[2] = 0.55f; // Eatable Lv2 (User's current level! 55% - Total eatable: 80%)
-                weights[3] = 0.20f; // Danger Lv3 (20%)
+                weights[1] = 0.22f; // Eatable Lv1 (22%)
+                weights[2] = 0.52f; // Eatable Lv2 (52%)
+                weights[3] = 0.26f; // Danger Lv3 (26%)
             }
             else // Lv 3+
             {
-                weights[1] = 0.15f; // Eatable Lv1
-                weights[2] = 0.25f; // Eatable Lv2
-                weights[3] = 0.60f; // Eatable Lv3 (User's current level! All 100% eatable)
+                weights[1] = 0.16f; // Eatable Lv1
+                weights[2] = 0.30f; // Eatable Lv2
+                weights[3] = 0.54f; // Eatable Lv3
             }
         }
         else if (effectiveMax == 4)
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.76f; // Eatable Lv1 minnows (76%)
-                weights[2] = 0.14f; // Danger Lv2 (14%)
-                weights[3] = 0.06f; // Danger Lv3 (6%)
-                weights[4] = 0.04f; // Danger Lv4 (4%)
+                weights[1] = 0.44f; // Eatable Lv1 (44%)
+                weights[2] = 0.28f; // Danger Lv2 (28%)
+                weights[3] = 0.18f; // Danger Lv3 (18%)
+                weights[4] = 0.10f; // Danger Lv4 (10%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.25f; // Eatable Lv1
-                weights[2] = 0.55f; // Eatable Lv2 (User's current level! - Total eatable: 80%)
-                weights[3] = 0.13f; // Danger Lv3 (13%)
-                weights[4] = 0.07f; // Danger Lv4 (7%)
+                weights[1] = 0.20f; // Eatable Lv1
+                weights[2] = 0.46f; // Eatable Lv2
+                weights[3] = 0.22f; // Danger Lv3
+                weights[4] = 0.12f; // Danger Lv4
             }
             else if (playerLevel == 3)
             {
-                weights[1] = 0.15f; // Eatable Lv1
-                weights[2] = 0.25f; // Eatable Lv2
-                weights[3] = 0.45f; // Eatable Lv3 (User's current level! - Total eatable: 85%)
-                weights[4] = 0.15f; // Danger Lv4 (15%)
+                weights[1] = 0.14f; // Eatable Lv1
+                weights[2] = 0.22f; // Eatable Lv2
+                weights[3] = 0.44f; // Eatable Lv3
+                weights[4] = 0.20f; // Danger Lv4
             }
             else // Lv 4+
             {
                 weights[1] = 0.10f; // Eatable Lv1
                 weights[2] = 0.18f; // Eatable Lv2
-                weights[3] = 0.27f; // Eatable Lv3
-                weights[4] = 0.45f; // Eatable Lv4 (User's current level! All 100% eatable)
+                weights[3] = 0.28f; // Eatable Lv3
+                weights[4] = 0.44f; // Eatable Lv4
             }
         }
         else // effectiveMax >= 5
         {
             if (playerLevel == 1)
             {
-                weights[1] = 0.75f; // Eatable Lv1 minnows (75%)
-                weights[2] = 0.13f; // Danger Lv2 (13%)
-                weights[3] = 0.06f; // Danger Lv3 (6%)
-                weights[4] = 0.04f; // Danger Lv4 (4%)
-                weights[5] = 0.02f; // Danger Lv5 (2%)
+                weights[1] = 0.40f; // Eatable Lv1 (40%)
+                weights[2] = 0.26f; // Danger Lv2 (26%)
+                weights[3] = 0.18f; // Danger Lv3 (18%)
+                weights[4] = 0.10f; // Danger Lv4 (10%)
+                weights[5] = 0.06f; // Danger Lv5 (6%)
             }
             else if (playerLevel == 2)
             {
-                weights[1] = 0.25f; // Eatable Lv1
-                weights[2] = 0.55f; // Eatable Lv2 (User's current level! - Total eatable: 80%)
-                weights[3] = 0.10f; // Danger Lv3 (10%)
-                weights[4] = 0.06f; // Danger Lv4 (6%)
-                weights[5] = 0.04f; // Danger Lv5 (4%)
+                weights[1] = 0.18f; // Eatable Lv1
+                weights[2] = 0.42f; // Eatable Lv2
+                weights[3] = 0.20f; // Danger Lv3
+                weights[4] = 0.12f; // Danger Lv4
+                weights[5] = 0.08f; // Danger Lv5
             }
             else if (playerLevel == 3)
             {
-                weights[1] = 0.15f; // Eatable Lv1
-                weights[2] = 0.25f; // Eatable Lv2
-                weights[3] = 0.45f; // Eatable Lv3 (User's current level! - Total eatable: 85%)
-                weights[4] = 0.09f; // Danger Lv4 (9%)
-                weights[5] = 0.06f; // Danger Lv5 (6%)
+                weights[1] = 0.12f; // Eatable Lv1
+                weights[2] = 0.20f; // Eatable Lv2
+                weights[3] = 0.38f; // Eatable Lv3
+                weights[4] = 0.18f; // Danger Lv4
+                weights[5] = 0.12f; // Danger Lv5
             }
             else if (playerLevel == 4)
             {
-                weights[1] = 0.10f; // Eatable Lv1
-                weights[2] = 0.15f; // Eatable Lv2
-                weights[3] = 0.25f; // Eatable Lv3
-                weights[4] = 0.40f; // Eatable Lv4 (User's current level! - Total eatable: 90%)
-                weights[5] = 0.10f; // Danger Lv5 (10%)
+                weights[1] = 0.08f; // Eatable Lv1
+                weights[2] = 0.14f; // Eatable Lv2
+                weights[3] = 0.22f; // Eatable Lv3
+                weights[4] = 0.36f; // Eatable Lv4
+                weights[5] = 0.20f; // Danger Lv5
             }
             else // Lv 5+
             {
-                weights[1] = 0.08f;
-                weights[2] = 0.12f;
-                weights[3] = 0.20f;
-                weights[4] = 0.25f;
-                weights[5] = 0.35f; // User's current level! All 100% eatable
+                weights[1] = 0.06f;
+                weights[2] = 0.10f;
+                weights[3] = 0.18f;
+                weights[4] = 0.28f;
+                weights[5] = 0.38f;
             }
         }
 
-        // 2. Dynamic Eatable Majority & Danger Suppression
+        // 2. Dynamic Eatable Majority & Danger Cap
         if (activeCounts != null)
         {
             int eatableCount = 0;
@@ -1111,9 +1150,11 @@ public class GridController : MonoBehaviour
                 else dangerCount += activeCounts[lvl];
             }
 
-            // CRITICAL REQUIREMENT: Eatable fish must always heavily outnumber danger fish.
-            // If danger fish reach 3 or take up >= 18% of total fish in water, strictly shut down danger spawns.
-            if (dangerCount >= 3 || (totalActive > 3 && dangerCount >= totalActive * 0.18f) || dangerCount >= eatableCount)
+            // Balanced Danger Control:
+            // Allow up to ~35% of total active fish (or up to 10 max) to be danger predators.
+            // Only suppress danger if danger fish reach the healthy cap or threaten to outnumber eatables.
+            int maxAllowedDanger = Mathf.Max(6, Mathf.RoundToInt(totalActive * 0.35f));
+            if (dangerCount >= maxAllowedDanger || (totalActive > 6 && dangerCount >= eatableCount))
             {
                 for (int lvl = playerLevel + 1; lvl <= effectiveMax; lvl++)
                 {
@@ -1122,12 +1163,12 @@ public class GridController : MonoBehaviour
             }
             else
             {
-                // Moderate diversity boost (+30%) if an eatable level is missing from water
-                for (int lvl = 1; lvl <= playerLevel; lvl++)
+                // Diversity Boost: If ANY available level is completely missing from the ocean, give it a +50% boost!
+                for (int lvl = 1; lvl <= effectiveMax; lvl++)
                 {
                     if (activeCounts[lvl] == 0)
                     {
-                        weights[lvl] *= 1.30f;
+                        weights[lvl] *= 1.50f;
                     }
                 }
             }
@@ -1166,20 +1207,23 @@ public class GridController : MonoBehaviour
         UpdateCameraCache();
         if (_cam == null) return false;
         
-        Bounds viewBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 5f, _camHeight + 5f, 100f));
-        Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 30f, _camHeight + 30f, 100f));
+        Bounds viewBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 4f, _camHeight + 4f, 100f));
+        Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 10f, _camHeight + 10f, 100f));
 
-        // 1. Universal Cleanup: any fish that wandered far away outside distant bounds
-        for (int i = 0; i < Fish.AllFish.Count; i++)
+        // 1. Universal Cleanup: any fish that wandered outside distant bounds (5 units off-screen)
+        // Despawn ALL of them immediately to ensure old fish clean up promptly
+        bool culledAny = false;
+        for (int i = Fish.AllFish.Count - 1; i >= 0; i--)
         {
             Fish fish = Fish.AllFish[i];
-            if (fish == null) continue;
-            if (!distantBounds.Contains(fish.transform.position))
+            if (fish == null || fish.IsDead) continue;
+            if (!distantBounds.Contains(fish.transform.position) && Time.time - fish.SpawnTime >= 1.5f)
             {
                 fish.DespawnSelf();
-                return true; 
+                culledAny = true;
             }
         }
+        if (culledAny && !forceRecycle) return true;
 
         // 2. Proactive Danger Fish Culling:
         // If active danger fish exceed 3 or >= 18% of the active fish, cull off-screen danger fish to guarantee space for eatable prey
@@ -1634,9 +1678,8 @@ public class GridController : MonoBehaviour
         // New Spawn X: +/- 45.5f (55 - 9.5)
         float spawnX = (direction > 0) ? -45.5f : 45.5f; 
         
-        // Y: Random height within the fixed game world (-14 to 14).
-        // This makes the shark feel like it's patrolling the ocean, not chasing the camera.
-        float spawnY = Random.Range(-14f, 14f);
+        // Y: Random height within the fixed game world (-14 to 14), validated to ensure a clear lane away from solid rocks.
+        float spawnY = SharkHazard.FindNearestClearLane(Random.Range(-14f, 14f));
 
         Vector3 spawnPos = new Vector3(spawnX, spawnY, 0);
 
@@ -1778,9 +1821,22 @@ public class GridController : MonoBehaviour
         cuttlefishTemplate.tag = "Enemy";
         cuttlefishTemplate.SetActive(false);
         cuttlefishTemplate.transform.SetParent(transform);
-        cuttlefishTemplate.transform.localScale = new Vector3(0.08f, 0.08f, 1f);
+        cuttlefishTemplate.transform.localScale = new Vector3(0.09f, 0.09f, 1f);
 
-        GameObject gfx = new GameObject("PlayerGraphics");
+        // Add Animator to Root with Fish.controller (for 2.5D swimming perspective animation)
+        Animator anim = cuttlefishTemplate.AddComponent<Animator>();
+        if (sharkAnimController != null)
+        {
+            anim.runtimeAnimatorController = sharkAnimController;
+        }
+#if UNITY_EDITOR
+        else
+        {
+            anim.runtimeAnimatorController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/Animations/Fish/Fish.controller");
+        }
+#endif
+
+        GameObject gfx = new GameObject("Gfx");
         gfx.transform.SetParent(cuttlefishTemplate.transform, false);
         gfx.transform.localPosition = Vector3.zero;
 
@@ -1829,13 +1885,17 @@ public class GridController : MonoBehaviour
             InitCuttlefishTemplate();
         }
 
+        Camera cam = _cam != null ? _cam : Camera.main;
+        Vector3 camPos = (cam != null) ? cam.transform.position : Vector3.zero;
+        float halfW = (cam != null && cam.orthographic) ? cam.orthographicSize * cam.aspect : 10f;
+        float halfH = (cam != null && cam.orthographic) ? cam.orthographicSize : 5.5f;
+
         Vector3 spawnPos;
         Vector2 targetPos;
 
         if (nearPlayer)
         {
-            Camera cam = _cam != null ? _cam : Camera.main;
-            Vector3 playerPos = (player != null) ? player.transform.position : (cam != null ? cam.transform.position : Vector3.zero);
+            Vector3 playerPos = (player != null) ? player.transform.position : camPos;
             bool spawnOnLeft = (Random.value > 0.5f);
             float spawnX = spawnOnLeft ? (playerPos.x - 6.5f) : (playerPos.x + 6.5f);
             float spawnY = Mathf.Clamp(playerPos.y + Random.Range(-0.8f, 0.8f), cachedWorldFloorY + 1.2f, cachedWorldSurfaceY - 1.5f);
@@ -1844,17 +1904,20 @@ public class GridController : MonoBehaviour
         }
         else
         {
+            // Spawn just outside current camera view so the player actually encounters it swimming across
             bool spawnOnLeft = (Random.value > 0.5f);
-            float spawnX = spawnOnLeft ? (cachedWorldBgLeft - 2.5f) : (cachedWorldBgRight + 2.5f);
-            float spawnY = Random.Range(cachedWorldFloorY + 1.2f, cachedWorldSurfaceY - 1.5f);
+            float spawnX = spawnOnLeft ? (camPos.x - halfW - 2.5f) : (camPos.x + halfW + 2.5f);
+            float minY = Mathf.Max(cachedWorldFloorY + 1.2f, camPos.y - halfH + 1.0f);
+            float maxY = Mathf.Min(cachedWorldSurfaceY - 1.5f, camPos.y + halfH - 1.0f);
+            float spawnY = (minY < maxY) ? Random.Range(minY, maxY) : camPos.y;
             spawnPos = new Vector3(spawnX, spawnY, 0f);
-            targetPos = new Vector2(spawnOnLeft ? cachedWorldBgRight : cachedWorldBgLeft, spawnY);
+            targetPos = new Vector2(spawnOnLeft ? (camPos.x + halfW + 6f) : (camPos.x - halfW - 6f), spawnY);
         }
 
         GameObject cuttleObj = Instantiate(cuttlefishTemplate, spawnPos, Quaternion.identity);
         cuttleObj.transform.SetParent(null);
         cuttleObj.transform.position = new Vector3(spawnPos.x, spawnPos.y, 0f);
-        cuttleObj.transform.localScale = new Vector3(0.08f, 0.08f, 1f);
+        cuttleObj.transform.localScale = new Vector3(0.09f, 0.09f, 1f);
 
         if (cuttleObj != null)
         {
@@ -1903,12 +1966,23 @@ public class GridController : MonoBehaviour
         Vector2 dir = (targetPos - spawnPos).normalized;
         fish.transform.rotation = Quaternion.identity;
 
+        // Immediately orient fish sprite to face its heading on spawn:
+        if (dir.x < 0f) fish.TurnLeft();
+        else if (dir.x > 0f) fish.TurnRight();
+
+        HungrySharkFishAI hsAI = fish.GetComponent<HungrySharkFishAI>();
+        if (hsAI != null)
+        {
+            hsAI.SetInitialDirection(dir);
+        }
+
         FishAI ai = fish.GetComponent<FishAI>();
         if (ai != null)
         {
             ai.SetInitialDirection(dir);
         }
-        else
+
+        if (hsAI == null && ai == null)
         {
             fish.FlipTowardsDestination(targetPos, false);
         }

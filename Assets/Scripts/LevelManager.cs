@@ -23,11 +23,22 @@ public static class LevelManager
     public const int OCEAN_LEVELS = 8;
     public const int LAKE_LEVELS = 5;
 
+    public static bool IsLakeUnlocked => HighestUnlockedLevel > OCEAN_LEVELS;
+
     private static int _currentLevel = 1;
     public static int CurrentLevel
     {
         get => Mathf.Clamp(_currentLevel, 1, TOTAL_LEVELS);
-        set => _currentLevel = Mathf.Clamp(value, 1, TOTAL_LEVELS);
+        set
+        {
+            int target = Mathf.Clamp(value, 1, TOTAL_LEVELS);
+            // Gating: Lost Lake (Levels 9-13) cannot be played until all 8 levels of Coral Coast are completed
+            if (IsLakeLevel(target) && !IsLakeUnlocked)
+            {
+                target = Mathf.Clamp(HighestUnlockedLevel, 1, OCEAN_LEVELS);
+            }
+            _currentLevel = target;
+        }
     }
 
     public static int HighestUnlockedLevel
@@ -42,6 +53,10 @@ public static class LevelManager
 
     public static bool IsLevelUnlocked(int level)
     {
+        if (IsLakeLevel(level))
+        {
+            return IsLakeUnlocked && level <= HighestUnlockedLevel;
+        }
         return level <= HighestUnlockedLevel;
     }
 

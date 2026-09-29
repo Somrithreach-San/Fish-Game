@@ -56,7 +56,10 @@ public class FishSchool : MonoBehaviour
         Wedge,
         StaggeredStream,
         Diamond,
-        Crescent
+        Crescent,
+        Echelon,
+        DoubleColumn,
+        ParabolicPod
     }
 
     /// <summary>
@@ -69,32 +72,33 @@ public class FishSchool : MonoBehaviour
         if (count <= 0) return offsets;
 
         float trailDir = movingRight ? -1f : 1f;
+        float spacingScale = Random.Range(0.88f, 1.20f);
 
-        // Choose a random formation archetype for each school
-        SchoolFormationType type = (SchoolFormationType)Random.Range(0, 5);
+        // Choose from 8 distinct formation archetypes for rich visual diversity
+        SchoolFormationType type = (SchoolFormationType)Random.Range(0, 8);
 
         switch (type)
         {
             case SchoolFormationType.Cluster:
-                // Organic tight cluster with natural micro-spacing
+                // Organic tight pod with natural micro-spacing
                 offsets[0] = new Vector2(0f, Random.Range(-0.15f, 0.15f));
                 for (int i = 1; i < count; i++)
                 {
                     Vector2 candidate = Vector2.zero;
                     bool valid = false;
-                    for (int attempt = 0; attempt < 25; attempt++)
+                    for (int attempt = 0; attempt < 30; attempt++)
                     {
                         float angle = Random.Range(0f, Mathf.PI * 2f);
-                        float dist = Random.Range(0.65f, 1.25f);
+                        float dist = Random.Range(0.70f, 1.35f) * spacingScale;
                         candidate = new Vector2(
-                            trailDir * (Mathf.Abs(Mathf.Cos(angle)) * dist * 1.05f + 0.18f * i),
-                            Mathf.Sin(angle) * dist * 0.75f
+                            trailDir * (Mathf.Abs(Mathf.Cos(angle)) * dist * 1.10f + 0.16f * i),
+                            Mathf.Sin(angle) * dist * 0.70f
                         );
 
                         valid = true;
                         for (int j = 0; j < i; j++)
                         {
-                            if (Vector2.Distance(candidate, offsets[j]) < 0.60f)
+                            if (Vector2.Distance(candidate, offsets[j]) < 0.65f)
                             {
                                 valid = false;
                                 break;
@@ -107,56 +111,104 @@ public class FishSchool : MonoBehaviour
                 break;
 
             case SchoolFormationType.Wedge:
-                // Tight, asymmetrical natural V-wedge
+                // Asymmetrical natural V-wedge with organic wing spread
                 offsets[0] = new Vector2(0f, Random.Range(-0.10f, 0.10f));
-                float upperSpread = Random.Range(0.48f, 0.68f);
-                float lowerSpread = Random.Range(0.48f, 0.68f);
+                float upperSpread = Random.Range(0.50f, 0.75f) * spacingScale;
+                float lowerSpread = Random.Range(0.50f, 0.75f) * spacingScale;
                 for (int i = 1; i < count; i++)
                 {
                     bool isUpper = (i % 2 == 1);
                     int tier = (i + 1) / 2;
-                    float forwardOffset = trailDir * (tier * Random.Range(0.65f, 0.88f) + Random.Range(-0.08f, 0.08f));
+                    float forwardOffset = trailDir * (tier * Random.Range(0.70f, 0.95f) * spacingScale + Random.Range(-0.10f, 0.10f));
                     float sideOffset = isUpper
-                        ? (tier * upperSpread + Random.Range(-0.10f, 0.10f))
-                        : (-tier * lowerSpread + Random.Range(-0.10f, 0.10f));
+                        ? (tier * upperSpread + Random.Range(-0.12f, 0.12f))
+                        : (-tier * lowerSpread + Random.Range(-0.12f, 0.12f));
                     offsets[i] = new Vector2(forwardOffset, sideOffset);
                 }
                 break;
 
             case SchoolFormationType.StaggeredStream:
-                // Tight drafting stream
+                // Drafting stream ribbon with sinusoidal vertical meander
                 offsets[0] = new Vector2(0f, Random.Range(-0.10f, 0.10f));
+                float phase = Random.Range(0f, Mathf.PI * 2f);
                 for (int i = 1; i < count; i++)
                 {
-                    float xDist = trailDir * (i * Random.Range(0.70f, 0.95f));
+                    float xDist = trailDir * (i * Random.Range(0.75f, 1.05f) * spacingScale);
                     float ySign = (i % 2 == 1) ? 1f : -1f;
-                    float yDist = ySign * Random.Range(0.22f, 0.45f) + Mathf.Sin(i * 1.3f) * 0.12f;
+                    float yDist = ySign * Random.Range(0.24f, 0.48f) + Mathf.Sin(i * 1.4f + phase) * 0.15f;
                     offsets[i] = new Vector2(xDist, yDist);
                 }
                 break;
 
             case SchoolFormationType.Diamond:
+                // Diamond flank shield
                 offsets[0] = new Vector2(0f, Random.Range(-0.08f, 0.08f)); // Leader
-                if (count > 1) offsets[1] = new Vector2(trailDir * Random.Range(0.70f, 0.90f), Random.Range(0.45f, 0.65f)); // Top flank
-                if (count > 2) offsets[2] = new Vector2(trailDir * Random.Range(0.70f, 0.90f), -Random.Range(0.45f, 0.65f)); // Bottom flank
-                if (count > 3) offsets[3] = new Vector2(trailDir * Random.Range(1.40f, 1.70f), Random.Range(-0.12f, 0.12f)); // Center tail
-                if (count > 4) offsets[4] = new Vector2(trailDir * Random.Range(2.05f, 2.35f), Random.Range(-0.18f, 0.18f)); // Rear guard
+                float flankSpread = Random.Range(0.50f, 0.72f) * spacingScale;
+                if (count > 1) offsets[1] = new Vector2(trailDir * Random.Range(0.75f, 0.98f) * spacingScale, flankSpread); // Top flank
+                if (count > 2) offsets[2] = new Vector2(trailDir * Random.Range(0.75f, 0.98f) * spacingScale, -flankSpread); // Bottom flank
+                if (count > 3) offsets[3] = new Vector2(trailDir * Random.Range(1.45f, 1.80f) * spacingScale, Random.Range(-0.14f, 0.14f)); // Center tail
+                if (count > 4) offsets[4] = new Vector2(trailDir * Random.Range(2.10f, 2.50f) * spacingScale, Random.Range(-0.20f, 0.20f)); // Rear guard
                 break;
 
             case SchoolFormationType.Crescent:
-            default:
-                // Tight curved sweeping arc
-                float arcRadius = Random.Range(1.4f, 2.0f);
-                float arcAngleSpread = Random.Range(45f, 65f) * Mathf.Deg2Rad;
+                // Curved sweeping arc with variable radius and aperture
+                float arcRadius = Random.Range(1.5f, 2.2f) * spacingScale;
+                float arcAngleSpread = Random.Range(48f, 72f) * Mathf.Deg2Rad;
                 for (int i = 0; i < count; i++)
                 {
                     float t = (count > 1) ? ((float)i / (count - 1) - 0.5f) : 0f;
                     float angle = t * arcAngleSpread;
-                    float x = trailDir * (arcRadius * (1f - Mathf.Cos(angle)) + Random.Range(0f, 0.18f));
+                    float x = trailDir * (arcRadius * (1f - Mathf.Cos(angle)) + Random.Range(0f, 0.15f));
                     float y = Mathf.Sin(angle) * arcRadius * 0.85f + Random.Range(-0.10f, 0.10f);
                     offsets[i] = new Vector2(x, y);
                 }
                 break;
+
+            case SchoolFormationType.Echelon:
+                // Diagonal stepped drafting echelon (stepped upward or downward)
+                bool echelonUp = Random.value < 0.5f;
+                float stepX = Random.Range(0.65f, 0.90f) * spacingScale;
+                float stepY = (echelonUp ? 1f : -1f) * Random.Range(0.38f, 0.55f) * spacingScale;
+                for (int i = 0; i < count; i++)
+                {
+                    offsets[i] = new Vector2(trailDir * i * stepX, i * stepY + Random.Range(-0.08f, 0.08f));
+                }
+                break;
+
+            case SchoolFormationType.DoubleColumn:
+                // Dual-lane synchronized pair stream
+                float colGap = Random.Range(0.48f, 0.70f) * spacingScale;
+                float longitudinalStep = Random.Range(0.80f, 1.10f) * spacingScale;
+                offsets[0] = new Vector2(0f, colGap * 0.5f);
+                for (int i = 1; i < count; i++)
+                {
+                    bool isTopCol = (i % 2 == 0);
+                    int row = (i + 1) / 2;
+                    float x = trailDir * (row * longitudinalStep + (isTopCol ? 0f : longitudinalStep * 0.45f));
+                    float y = (isTopCol ? 1f : -1f) * colGap * 0.5f + Random.Range(-0.08f, 0.08f);
+                    offsets[i] = new Vector2(x, y);
+                }
+                break;
+
+            case SchoolFormationType.ParabolicPod:
+            default:
+                // Parabolic pocket pod with dynamic flank depth
+                float widthFactor = Random.Range(0.55f, 0.80f) * spacingScale;
+                float depthFactor = Random.Range(0.70f, 1.05f) * spacingScale;
+                for (int i = 0; i < count; i++)
+                {
+                    float yNorm = (count > 1) ? ((float)i / (count - 1) * 2f - 1f) : 0f;
+                    float xOffset = trailDir * (yNorm * yNorm * depthFactor + Random.Range(0f, 0.18f));
+                    float yOffset = yNorm * widthFactor * 1.5f + Random.Range(-0.10f, 0.10f);
+                    offsets[i] = new Vector2(xOffset, yOffset);
+                }
+                break;
+        }
+
+        // Apply subtle organic micro-jitter to every fish so no two formations are ever identical
+        for (int i = 0; i < count; i++)
+        {
+            offsets[i] += new Vector2(Random.Range(-0.12f, 0.12f), Random.Range(-0.10f, 0.10f));
         }
 
         return offsets;

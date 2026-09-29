@@ -136,7 +136,7 @@ public class CheatTestingMenu : MonoBehaviour
         rootRt.anchorMin = new Vector2(0.5f, 0.5f);
         rootRt.anchorMax = new Vector2(0.5f, 0.5f);
         rootRt.pivot = new Vector2(0.5f, 0.5f);
-        rootRt.sizeDelta = new Vector2(920f, 640f);
+        rootRt.sizeDelta = new Vector2(920f, 850f);
 
         // Background Panel
         Image bg = modalRoot.AddComponent<Image>();
@@ -212,6 +212,36 @@ public class CheatTestingMenu : MonoBehaviour
         CreateButton(contentObj.transform, new Vector2(305f, -320f), new Vector2(190f, 42f), "💰 +5,000 Score", new Color(0.85f, 0.75f, 0.20f), OnAddScoreClicked);
         CreateButton(contentObj.transform, new Vector2(510f, -320f), new Vector2(190f, 42f), "🧹 Clear All Fish", new Color(0.65f, 0.20f, 0.20f), OnClearFishClicked);
         CreateButton(contentObj.transform, new Vector2(715f, -320f), new Vector2(190f, 42f), "🔄 Reset Shark Hits", new Color(0.30f, 0.50f, 0.50f), OnResetSharkStateClicked);
+
+        // --- SECTION 4: LEVEL PROGRESSION & GATING CHEATS ---
+        CreateCategoryHeader(contentObj.transform, new Vector2(0f, -370f), "🗺️ LEVEL PROGRESSION & UNLOCK CHEATS");
+        CreateButton(contentObj.transform, new Vector2(100f, -410f), new Vector2(190f, 42f), "🔒 Reset to Lv1 (Lock Lake)", new Color(0.70f, 0.25f, 0.25f), () =>
+        {
+            LevelManager.HighestUnlockedLevel = 1;
+            LevelManager.CurrentLevel = 1;
+            ShowStatus("Progress Reset to Level 1. Lost Lake is now LOCKED.");
+        });
+        CreateButton(contentObj.transform, new Vector2(305f, -410f), new Vector2(190f, 42f), "🌊 Set to Level 8 (Ocean End)", new Color(0.20f, 0.50f, 0.80f), () =>
+        {
+            LevelManager.HighestUnlockedLevel = 8;
+            LevelManager.CurrentLevel = 8;
+            ShowStatus("Set to Level 8 (Coral Coast Finale). Complete it to unlock Lost Lake!");
+        });
+        CreateButton(contentObj.transform, new Vector2(510f, -410f), new Vector2(190f, 42f), "🏆 Win Lv8 (Unlock Lake)", new Color(0.25f, 0.70f, 0.40f), () =>
+        {
+            LevelManager.CurrentLevel = 8;
+            LevelManager.CompleteCurrentLevel();
+            ShowStatus("Level 8 Marked Complete! Lost Lake (Level 9+) is now UNLOCKED.");
+        });
+        CreateButton(contentObj.transform, new Vector2(715f, -410f), new Vector2(190f, 42f), "🔓 Unlock All Levels", new Color(0.85f, 0.60f, 0.20f), () =>
+        {
+            LevelManager.HighestUnlockedLevel = 13;
+            ShowStatus("All Levels 1-13 Unlocked.");
+        });
+
+        // --- SECTION 5: DEEP OCEAN AMBIENCE (WHALE CALL & BACKGROUND VISUAL) ---
+        CreateCategoryHeader(contentObj.transform, new Vector2(0f, -460f), "🐋 DEEP OCEAN AMBIENCE & BACKGROUND WHALE (LEVELS 5 TO 8)");
+        CreateButton(contentObj.transform, new Vector2(400f, -508f), new Vector2(600f, 44f), "🐋 Trigger Ambient Whale (Audio & Visual)", new Color(0.18f, 0.50f, 0.72f), OnTriggerAmbientWhaleClicked);
 
         // Status Feedback Bar at Bottom
         GameObject statusObj = new GameObject("StatusBar");
@@ -448,5 +478,29 @@ public class CheatTestingMenu : MonoBehaviour
             return GameManager.instance.playerGameObject.GetComponent<PlayerController>();
         }
         return FindFirstObjectByType<PlayerController>();
+    }
+
+    private void OnTriggerAmbientWhaleClicked()
+    {
+        BackgroundWhaleAmbient whaleManager = BackgroundWhaleAmbient.Instance != null ? BackgroundWhaleAmbient.Instance : FindFirstObjectByType<BackgroundWhaleAmbient>();
+        if (whaleManager == null)
+        {
+            GameObject go = new GameObject("BackgroundWhaleAmbient");
+            whaleManager = go.AddComponent<BackgroundWhaleAmbient>();
+        }
+
+        if (DeepWhaleAmbience.Instance == null && FindFirstObjectByType<DeepWhaleAmbience>() == null)
+        {
+            GameObject goSound = new GameObject("DeepWhaleAmbience");
+            goSound.AddComponent<DeepWhaleAmbience>();
+        }
+
+        if (whaleManager != null)
+        {
+            bool swimRight = Random.value > 0.5f;
+            whaleManager.TriggerWhalePass(swimRight, playSoundOnFullEntry: true);
+            string dir = swimRight ? "Left ➔ Right" : "Right ➔ Left";
+            ShowStatus($"🐋 Spawned Ambient Whale ({dir}) — Sound echoes when 100% entered!");
+        }
     }
 }

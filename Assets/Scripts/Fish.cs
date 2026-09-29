@@ -130,6 +130,7 @@ public class Fish : MonoBehaviour
 
     // OPTIMIZATION: Static list to track all active fish without FindObjectsOfType
     public static List<Fish> AllFish = new List<Fish>();
+    public static bool useHungrySharkAI = true;
     private GameManager cachedGameManager;
     private Transform cachedPlayerTransform;
 
@@ -300,22 +301,47 @@ public class Fish : MonoBehaviour
         }
     }
 
-    public void OnEatenByPlayer()
+    public void OnEatenByPlayer(PlayerController player = null)
     {
         isEaten = true;
+        Transform eaterTransform = player != null ? player.transform : (GameManager.instance != null && GameManager.instance.playerGameObject != null ? GameManager.instance.playerGameObject.transform : null);
+        SpawnEatenBlood(eaterTransform);
         if (GroupSchool != null)
         {
             GroupSchool.OnFishEatenByPlayer(this, transform.position);
         }
     }
 
-    public void OnEatenByPredator()
+    public void OnEatenByPredator(Fish predator = null, SharkHazard shark = null)
     {
         isEaten = true;
+        Transform eaterTransform = predator != null ? predator.transform : (shark != null ? shark.transform : null);
+        SpawnEatenBlood(eaterTransform);
         if (GroupSchool != null)
         {
             GroupSchool.OnFishEatenByPredator(this);
         }
+    }
+
+    private void SpawnEatenBlood(Transform eater = null)
+    {
+        float bloodScale = Mathf.Clamp(0.55f + (level - 1) * 0.25f, 0.5f, 2.0f);
+        Rigidbody2D rb = (eater != null) ? eater.GetComponent<Rigidbody2D>() : GetComponent<Rigidbody2D>();
+        Vector2 vel = (rb != null && rb.linearVelocity.sqrMagnitude > 0.05f) 
+            ? rb.linearVelocity 
+            : (isFacingRight ? Vector2.right * 2f : Vector2.left * 2f);
+        FishBloodCloud.Spawn(transform.position, bloodScale, vel, eater);
+    }
+
+    public Vector3 GetMouthPosition()
+    {
+        float facing = isFacingRight ? 1f : -1f;
+        float forwardOffset = 0.45f * Mathf.Abs(transform.localScale.x);
+        if (cachedGfxSr != null && cachedGfxSr.bounds.size.x > 0.1f)
+        {
+            forwardOffset = cachedGfxSr.bounds.extents.x * 0.85f;
+        }
+        return transform.position + new Vector3(facing * forwardOffset, 0f, 0f);
     }
 
     public void Die()
@@ -380,6 +406,12 @@ public class Fish : MonoBehaviour
         ResetSpikeState();
         ResetSickState();
         ResetBiteState();
+        if (goldenParticles != null)
+        {
+            var em = goldenParticles.emission;
+            em.enabled = false;
+            goldenParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
     }
 
     private void Start()
@@ -416,9 +448,24 @@ public class Fish : MonoBehaviour
         {
             SetGoldenStatus(true);
         }
-        var ai = GetComponent<FishAI>();
-        if (ai == null) ai = gameObject.AddComponent<FishAI>();
-        ai.enabled = true;
+        if (useHungrySharkAI)
+        {
+            var hsAI = GetComponent<HungrySharkFishAI>();
+            if (hsAI == null) hsAI = gameObject.AddComponent<HungrySharkFishAI>();
+            hsAI.enabled = true;
+
+            var oldAI = GetComponent<FishAI>();
+            if (oldAI != null) oldAI.enabled = false;
+        }
+        else
+        {
+            var ai = GetComponent<FishAI>();
+            if (ai == null) ai = gameObject.AddComponent<FishAI>();
+            ai.enabled = true;
+
+            var oldHsAI = GetComponent<HungrySharkFishAI>();
+            if (oldHsAI != null) oldHsAI.enabled = false;
+        }
         
         // Disable legacy AI scripts to prevent them from constantly overriding FishAI's movement (e.g. StateController setting velocity to wander)
         var movement = GetComponent<FishMovement>();
@@ -429,8 +476,8 @@ public class Fish : MonoBehaviour
         SetupRigidbody();
 
         // Setup Manual Collision Check (Bypasses Physics Matrix "Enemy vs Enemy" ignore)
-        // CRITICAL FIX: Explicitly get CapsuleCollider2D to avoid grabbing a destroyed collider
-        myCollider = GetComponent<CapsuleCollider2D>();
+        myCollider = GetComponent<Collider2D>();
+        if (myCollider == null) UpdateCollision();
         
         contactFilter = new ContactFilter2D();
         contactFilter.useTriggers = true; 
@@ -441,9 +488,16 @@ public class Fish : MonoBehaviour
 
     private ParticleSystem goldenParticles;
 
+    private static Material goldenStarMaterial;
     private void CreateGoldenParticles()
     {
-        if (goldenParticles != null) return;
+        if (goldenParticles != null)
+        {
+            var em = goldenParticles.emission;
+            em.enabled = true;
+            if (!goldenParticles.isPlaying) goldenParticles.Play();
+            return;
+        }
 
         GameObject pObj = new GameObject("GoldenParticles");
         pObj.transform.SetParent(transform);
@@ -452,60 +506,78 @@ public class Fish : MonoBehaviour
 
         goldenParticles = pObj.AddComponent<ParticleSystem>();
         var main = goldenParticles.main;
-        main.startLifetime = 1.0f;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.45f, 0.85f);
         main.startSpeed = 0f;
-        main.startSize = 0.1f; // Tiny
-        main.startColor = new Color(1f, 0.8f, 0f, 1f); // Gold
-        main.simulationSpace = ParticleSystemSimulationSpace.World; // Trail behavior
-        main.maxParticles = 50;
+        main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.09f); // Fine delicate sparkles
+        main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.98f, 0.85f, 1f),  // Bright champagne sparkle
+            new Color(1f, 0.82f, 0.15f, 1f)   // Luminous gold sparkle
+        );
+        main.simulationSpace = ParticleSystemSimulationSpace.World; // Streaming trail behind swimming fish
+        main.maxParticles = 80;
 
         var emission = goldenParticles.emission;
-        emission.rateOverTime = 8f; // Just enough, not too much
+        emission.enabled = true;
+        emission.rateOverTime = 25f; // Rich streaming sparkle trail
 
         var shape = goldenParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Circle;
-        shape.radius = 0.3f;
+        shape.radius = 0.08f;
 
         var renderer = pObj.GetComponent<ParticleSystemRenderer>();
-        // Fix: Use the bubble texture/material if available to look like bubbles, otherwise default sprite
-        if (bubbleMaterial != null)
-        {
-            renderer.material = bubbleMaterial;
-            // Ensure texture sheet animation works if using bubble texture
-            var texSheet = goldenParticles.textureSheetAnimation;
-            texSheet.enabled = true;
-            texSheet.mode = ParticleSystemAnimationMode.Grid;
-            texSheet.numTilesX = 8; // Standard 8x8 bubble grid assumption
-            texSheet.numTilesY = 8;
-            texSheet.animation = ParticleSystemAnimationType.SingleRow;
-            texSheet.rowMode = ParticleSystemAnimationRowMode.Random;
-        }
-        else
-        {
-            // Fallback to generated star texture for a "Shiny/Rare" look
-            Material mat = new Material(Shader.Find("Sprites/Default"));
-            mat.mainTexture = GetStarTexture();
-            renderer.material = mat;
-        }
         
-        renderer.sortingLayerName = "Foreground";
-        renderer.sortingOrder = 1;
+        // Dedicated Star Sparkle Material
+        if (goldenStarMaterial == null)
+        {
+            Shader starShader = Shader.Find("Sprites/Default") 
+                             ?? Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default") 
+                             ?? Shader.Find("Mobile/Particles/Additive");
+            goldenStarMaterial = new Material(starShader);
+            goldenStarMaterial.mainTexture = GetStarTexture();
+        }
+        renderer.material = goldenStarMaterial;
+        
+        // CRITICAL: Must be on ParallaxForeground with high sortingOrder so it renders visibly over water & fish
+        renderer.sortingLayerName = "ParallaxForeground";
+        renderer.sortingOrder = 150;
 
-        // Apply "Twinkle" behavior
+        // Twinkle and sparkle scaling
         var sizeOverLifetime = goldenParticles.sizeOverLifetime;
         sizeOverLifetime.enabled = true;
         AnimationCurve curve = new AnimationCurve();
-        curve.AddKey(0.0f, 0.0f);
-        curve.AddKey(0.5f, 1.0f); // Peak at middle
+        curve.AddKey(0.0f, 0.2f);
+        curve.AddKey(0.25f, 1.0f); // Peak sparkle
+        curve.AddKey(0.65f, 0.75f);
         curve.AddKey(1.0f, 0.0f);
         sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1.0f, curve);
 
+        // Color and alpha fade over lifetime (Premium Royal Gold)
+        var colorOverLifetime = goldenParticles.colorOverLifetime;
+        colorOverLifetime.enabled = true;
+        Gradient grad = new Gradient();
+        grad.SetKeys(
+            new GradientColorKey[] {
+                new GradientColorKey(new Color(1.0f, 0.98f, 0.88f), 0f),    // Sparkling Diamond White-Gold core
+                new GradientColorKey(new Color(1.0f, 0.85f, 0.22f), 0.35f), // Radiant 24K Gold
+                new GradientColorKey(new Color(1.0f, 0.65f, 0.05f), 0.80f), // Deep Rich Amber Gold
+                new GradientColorKey(new Color(0.95f, 0.45f, 0.0f), 1.0f)   // Warm Sunset Gold fade
+            },
+            new GradientAlphaKey[] {
+                new GradientAlphaKey(0f, 0f),
+                new GradientAlphaKey(1f, 0.12f),
+                new GradientAlphaKey(0.9f, 0.65f),
+                new GradientAlphaKey(0f, 1f)
+            }
+        );
+        colorOverLifetime.color = grad;
+
         var rotOverLifetime = goldenParticles.rotationOverLifetime;
         rotOverLifetime.enabled = true;
-        rotOverLifetime.z = new ParticleSystem.MinMaxCurve(-45f, 45f);
+        rotOverLifetime.z = new ParticleSystem.MinMaxCurve(-140f * Mathf.Deg2Rad, 140f * Mathf.Deg2Rad);
     }
 
-    // Helper to generate a runtime star/sparkle texture
+    // Helper to generate a crisp 8-point '*' star sparkle texture
     private static Texture2D cachedStarTexture;
     private Texture2D GetStarTexture()
     {
@@ -513,29 +585,39 @@ public class Fish : MonoBehaviour
 
         int size = 64;
         cachedStarTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        cachedStarTexture.wrapMode = TextureWrapMode.Clamp;
+        cachedStarTexture.filterMode = FilterMode.Bilinear;
         
         Color[] colors = new Color[size * size];
-        Vector2 center = new Vector2(size / 2f, size / 2f);
-        float centerX = size / 2f;
-        float centerY = size / 2f;
+        float centerX = (size - 1) / 2.0f;
+        float centerY = (size - 1) / 2.0f;
 
         for (int y = 0; y < size; y++)
         {
             for (int x = 0; x < size; x++)
             {
-                // Create a 4-point star shape (Diamond + Cross)
                 float dx = Mathf.Abs(x - centerX);
                 float dy = Mathf.Abs(y - centerY);
-                
-                // Distance from center (Standard radial glow)
-                float dist = Vector2.Distance(new Vector2(x,y), center);
-                float glow = Mathf.Clamp01(1.0f - (dist / (size/2f)));
+                float dist = Mathf.Sqrt(dx * dx + dy * dy);
 
-                // Cross shape (Spikes)
-                float spike = Mathf.Max(0, 1.0f - (dx / (size/8f))) * Mathf.Max(0, 1.0f - (dy / (size/2.5f))) // Vertical
-                            + Mathf.Max(0, 1.0f - (dy / (size/8f))) * Mathf.Max(0, 1.0f - (dx / (size/2.5f))); // Horizontal
+                // 1. Core central radiant glow
+                float core = Mathf.Max(0.0f, 1.0f - (dist / (size * 0.20f)));
+                core = core * core;
 
-                float alpha = Mathf.Clamp01(glow * 0.5f + spike);
+                // 2. Cardinal rays (Vertical & Horizontal sharp spikes)
+                float rayW = size * 0.06f;
+                float rayL = size * 0.46f;
+                float cardinalV = Mathf.Max(0.0f, 1.0f - (dx / rayW)) * Mathf.Max(0.0f, 1.0f - (dy / rayL));
+                float cardinalH = Mathf.Max(0.0f, 1.0f - (dy / rayW)) * Mathf.Max(0.0f, 1.0f - (dx / rayL));
+
+                // 3. Diagonal rays for 8-point '*' asterisk sparkle
+                float d1 = Mathf.Abs(dx - dy) * 0.7071f;
+                float d2 = (dx + dy) * 0.7071f;
+                float diagW = size * 0.05f;
+                float diagL = size * 0.30f;
+                float diag1 = Mathf.Max(0.0f, 1.0f - (d1 / diagW)) * Mathf.Max(0.0f, 1.0f - (d2 / diagL));
+
+                float alpha = Mathf.Clamp01(core * 0.90f + (cardinalV + cardinalH) * 0.95f + diag1 * 0.70f);
                 colors[y * size + x] = new Color(1f, 1f, 1f, alpha);
             }
         }
@@ -617,77 +699,89 @@ public class Fish : MonoBehaviour
 
     private void UpdateCollision()
     {
+        if (gfx == null) gfx = GetComponentInChildren<SpriteRenderer>()?.transform;
         if (gfx == null) return;
         SpriteRenderer sr = gfx.GetComponent<SpriteRenderer>();
         if (sr == null || sr.sprite == null) return;
 
-        // "Game Style" / "Feeding Frenzy" Fair Collision
-        // 1. Fit shape to visual sprite body (Capsule is best for fish)
-        // 2. Adjust for transparent canvas padding on custom sprites
-        // 3. Keep danger hitboxes strictly inside the visible scales (0.78f forgiveness)
-
-        // Optimization: Use cached buffer to avoid GC allocation
-        if (collisionBuffer == null) collisionBuffer = new List<Collider2D>();
-        collisionBuffer.Clear();
-        GetComponents<Collider2D>(collisionBuffer);
-
-        CapsuleCollider2D capsule = null;
-        
-        // Identify Capsule and Mark others for destruction
-        foreach(var c in collisionBuffer)
+        // Clean up legacy colliders and maintain PolygonCollider2D for full body shape mapping
+        PolygonCollider2D poly = GetComponent<PolygonCollider2D>();
+        if (poly == null)
         {
-            if (c is CapsuleCollider2D cap)
-            {
-                capsule = cap;
-            }
-            else
-            {
-                Destroy(c);
-            }
-        }
-        collisionBuffer.Clear();
-
-        // Add capsule if missing
-        if (capsule == null)
-        {
-             capsule = gameObject.AddComponent<CapsuleCollider2D>();
+            poly = gameObject.AddComponent<PolygonCollider2D>();
         }
 
-        capsule.isTrigger = true;
+        poly.enabled = true;
+        poly.isTrigger = true;
 
-        // Calculate Bounds
-        Bounds b = sr.sprite.bounds;
-        Vector2 spriteSize = b.size;
-        Vector3 spriteCenter = b.center;
+        Collider2D[] allCols = GetComponents<Collider2D>();
+        foreach (var c in allCols)
+        {
+            if (c != poly) Destroy(c);
+        }
 
-        // Adjust for gfx scale relative to root
-        float scaleX = Mathf.Abs(gfx.localScale.x);
-        float scaleY = Mathf.Abs(gfx.localScale.y);
+        Sprite sprite = sr.sprite;
+        int shapeCount = sprite.GetPhysicsShapeCount();
 
-        // Get tight visual aspect ratio to eliminate transparent padding
-        GetTightVisualAspect(sr.sprite, out float wRatio, out float hRatio, out Vector2 offsetNorm);
+        bool isChildGfx = (gfx != null && gfx != transform);
+        float gfxScaleX = isChildGfx ? Mathf.Abs(gfx.localScale.x) : 1f;
+        float gfxScaleY = isChildGfx ? Mathf.Abs(gfx.localScale.y) : 1f;
+        Vector3 gfxLocalPos = isChildGfx ? gfx.localPosition : Vector3.zero;
 
-        Vector2 finalSize = new Vector2(spriteSize.x * scaleX * wRatio, spriteSize.y * scaleY * hRatio);
-        
-        // Calculate Center Offset in Root Local Space
-        Vector3 worldCenter = gfx.TransformPoint(spriteCenter + new Vector3(spriteSize.x * offsetNorm.x, spriteSize.y * offsetNorm.y, 0f));
-        Vector3 localCenter = transform.InverseTransformPoint(worldCenter);
+        if (shapeCount > 0)
+        {
+            var validPaths = new List<Vector2[]>();
 
-        // Apply Forgiveness - Feeding Frenzy feel:
-        // Level 1 minnows get a friendly 1.0f box so they are easy to scoop up.
-        // Higher level predator/danger fish use 0.78f so their hitboxes stay strictly inside their visual body.
-        float forgiveness = (level == 1) ? 1.0f : (isGoldenFish ? 0.95f : 0.78f);
-        
-        capsule.size = finalSize * forgiveness;
-        capsule.offset = localCenter;
-        
-        // Auto-Orientation
-        if (finalSize.x >= finalSize.y)
-            capsule.direction = CapsuleDirection2D.Horizontal;
+            for (int s = 0; s < shapeCount; s++)
+            {
+                var shapePts = new List<Vector2>();
+                sprite.GetPhysicsShape(s, shapePts);
+                if (shapePts.Count < 3) continue;
+                if (shapeCount > 1 && shapePts.Count < 10) continue;
+
+                int targetPts = Mathf.Min(shapePts.Count, 32);
+                int step = Mathf.Max(1, shapePts.Count / targetPts);
+                var path = new List<Vector2>();
+
+                for (int p = 0; p < shapePts.Count; p += step)
+                {
+                    Vector2 pt = shapePts[p];
+                    Vector2 localPt = new Vector2(pt.x * gfxScaleX + gfxLocalPos.x, pt.y * gfxScaleY + gfxLocalPos.y);
+                    path.Add(localPt);
+                }
+
+                if (path.Count >= 3)
+                {
+                    validPaths.Add(path.ToArray());
+                }
+            }
+
+            if (validPaths.Count > 0)
+            {
+                poly.pathCount = validPaths.Count;
+                for (int i = 0; i < validPaths.Count; i++)
+                {
+                    poly.SetPath(i, validPaths[i]);
+                }
+            }
+        }
         else
-            capsule.direction = CapsuleDirection2D.Vertical;
+        {
+            Bounds b = sr.sprite.bounds;
+            float hx = b.extents.x * gfxScaleX;
+            float hy = b.extents.y * gfxScaleY;
+            Vector2 c = (Vector2)gfxLocalPos + (Vector2)b.center;
+            poly.pathCount = 1;
+            poly.SetPath(0, new Vector2[]
+            {
+                new Vector2(c.x - hx, c.y - hy * 0.7f),
+                new Vector2(c.x + hx, c.y - hy * 0.4f),
+                new Vector2(c.x + hx, c.y + hy * 0.4f),
+                new Vector2(c.x - hx, c.y + hy * 0.7f)
+            });
+        }
 
-        myCollider = capsule;
+        myCollider = poly;
     }
 
     private void Update()
@@ -706,6 +800,12 @@ public class Fish : MonoBehaviour
             {
                 cachedGfxSr.color = Color.white;
             }
+        }
+
+        // Ink Disorientation Debuff timer (from cuttlefish ink cloud)
+        if (inkDisorientTimer > 0f)
+        {
+            inkDisorientTimer -= Time.deltaTime;
         }
 
         // Bobbing Animation (only fallback if no Animator is controlling Gfx)
@@ -732,8 +832,8 @@ public class Fish : MonoBehaviour
             // OPTIMIZATION: Use sqrMagnitude to avoid expensive square root calculation
             float distSqr = (transform.position - cachedPlayerTransform.position).sqrMagnitude;
             
-            // Reduced distance from 80f to 35f (35*35 = 1225)
-            if (distSqr > 1225f) 
+            // Clean up fish that wander far from player (> 20f, 20*20 = 400) once alive for at least 2.0s
+            if (distSqr > 400f && Time.time - SpawnTime >= 2.0f) 
             {
                 DespawnSelf();
                 return;
@@ -762,7 +862,7 @@ public class Fish : MonoBehaviour
         if (myCollider == null) 
         {
              // Try to recover collider if lost
-             myCollider = GetComponent<CapsuleCollider2D>();
+             myCollider = GetComponent<Collider2D>();
              if (myCollider == null) return;
         }
 
@@ -786,7 +886,7 @@ public class Fish : MonoBehaviour
                       if (this.level > otherFish.Level)
                       {
                           // This predator tried to eat the spiked pufferfish and dies on the spikes!
-                          this.OnEatenByPredator();
+                          this.OnEatenByPredator(otherFish);
                           this.Die();
                           PlayEatEffect();
                           return;
@@ -798,7 +898,7 @@ public class Fish : MonoBehaviour
                       if (otherFish.Level > this.level)
                       {
                           // Predator tried to eat me while I am spiked -> predator dies on my spikes!
-                          otherFish.OnEatenByPredator();
+                          otherFish.OnEatenByPredator(this);
                           otherFish.Die();
                           PlayEatEffect();
                           continue;
@@ -815,12 +915,14 @@ public class Fish : MonoBehaviour
                       }
 
                       bool wasSick = otherFish.IsSickFish;
-                      otherFish.OnEatenByPredator();
+                      otherFish.OnEatenByPredator(this);
                       otherFish.Die();
                       PlayEatEffect();
                       TriggerBite();
                       var ai = GetComponent<FishAI>();
-                      if (ai != null) ai.OnAteFish(otherFish);
+                      if (ai != null && ai.enabled) ai.OnAteFish(otherFish);
+                      var hsAI = GetComponent<HungrySharkFishAI>();
+                      if (hsAI != null && hsAI.enabled) hsAI.OnAteFish(otherFish);
 
                       if (wasSick)
                       {
@@ -860,11 +962,18 @@ public class Fish : MonoBehaviour
 #if UNITY_EDITOR
                 string[] possiblePaths = new string[]
                 {
-                    $"Assets/Graphics/fish/{baseName}_mouth open.png",
+                    $"Assets/Graphics/fish/{baseName}_Mouth_Open.png",
                     $"Assets/Graphics/fish/{baseName}_mouth_open.png",
+                    $"Assets/Graphics/fish/{baseName}_mouth open.png",
+                    $"Assets/Graphics/fish/{baseName}_Mouth Open.png",
                     $"Assets/Graphics/fish/{baseName} mouth open.png",
+                    $"Assets/Graphics/fish/{baseName} Mouth Open.png",
+                    $"Assets/Graphics/fish/{baseName} mouth_open.png",
+                    $"Assets/Graphics/fish/{baseName}_mouth.png",
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_Mouth_Open.png" : "",
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_mouth_open.png" : "",
                     cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_mouth open.png" : "",
-                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name}_mouth_open.png" : ""
+                    cachedGfxSr.sprite != null ? $"Assets/Graphics/fish/{cachedGfxSr.sprite.name} mouth open.png" : ""
                 };
 
                 foreach (var path in possiblePaths)
@@ -895,10 +1004,13 @@ public class Fish : MonoBehaviour
 #endif
                 if (openSprite == null)
                 {
-                    openSprite = Resources.Load<Sprite>($"{baseName}_mouth open") ??
+                    openSprite = Resources.Load<Sprite>($"{baseName}_Mouth_Open") ??
                                  Resources.Load<Sprite>($"{baseName}_mouth_open") ??
-                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth open") : null) ??
-                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth_open") : null);
+                                 Resources.Load<Sprite>($"{baseName}_mouth open") ??
+                                 Resources.Load<Sprite>($"{baseName} mouth open") ??
+                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_Mouth_Open") : null) ??
+                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth_open") : null) ??
+                                 (cachedGfxSr.sprite != null ? Resources.Load<Sprite>($"{cachedGfxSr.sprite.name}_mouth open") : null);
                 }
             }
 
@@ -992,10 +1104,21 @@ public class Fish : MonoBehaviour
             rb.constraints = RigidbodyConstraints2D.FreezeRotation;
             rb.interpolation = RigidbodyInterpolation2D.Interpolate; // Important for smooth FishAI movement
 
-            // Use FishAI (Add if missing)
-            var ai = GetComponent<FishAI>();
-            if (ai == null) ai = gameObject.AddComponent<FishAI>();
-            ai.enabled = true;
+            FishAI ai = GetComponent<FishAI>();
+            HungrySharkFishAI hsAI = GetComponent<HungrySharkFishAI>();
+
+            if (useHungrySharkAI)
+            {
+                if (hsAI == null) hsAI = gameObject.AddComponent<HungrySharkFishAI>();
+                hsAI.enabled = true;
+                if (ai != null) ai.enabled = false;
+            }
+            else
+            {
+                if (ai == null) ai = gameObject.AddComponent<FishAI>();
+                ai.enabled = true;
+                if (hsAI != null) hsAI.enabled = false;
+            }
             
             // Disable old legacy movement/state controllers to prevent conflicts
             var movement = GetComponent<FishMovement>();
@@ -1007,7 +1130,14 @@ public class Fish : MonoBehaviour
             
             var stateCtrl = GetComponent<StateController>();
             if (stateCtrl != null) stateCtrl.enabled = false;
-            if (ai != null)
+
+            if (hsAI != null && hsAI.enabled)
+            {
+                hsAI.wanderSpeed = 5.0f;
+                hsAI.fleeSpeed = 6.5f;
+                hsAI.sharkDetectionRadius = 0f; // DISABLE FLEEING for Golden Fish
+            }
+            if (ai != null && ai.enabled)
             {
                 ai.enabled = true; // Ensure it's enabled
                 // Adjust stats for Golden Fish - Fast and agile
@@ -1022,6 +1152,12 @@ public class Fish : MonoBehaviour
         else
         {
             goldenStatusActive = false;
+            if (goldenParticles != null)
+            {
+                var em = goldenParticles.emission;
+                em.enabled = false;
+                goldenParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            }
         }
     }
 
@@ -1075,17 +1211,14 @@ public class Fish : MonoBehaviour
 
     public void TurnLeft()
     {
-        //Already looking left
-        if (!isFacingRight) return;
-
-        Flip();
+        isFacingRight = false;
+        transform.localScale = new Vector3(-Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
     }
 
     public void TurnRight()
     {
-        //Already looking right
-        if (isFacingRight) return;
-        Flip();
+        isFacingRight = true;
+        transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
     }
 
     public void FlipTowardsDestination(Vector2 _destination, bool localSpace = true)
@@ -1165,7 +1298,7 @@ public class Fish : MonoBehaviour
                 if (otherFish.Level > this.level)
                 {
                     // Predator tried to bite me while I am spiked -> predator dies!
-                    otherFish.OnEatenByPredator();
+                    otherFish.OnEatenByPredator(this);
                     otherFish.Die();
                     PlayEatEffect();
                     return;
@@ -1184,12 +1317,14 @@ public class Fish : MonoBehaviour
                 }
 
                 bool wasSick = otherFish.IsSickFish;
-                otherFish.OnEatenByPredator();
+                otherFish.OnEatenByPredator(this);
                 otherFish.Die();
                 PlayEatEffect();
                 TriggerBite();
                 var ai = GetComponent<FishAI>();
-                if (ai != null) ai.OnAteFish(otherFish);
+                if (ai != null && ai.enabled) ai.OnAteFish(otherFish);
+                var hsAI = GetComponent<HungrySharkFishAI>();
+                if (hsAI != null && hsAI.enabled) hsAI.OnAteFish(otherFish);
 
                 if (wasSick)
                 {
@@ -1216,6 +1351,8 @@ public class Fish : MonoBehaviour
         // Disable AI & movement components
         var ai = GetComponent<FishAI>();
         if (ai != null) ai.enabled = false;
+        var hsAI = GetComponent<HungrySharkFishAI>();
+        if (hsAI != null) hsAI.enabled = false;
 
         var movement = GetComponent<FishMovement>();
         if (movement != null) movement.enabled = false;
@@ -1274,6 +1411,8 @@ public class Fish : MonoBehaviour
         // 2. Disable AI & movement components
         var ai = GetComponent<FishAI>();
         if (ai != null) ai.enabled = false;
+        var hsAI = GetComponent<HungrySharkFishAI>();
+        if (hsAI != null) hsAI.enabled = false;
 
         var movement = GetComponent<FishMovement>();
         if (movement != null) movement.enabled = false;
@@ -1414,8 +1553,16 @@ public class Fish : MonoBehaviour
         hookCurrentAngle = 0f;
         hookAngleVelocity = 0f;
 
-        var ai = GetComponent<FishAI>();
-        if (ai != null) ai.enabled = true;
+        if (useHungrySharkAI)
+        {
+            var hsAI = GetComponent<HungrySharkFishAI>();
+            if (hsAI != null) hsAI.enabled = true;
+        }
+        else
+        {
+            var ai = GetComponent<FishAI>();
+            if (ai != null) ai.enabled = true;
+        }
 
         var movement = GetComponent<FishMovement>();
         if (movement != null) movement.enabled = false;
@@ -1707,6 +1854,9 @@ public class Fish : MonoBehaviour
 
     private static readonly Color SICK_FISH_COLOR = new Color(0.72f, 1f, 0.72f, 1f);
 
+    private float inkDisorientTimer = 0f;
+    public bool IsDisorientedByInk => inkDisorientTimer > 0f;
+
     public void SetSickStatus(bool sick)
     {
         isSickFish = sick;
@@ -1774,8 +1924,15 @@ public class Fish : MonoBehaviour
     public void ApplyInkDisorientation(float duration = 3.5f)
     {
         if (IsCuttlefish || IsDead) return;
+        inkDisorientTimer = duration;
+
+        var hsAI = GetComponent<HungrySharkFishAI>();
+        if (hsAI != null && hsAI.enabled)
+        {
+            hsAI.ApplyInkDisorientation(duration);
+        }
         FishAI ai = GetComponent<FishAI>();
-        if (ai != null)
+        if (ai != null && ai.enabled)
         {
             ai.ApplyInkDisorientation(duration);
         }
@@ -1787,10 +1944,26 @@ public class Fish : MonoBehaviour
     /// </summary>
     private void ConfigureAiFishRendering()
     {
-        if (cachedGfxSr == null) return;
+        if (cachedGfxSr == null)
+        {
+            if (gfx != null) cachedGfxSr = gfx.GetComponent<SpriteRenderer>();
+            if (cachedGfxSr == null) cachedGfxSr = GetComponentInChildren<SpriteRenderer>();
+        }
+        if (cachedGfxSr != null)
+        {
+            cachedGfxSr.sortingLayerName = "ParallaxForeground";
+            cachedGfxSr.sortingOrder = 90;
+        }
 
-        cachedGfxSr.sortingLayerName = "ParallaxForeground";
-        cachedGfxSr.sortingOrder = 90; // Well in front of reef elements (50-55) and behind player (120).
+        var allSrs = GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < allSrs.Length; i++)
+        {
+            if (allSrs[i] != null)
+            {
+                allSrs[i].sortingLayerName = "ParallaxForeground";
+                allSrs[i].sortingOrder = 90;
+            }
+        }
     }
 
     #region Mouth Bite Animation Logic

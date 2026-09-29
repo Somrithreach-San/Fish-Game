@@ -66,7 +66,22 @@ public class PlayerSpawn : MonoBehaviour
 
     private void Start()
     {
-        // Fallback: only spawn if GameStart event was not already triggered
+        // Fallback: spawn player only if GameStart event was never triggered.
+        // If the briefing is active we wait for it to complete before checking,
+        // so we don't bypass the briefing gate.
+        StartCoroutine(FallbackSpawnRoutine());
+    }
+
+    private IEnumerator FallbackSpawnRoutine()
+    {
+        // Wait one frame for GameStart to fire (it fires synchronously after briefing).
+        yield return null;
+
+        // If briefing is still showing, wait until it finishes.
+        while (Rhinotap.LevelBriefingManager.IsBriefingActive)
+            yield return null;
+
+        // Spawn only if GameStart event didn't already trigger a spawn.
         if (!hasSpawned && player == null)
         {
             SpawnPlayer();

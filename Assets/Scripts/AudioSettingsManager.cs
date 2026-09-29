@@ -94,98 +94,194 @@ public static class AudioSettingsManager
                 PlayerPrefs.SetFloat("SfxVolume", 1.0f);
             }
             PlayerPrefs.Save();
-            ApplyMixerSettings();
-            OnSfxSettingChanged?.Invoke(IsSfxEnabled);
-            OnSfxVolumeChanged?.Invoke(SfxVolume);
-        }
-    }
-
-    public static float MusicVolume
-    {
-        get => PlayerPrefs.GetFloat("MusicVolume", 1.0f);
-        set
-        {
-            bool wasEnabled = IsMusicEnabled;
-            float clamped = Mathf.Clamp01(value);
-            PlayerPrefs.SetFloat("MusicVolume", clamped);
-            PlayerPrefs.SetInt(MusicKey, clamped > 0.001f ? 1 : 0);
-            PlayerPrefs.Save();
-            ApplyMixerSettings();
-            bool nowEnabled = IsMusicEnabled;
-            if (wasEnabled != nowEnabled)
-            {
-                OnMusicSettingChanged?.Invoke(nowEnabled);
-            }
-            OnMusicVolumeChanged?.Invoke(clamped);
-        }
-    }
-
-    public static float SfxVolume
-    {
-        get => PlayerPrefs.GetFloat("SfxVolume", 1.0f);
-        set
-        {
-            bool wasEnabled = IsSfxEnabled;
-            float clamped = Mathf.Clamp01(value);
-            PlayerPrefs.SetFloat("SfxVolume", clamped);
-            PlayerPrefs.SetInt(SfxKey, clamped > 0.001f ? 1 : 0);
-            PlayerPrefs.Save();
-            ApplyMixerSettings();
-            bool nowEnabled = IsSfxEnabled;
-            if (wasEnabled != nowEnabled)
-            {
-                OnSfxSettingChanged?.Invoke(nowEnabled);
-            }
-            OnSfxVolumeChanged?.Invoke(clamped);
-        }
-    }
-
-    public static float MasterVolume
-    {
-        get => PlayerPrefs.GetFloat(VolumeKey, 1.0f);
-        set
-        {
-            float clamped = Mathf.Clamp01(value);
-            PlayerPrefs.SetFloat(VolumeKey, clamped);
-            PlayerPrefs.Save();
-            AudioListener.volume = clamped;
-            ApplyMixerSettings();
-            OnVolumeSettingChanged?.Invoke(clamped);
-        }
-    }
-
-    public static void InitializeAudio()
-    {
-        EnsureMixerInitialized();
-        float master = MasterVolume;
-        if (master <= 0.001f)
-        {
-            master = 1.0f;
-            PlayerPrefs.SetFloat(VolumeKey, 1.0f);
-            PlayerPrefs.Save();
-        }
-        AudioListener.volume = master;
-        AudioListener.pause = false;
         ApplyMixerSettings();
+        UpdateAllRegisteredSfxSources();
+        OnSfxSettingChanged?.Invoke(IsSfxEnabled);
+        OnSfxVolumeChanged?.Invoke(SfxVolume);
     }
+}
 
-    public static void RouteToSfx(AudioSource source)
+public static float MusicVolume
+{
+    get => PlayerPrefs.GetFloat("MusicVolume", 1.0f);
+    set
     {
-        if (source == null) return;
-        if (SfxMixerGroup != null)
+        bool wasEnabled = IsMusicEnabled;
+        float clamped = Mathf.Clamp01(value);
+        PlayerPrefs.SetFloat("MusicVolume", clamped);
+        PlayerPrefs.SetInt(MusicKey, clamped > 0.001f ? 1 : 0);
+        PlayerPrefs.Save();
+        ApplyMixerSettings();
+        bool nowEnabled = IsMusicEnabled;
+        if (wasEnabled != nowEnabled)
         {
-            source.outputAudioMixerGroup = SfxMixerGroup;
+            OnMusicSettingChanged?.Invoke(nowEnabled);
+        }
+        OnMusicVolumeChanged?.Invoke(clamped);
+    }
+}
+
+public static float SfxVolume
+{
+    get => PlayerPrefs.GetFloat("SfxVolume", 1.0f);
+    set
+    {
+        bool wasEnabled = IsSfxEnabled;
+        float clamped = Mathf.Clamp01(value);
+        PlayerPrefs.SetFloat("SfxVolume", clamped);
+        PlayerPrefs.SetInt(SfxKey, clamped > 0.001f ? 1 : 0);
+        PlayerPrefs.Save();
+        ApplyMixerSettings();
+        UpdateAllRegisteredSfxSources();
+        bool nowEnabled = IsSfxEnabled;
+        if (wasEnabled != nowEnabled)
+        {
+            OnSfxSettingChanged?.Invoke(nowEnabled);
+        }
+        OnSfxVolumeChanged?.Invoke(clamped);
+    }
+}
+
+public static float MasterVolume
+{
+    get => PlayerPrefs.GetFloat(VolumeKey, 1.0f);
+    set
+    {
+        float clamped = Mathf.Clamp01(value);
+        PlayerPrefs.SetFloat(VolumeKey, clamped);
+        PlayerPrefs.Save();
+        AudioListener.volume = clamped;
+        ApplyMixerSettings();
+        OnVolumeSettingChanged?.Invoke(clamped);
+    }
+}
+
+public static void InitializeAudio()
+{
+    EnsureMixerInitialized();
+    float master = MasterVolume;
+    if (master <= 0.001f)
+    {
+        master = 1.0f;
+        PlayerPrefs.SetFloat(VolumeKey, 1.0f);
+        PlayerPrefs.Save();
+    }
+    AudioListener.volume = master;
+    AudioListener.pause = false;
+    ApplyMixerSettings();
+    UpdateAllRegisteredSfxSources();
+}
+
+/// <summary>
+/// Returns the active scaled volume for a SFX source given its base volume (0..1).
+/// Returns 0 if SFX is muted or disabled.
+/// </summary>
+public static float GetScaledSfxVolume(float baseVolume = 1.0f)
+{
+    if (!IsSfxEnabled) return 0f;
+    return Mathf.Clamp01(baseVolume * SfxVolume);
+}
+
+/// <summary>
+/// Returns the active scaled volume for music given its base volume (0..1).
+/// Returns 0 if Music is muted or disabled.
+/// </summary>
+public static float GetScaledMusicVolume(float baseVolume = 1.0f)
+{
+    if (!IsMusicEnabled) return 0f;
+    return Mathf.Clamp01(baseVolume * MusicVolume);
+}
+
+/// <summary>
+/// Tracks registered SFX AudioSources to dynamically update their volumes whenever SfxVolume changes.
+/// </summary>
+private class SfxSourceBinding
+{
+    public WeakReference<AudioSource> SourceRef;
+    public float BaseVolume;
+}
+private static readonly System.Collections.Generic.List<SfxSourceBinding> s_RegisteredSfxSources = new System.Collections.Generic.List<SfxSourceBinding>();
+
+public static void RouteToSfx(AudioSource source, float baseVolume = 1.0f)
+{
+    if (source == null) return;
+    source.mute = !IsSfxEnabled;
+    source.volume = GetScaledSfxVolume(baseVolume);
+    if (SfxMixerGroup != null)
+    {
+        source.outputAudioMixerGroup = SfxMixerGroup;
+    }
+    RegisterSfxSource(source, baseVolume);
+}
+
+public static void RegisterSfxSource(AudioSource source, float baseVolume = 1.0f)
+{
+    if (source == null) return;
+    CleanupDeadSfxSources();
+    for (int i = 0; i < s_RegisteredSfxSources.Count; i++)
+    {
+        if (s_RegisteredSfxSources[i].SourceRef.TryGetTarget(out var existing) && existing == source)
+        {
+            s_RegisteredSfxSources[i].BaseVolume = baseVolume;
+            source.mute = !IsSfxEnabled;
+            source.volume = GetScaledSfxVolume(baseVolume);
+            return;
         }
     }
-
-    public static void RouteToMusic(AudioSource source)
+    s_RegisteredSfxSources.Add(new SfxSourceBinding
     {
-        if (source == null) return;
-        if (MusicMixerGroup != null)
+        SourceRef = new WeakReference<AudioSource>(source),
+        BaseVolume = baseVolume
+    });
+}
+
+public static void UnregisterSfxSource(AudioSource source)
+{
+    if (source == null) return;
+    for (int i = s_RegisteredSfxSources.Count - 1; i >= 0; i--)
+    {
+        if (!s_RegisteredSfxSources[i].SourceRef.TryGetTarget(out var target) || target == null || target == source)
         {
-            source.outputAudioMixerGroup = MusicMixerGroup;
+            s_RegisteredSfxSources.RemoveAt(i);
         }
     }
+}
+
+public static void UpdateAllRegisteredSfxSources()
+{
+    for (int i = s_RegisteredSfxSources.Count - 1; i >= 0; i--)
+    {
+        if (s_RegisteredSfxSources[i].SourceRef.TryGetTarget(out var src) && src != null)
+        {
+            src.mute = !IsSfxEnabled;
+            src.volume = GetScaledSfxVolume(s_RegisteredSfxSources[i].BaseVolume);
+        }
+        else
+        {
+            s_RegisteredSfxSources.RemoveAt(i);
+        }
+    }
+}
+
+private static void CleanupDeadSfxSources()
+{
+    for (int i = s_RegisteredSfxSources.Count - 1; i >= 0; i--)
+    {
+        if (!s_RegisteredSfxSources[i].SourceRef.TryGetTarget(out var src) || src == null)
+        {
+            s_RegisteredSfxSources.RemoveAt(i);
+        }
+    }
+}
+
+public static void RouteToMusic(AudioSource source)
+{
+    if (source == null) return;
+    if (MusicMixerGroup != null)
+    {
+        source.outputAudioMixerGroup = MusicMixerGroup;
+    }
+}
 
     private static void EnsureMixerInitialized()
     {

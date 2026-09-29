@@ -52,6 +52,41 @@ public class InkScreenOverlay : MonoBehaviour
         SetupCanvasAndVisuals();
     }
 
+    private void OnEnable()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        ClearBlindingImmediate();
+    }
+
+    public static void ClearBlindingImmediate()
+    {
+        if (_instance == null) return;
+        if (_instance.activeBlindingCoroutine != null)
+        {
+            _instance.StopCoroutine(_instance.activeBlindingCoroutine);
+            _instance.activeBlindingCoroutine = null;
+        }
+        if (_instance.canvasGroup != null)
+        {
+            _instance.canvasGroup.alpha = 0f;
+        }
+        if (_instance.inkMaterial != null)
+        {
+            _instance.inkMaterial.SetFloat(PropAlpha, 0f);
+            _instance.inkMaterial.SetFloat(PropDissolve, 1.0f);
+            _instance.inkMaterial.SetFloat(PropDripOffset, 0f);
+        }
+    }
+
     private void SetupCanvasAndVisuals()
     {
         canvas = GetComponent<Canvas>();

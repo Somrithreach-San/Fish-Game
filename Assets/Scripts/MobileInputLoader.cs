@@ -117,11 +117,11 @@ public class MobileInputLoader : MonoBehaviour
         abilityBtnObj.transform.SetParent(canvasObj.transform, false);
 
         RectTransform rt = abilityBtnObj.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(1, 0);
-        rt.anchorMax = new Vector2(1, 0);
-        rt.pivot = new Vector2(1, 0);
-        rt.sizeDelta = new Vector2(200, 200);
-        rt.anchoredPosition = new Vector2(-480, 228);
+        rt.anchorMin = new Vector2(1f, 0.5f);
+        rt.anchorMax = new Vector2(1f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(150f, 150f);
+        rt.anchoredPosition = new Vector2(-110f, -200f);
 
         abilityBtnObj.AddComponent<CanvasRenderer>();
         MobileAbilityButton abilityBtn = abilityBtnObj.AddComponent<MobileAbilityButton>();

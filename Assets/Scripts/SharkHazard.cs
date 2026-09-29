@@ -228,6 +228,8 @@ public class SharkHazard : MonoBehaviour
 
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
         AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged -= HandleSfxVolumeChanged;
+        AudioSettingsManager.OnSfxVolumeChanged += HandleSfxVolumeChanged;
         if (!isEventSubscribed)
         {
             try
@@ -278,6 +280,7 @@ public class SharkHazard : MonoBehaviour
             isEventSubscribed = false;
         }
         AudioSettingsManager.OnSfxSettingChanged -= HandleSfxSettingChanged;
+        AudioSettingsManager.OnSfxVolumeChanged -= HandleSfxVolumeChanged;
     }
 
     private void HandleSfxSettingChanged(bool enabled)
@@ -285,6 +288,7 @@ public class SharkHazard : MonoBehaviour
         if (audioSource != null)
         {
             audioSource.mute = !enabled;
+            audioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
             if (!enabled && audioSource.isPlaying)
             {
                 audioSource.Stop();
@@ -293,10 +297,25 @@ public class SharkHazard : MonoBehaviour
         if (swimSource != null)
         {
             swimSource.mute = !enabled;
+            swimSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
             if (!enabled && swimSource.isPlaying)
             {
                 swimSource.Stop();
             }
+        }
+    }
+
+    private void HandleSfxVolumeChanged(float vol)
+    {
+        if (audioSource != null)
+        {
+            audioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            audioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
+        }
+        if (swimSource != null)
+        {
+            swimSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            swimSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
         }
     }
 
@@ -513,8 +532,8 @@ public class SharkHazard : MonoBehaviour
             _sharedIconImage.sprite = iconSprite;
         }
 
-        // Capture Spawn Y (Fixed World Y)
-        float spawnY = transform.position.y;
+        // Capture Spawn Y (Fixed World Y, validated against solid rock obstacles)
+        float spawnY = FindNearestClearLane(transform.position.y);
 
         // Size
         _sharedIconRect.sizeDelta = new Vector2(100, 100);
@@ -610,6 +629,14 @@ public class SharkHazard : MonoBehaviour
                 _sharedIconRect.anchoredPosition = new Vector2(targetX, targetY);
             }
 
+            if (LevelManager.IsLevelCompleted)
+            {
+                if (_sharedCanvasObj != null) _sharedCanvasObj.SetActive(false);
+                if (audioSource != null && audioSource.isPlaying && audioSource.clip == warningSound) audioSource.Stop();
+                gameObject.SetActive(false);
+                yield break;
+            }
+
             yield return null;
         }
         
@@ -620,6 +647,12 @@ public class SharkHazard : MonoBehaviour
         if (audioSource != null && audioSource.isPlaying && audioSource.clip == warningSound)
         {
             audioSource.Stop();
+        }
+
+        if (LevelManager.IsLevelCompleted)
+        {
+            gameObject.SetActive(false);
+            yield break;
         }
 
         // 2. Teleport Shark to "Just Outside Screen" — make it visible right as it enters
@@ -662,7 +695,7 @@ public class SharkHazard : MonoBehaviour
     private void StartCharging()
     {
         isCharging = true;
-        chargeY = transform.position.y;
+        chargeY = FindNearestClearLane(transform.position.y);
         
         SetVisualsVisible(true);
 
@@ -678,6 +711,55 @@ public class SharkHazard : MonoBehaviour
             swimSource.pitch = 1.0f;
             if (!swimSource.isPlaying) swimSource.Play();
         }
+    }
+
+    public static bool IsSolidEnvironmentObstacle(Collider2D col)
+    {
+        if (col == null || col.isTrigger) return false;
+
+        // Exclude dynamic actors (player, fish, boats, hazards)
+        if (col.GetComponentInParent<PlayerController>() != null) return false;
+        if (col.GetComponentInParent<Fish>() != null) return false;
+        if (col.GetComponentInParent<Hazard>() != null) return false;
+        if (col.GetComponentInParent<SharkHazard>() != null) return false;
+        if (col.GetComponentInParent<HarpoonHazard>() != null) return false;
+        if (col.GetComponentInParent<FishermanBoat>() != null) return false;
+        if (col.GetComponentInParent<RiverBoat>() != null) return false;
+        if (col.GetComponentInParent<Clam>() != null) return false;
+
+        return true;
+    }
+
+    public static bool IsLaneBlockedBySolidObstacle(float testY, float halfHeight = 2.0f)
+    {
+        Vector2 start = new Vector2(-60f, testY);
+        RaycastHit2D[] hits = Physics2D.BoxCastAll(start, new Vector2(1f, halfHeight * 2f), 0f, Vector2.right, 120f);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            if (IsSolidEnvironmentObstacle(hits[i].collider))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static float FindNearestClearLane(float preferredY, float halfHeight = 2.0f)
+    {
+        if (!IsLaneBlockedBySolidObstacle(preferredY, halfHeight)) return preferredY;
+
+        for (float offset = 0.5f; offset <= 25f; offset += 0.5f)
+        {
+            float yUp = preferredY + offset;
+            if (yUp <= 14f && !IsLaneBlockedBySolidObstacle(yUp, halfHeight))
+                return yUp;
+
+            float yDown = preferredY - offset;
+            if (yDown >= -14f && !IsLaneBlockedBySolidObstacle(yDown, halfHeight))
+                return yDown;
+        }
+
+        return preferredY > 0 ? 10f : -10f;
     }
 
     private void Update()
@@ -710,9 +792,42 @@ public class SharkHazard : MonoBehaviour
             }
         }
 
-        // Move across screen (Strictly Horizontal, scaled by CurrentMoveSpeed)
+        // --- Solid Rock Obstacle Avoidance ---
+        Vector2 travelDir = new Vector2(direction, 0f);
+        float lookAheadDist = 6.5f;
+        float sharkHalfH = 1.6f * (sharkScale / 0.85f);
+
+        RaycastHit2D hitCenter = Physics2D.Raycast(transform.position, travelDir, lookAheadDist);
+        RaycastHit2D hitUpper = Physics2D.Raycast(transform.position + Vector3.up * sharkHalfH, travelDir, lookAheadDist);
+        RaycastHit2D hitLower = Physics2D.Raycast(transform.position + Vector3.down * sharkHalfH, travelDir, lookAheadDist);
+
+        bool obstacleAhead = (hitCenter.collider != null && IsSolidEnvironmentObstacle(hitCenter.collider)) ||
+                             (hitUpper.collider != null && IsSolidEnvironmentObstacle(hitUpper.collider)) ||
+                             (hitLower.collider != null && IsSolidEnvironmentObstacle(hitLower.collider));
+
+        if (obstacleAhead)
+        {
+            RaycastHit2D checkUp = Physics2D.Raycast(transform.position + Vector3.up * 3.0f, travelDir, lookAheadDist * 1.2f);
+            bool upClear = (checkUp.collider == null || !IsSolidEnvironmentObstacle(checkUp.collider));
+
+            float avoidSpeed = 8.0f;
+            if (upClear && transform.position.y < 14f)
+            {
+                chargeY += avoidSpeed * Time.deltaTime;
+            }
+            else
+            {
+                chargeY -= avoidSpeed * Time.deltaTime;
+            }
+        }
+
+        // Smoothly adjust current Y towards chargeY
+        float currentY = Mathf.MoveTowards(transform.position.y, chargeY, 12f * Time.deltaTime);
+
+        // Move across screen (scaled by CurrentMoveSpeed)
         float newX = transform.position.x + (direction * CurrentMoveSpeed * Time.deltaTime);
-        transform.position = new Vector3(newX, chargeY, 0f);
+        transform.position = new Vector3(newX, currentY, 0f);
+        transform.rotation = Quaternion.identity; // Guarantee laser-straight horizontal charge
 
         // Check bounds to destroy after passing
         if (!hasPassedScreen && cam != null)
@@ -819,7 +934,7 @@ public class SharkHazard : MonoBehaviour
         PlayerController pc = other.GetComponent<PlayerController>() ?? other.GetComponentInParent<PlayerController>();
         if (pc != null)
         {
-            if (pc.IsAlive && !pc.IsHooked && !PlayerAbilitySystem.IsPlayerInvulnerable)
+            if (pc.IsAlive && !pc.IsHooked && !PlayerAbilitySystem.IsPlayerInvulnerable && !LevelManager.IsLevelCompleted)
             {
                 Sprite sharkSprite = closedSprite != null ? closedSprite : (cachedSr != null ? cachedSr.sprite : GetComponentInChildren<SpriteRenderer>()?.sprite);
                 pc.Death(sharkSprite);
@@ -833,7 +948,7 @@ public class SharkHazard : MonoBehaviour
         if (fish != null && !fish.IsDead && !fish.IsHooked && fish.gameObject.activeInHierarchy)
         {
             bool wasSick = fish.IsSickFish;
-            fish.OnEatenByPredator();
+            fish.OnEatenByPredator(null, this);
             fish.Die();
             PlayEatEffect();
             if (wasSick)
@@ -917,14 +1032,62 @@ public class SharkHazard : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (IsSolidEnvironmentObstacle(other))
+        {
+            DeflectFromSolidObstacle(other);
+            return;
+        }
+
         if (TryConsumeTarget(other)) TriggerBite();
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        if (IsSolidEnvironmentObstacle(other))
+        {
+            DeflectFromSolidObstacle(other);
+            return;
+        }
+
         // The shark collider covers the body, so keep checking while overlapping
         // and only consume once the prey reaches the lethal head zone.
         if (TryConsumeTarget(other)) TriggerBite();
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision != null && IsSolidEnvironmentObstacle(collision.collider))
+        {
+            DeflectFromSolidObstacle(collision.collider);
+        }
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        if (collision != null && IsSolidEnvironmentObstacle(collision.collider))
+        {
+            DeflectFromSolidObstacle(collision.collider);
+        }
+    }
+
+    private void DeflectFromSolidObstacle(Collider2D solidCol)
+    {
+        if (solidCol == null) return;
+        Vector2 closest = solidCol.ClosestPoint(transform.position);
+        Vector2 pushDir = (Vector2)transform.position - closest;
+        if (pushDir.sqrMagnitude < 0.0001f)
+        {
+            pushDir = (transform.position.y >= solidCol.bounds.center.y) ? Vector2.up : Vector2.down;
+        }
+        else
+        {
+            pushDir.Normalize();
+        }
+
+        float pushAmount = 5.0f * Time.deltaTime;
+        float newY = transform.position.y + Mathf.Sign(pushDir.y != 0 ? pushDir.y : 1f) * pushAmount;
+        chargeY = newY;
+        transform.position = new Vector3(transform.position.x, newY, transform.position.z);
     }
 
     private void SetupTrailParticles()

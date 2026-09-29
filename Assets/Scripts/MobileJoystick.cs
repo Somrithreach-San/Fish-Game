@@ -53,6 +53,10 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         return null;
     }
 
+    private Image handleImage;
+    private readonly Color handleIdleColor = new Color(1f, 1f, 1f, 0.55f);
+    private readonly Color handleActiveColor = new Color(1f, 1f, 1f, 1.0f);
+
     private void Awake()
     {
         Instance = this;
@@ -74,16 +78,15 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
             }
         }
 
-        // 2. Inner Handle: Slightly more visible white circle
+        // 2. Inner Handle: Slightly more visible white circle (goes full white when used)
         if (handle != null)
         {
-            Image handleImg = handle.GetComponent<Image>();
-            if (handleImg != null)
+            handleImage = handle.GetComponent<Image>();
+            if (handleImage != null)
             {
                 Sprite circle = GetHandleSprite();
-                if (circle != null) handleImg.sprite = circle;
-                // Inner knob is a bit more visible
-                handleImg.color = new Color(1f, 1f, 1f, 0.55f);
+                if (circle != null) handleImage.sprite = circle;
+                handleImage.color = handleIdleColor;
             }
         }
         
@@ -118,17 +121,23 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         {
             gameObject.SetActive(true);
             
-            // AUTO-FIX: Enforce standard mobile sizing (User Request: Responsiveness & Size)
-            // Force update to 250 (Standard Size).
-            if (background != null && Mathf.Abs(background.sizeDelta.x - 250) > 1)
+            // AUTO-FIX: Enforce standard mobile sizing & lowered position aligned with Speed Boost
+            if (background != null)
             {
-                background.sizeDelta = new Vector2(250, 250);
-                // Fix: Move up to avoid safe area/home bar issues (was 320)
-                background.anchoredPosition = new Vector2(200, 380); 
+                background.anchorMin = new Vector2(0f, 0.5f);
+                background.anchorMax = new Vector2(0f, 0.5f);
+                background.pivot = new Vector2(0.5f, 0.5f);
+                background.sizeDelta = new Vector2(240f, 240f);
+                // Lowered comfortably on the left side (aligned with Speed Boost button)
+                background.anchoredPosition = new Vector2(220f, -70f); 
                 
                 if (handle != null)
                 {
-                    handle.sizeDelta = new Vector2(100, 100); // Slightly smaller handle for 250 bg
+                    handle.anchorMin = new Vector2(0.5f, 0.5f);
+                    handle.anchorMax = new Vector2(0.5f, 0.5f);
+                    handle.pivot = new Vector2(0.5f, 0.5f);
+                    handle.anchoredPosition = Vector2.zero;
+                    handle.sizeDelta = new Vector2(100f, 100f); // Increased inner joystick circle
                 }
                 
                 // Improve responsiveness: Reduce travel distance
@@ -156,11 +165,21 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
                     InputDirection.y * (background.sizeDelta.y / 2) * handleRange
                 );
             }
+
+            // Make handle full white while active/dragged
+            if (handleImage != null)
+            {
+                handleImage.color = handleActiveColor;
+            }
         }
     }
 
     public void OnPointerDown(PointerEventData eventData)
     {
+        if (handleImage != null)
+        {
+            handleImage.color = handleActiveColor;
+        }
         OnDrag(eventData);
     }
 
@@ -179,6 +198,8 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         InputDirection = Vector2.zero;
         if (handle != null)
             handle.anchoredPosition = Vector2.zero;
+        if (handleImage != null)
+            handleImage.color = handleIdleColor;
     }
 
     private void OnDestroy()

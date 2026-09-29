@@ -13,10 +13,10 @@ using Rhinotap.Toolkit;
 public class Cuttlefish : MonoBehaviour
 {
     [Header("Detection Settings")]
-    [Tooltip("Maximum distance in front of the cuttlefish where threats are detected (~4.5 units)")]
-    [SerializeField] private float visionRange = 4.5f;
-    [Tooltip("Forward cone alignment threshold (0.45 = ~63° focused cone in front of tentacles)")]
-    [SerializeField] private float visionDotThreshold = 0.45f;
+    [Tooltip("Maximum distance in front of the cuttlefish where threats are detected")]
+    [SerializeField] private float visionRange = 4.0f;
+    [Tooltip("Forward cone alignment threshold (0.70 = ~45° focused cone directly in front of tentacles)")]
+    [SerializeField] private float visionDotThreshold = 0.70f;
     [SerializeField] private float inkCooldownDuration = 8.0f; // Cooldown before spraying ink again
     [SerializeField] private float jetEscapeSpeed = 10.5f;
 
@@ -27,6 +27,7 @@ public class Cuttlefish : MonoBehaviour
     private Fish fish;
     private Rigidbody2D rb;
     private FishAI ai;
+    private HungrySharkFishAI hsAI;
     private float inkCooldownTimer = 0f;
     private bool isJetting = false;
     private float jetTimer = 0f;
@@ -40,6 +41,7 @@ public class Cuttlefish : MonoBehaviour
         fish = GetComponent<Fish>();
         rb = GetComponent<Rigidbody2D>();
         ai = GetComponent<FishAI>();
+        hsAI = GetComponent<HungrySharkFishAI>();
 
         LoadDefaultAudio();
     }
@@ -108,7 +110,14 @@ public class Cuttlefish : MonoBehaviour
             if (jetTimer <= 0f)
             {
                 isJetting = false;
-                if (ai != null) ai.enabled = true;
+                if (Fish.useHungrySharkAI)
+                {
+                    if (hsAI != null) hsAI.enabled = true;
+                }
+                else
+                {
+                    if (ai != null) ai.enabled = true;
+                }
             }
             else if (rb != null)
             {
@@ -135,22 +144,20 @@ public class Cuttlefish : MonoBehaviour
         Vector2 forward = new Vector2(facing, 0f);
         Vector2 myPos = transform.position;
 
-        // 1. Check Player (Always defends against player approaching in front cone, regardless of player level)
+        // 1. Check Player (Defends against player approaching in front cone)
         PlayerController player = GetPlayer();
-        if (player != null && player.IsAlive)
+        if (player != null && player.IsAlive && !LevelManager.IsLevelCompleted)
         {
             Vector2 toPlayer = (Vector2)player.transform.position - myPos;
             float dist = toPlayer.magnitude;
 
-            if (dist <= visionRange && dist > 0.05f)
+            // In front: positive X in facing direction, within vision range and forward cone
+            float dx = toPlayer.x * facing;
+            if (dx > 0.15f && dist <= visionRange && dist > 0.05f)
             {
                 Vector2 dirToPlayer = toPlayer / dist;
                 float dot = Vector2.Dot(forward, dirToPlayer);
-
-                // STRICT FORWARD CONE:
-                // dot > visionDotThreshold (0.15f) means threat is within ~81° in front of the head/tentacles.
-                // If dot <= 0, the threat is BEHIND the cuttlefish and CANNOT be seen!
-                if (dot > visionDotThreshold)
+                if (dot >= visionDotThreshold)
                 {
                     TriggerInkAndJetEscape(dirToPlayer, targetPlayer: player);
                     return;
@@ -158,7 +165,7 @@ public class Cuttlefish : MonoBehaviour
             }
         }
 
-        // 2. Check Larger AI Fish Predators in front (Level >= 2 only, ignores Level 1 schooling fish)
+        // 2. Check Larger AI Fish Predators in front (Level >= 2 only, ignores harmless Level 1 schooling fish)
         if (Fish.AllFish != null)
         {
             for (int i = 0; i < Fish.AllFish.Count; i++)
@@ -170,12 +177,13 @@ public class Cuttlefish : MonoBehaviour
                 Vector2 toOther = (Vector2)other.transform.position - myPos;
                 float dist = toOther.magnitude;
 
-                if (dist <= visionRange && dist > 0.05f)
+                float dx = toOther.x * facing;
+                if (dx > 0.15f && dist <= visionRange && dist > 0.05f)
                 {
                     Vector2 dirToOther = toOther / dist;
                     float dot = Vector2.Dot(forward, dirToOther);
 
-                    if (dot > visionDotThreshold)
+                    if (dot >= visionDotThreshold)
                     {
                         TriggerInkAndJetEscape(dirToOther, targetFish: other);
                         return;
@@ -225,6 +233,7 @@ public class Cuttlefish : MonoBehaviour
         jetTimer = 0.85f;
 
         if (ai != null) ai.enabled = false;
+        if (hsAI != null) hsAI.enabled = false;
         if (rb != null)
         {
             rb.linearVelocity = jetDirection * jetEscapeSpeed;

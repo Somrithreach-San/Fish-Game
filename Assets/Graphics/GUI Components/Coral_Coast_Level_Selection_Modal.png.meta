@@ -116,10 +116,10 @@ TextureImporter:
       name: Coral_Coast_Level_Selection_Modal_0
       rect:
         serializedVersion: 2
-        x: 922
-        y: 822
-        width: 20913
-        height: 13879
+        x: 0
+        y: 0
+        width: 8998
+        height: 5431
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}

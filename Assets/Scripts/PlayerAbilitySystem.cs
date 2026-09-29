@@ -443,7 +443,7 @@ public class PlayerAbilitySystem : MonoBehaviour
         {
             audioSource.clip = vClip;
             audioSource.loop = false;
-            audioSource.volume = 0.95f;
+            audioSource.volume = 0.95f * AudioSettingsManager.SfxVolume;
             audioSource.Play();
         }
 

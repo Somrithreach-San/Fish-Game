@@ -140,7 +140,7 @@ public class GuiManager : Singleton<GuiManager>
 
     public void PlayUiSound(AudioClip clip, float volume = 1.0f)
     {
-        if (clip != null && AudioSettingsManager.IsSfxEnabled)
+        if (clip != null && AudioSettingsManager.IsSfxEnabled && AudioSettingsManager.SfxVolume > 0.001f)
         {
             if (uiAudioSource == null)
             {
@@ -149,6 +149,8 @@ public class GuiManager : Singleton<GuiManager>
                 uiAudioSource.ignoreListenerPause = true;
                 AudioSettingsManager.RouteToSfx(uiAudioSource);
             }
+            uiAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            uiAudioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
             uiAudioSource.PlayOneShot(clip, volume);
         }
     }
@@ -436,13 +438,15 @@ public class GuiManager : Singleton<GuiManager>
         
         // Create Pause Button matching Settings close button (180x180, anchored top-right at (-50, -50))
         pauseBtn = CreatePauseBubbleButton(mainCanvas, () => {
+             if (Rhinotap.LevelBriefingManager.IsBriefingActive) return;
              PlayButtonSound();
              GameManager.instance.PlayPause();
         });
         
         if (pauseBtn != null)
         {
-             pauseBtn.SetActive(true);
+             bool shouldShow = !Rhinotap.LevelBriefingManager.IsBriefingActive;
+             pauseBtn.SetActive(shouldShow);
              pauseBtn.transform.SetAsLastSibling();
         }
 
@@ -1267,7 +1271,7 @@ public class GuiManager : Singleton<GuiManager>
 
     public void PlayButtonSound()
     {
-        if (!AudioSettingsManager.IsSfxEnabled) return;
+        if (!AudioSettingsManager.IsSfxEnabled || AudioSettingsManager.SfxVolume <= 0.001f) return;
         if (!AudioSettingsManager.CanPlayButtonSound()) return;
 
         if (GameManager.instance != null && GameManager.instance.ButtonSoundEffect != null)
@@ -1279,6 +1283,8 @@ public class GuiManager : Singleton<GuiManager>
                  uiAudioSource.spatialBlend = 0f;
                  AudioSettingsManager.RouteToSfx(uiAudioSource);
             }
+            uiAudioSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            uiAudioSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
             uiAudioSource.PlayOneShot(GameManager.instance.ButtonSoundEffect, 1.0f);
         }
     }
@@ -1852,28 +1858,24 @@ public class GuiManager : Singleton<GuiManager>
         return sp;
     }
 
-    private static Sprite[] _cachedXpBarTracks = new Sprite[7];
-    private static Sprite[] _cachedXpBarFills = new Sprite[7];
-
-    private int GetMappedBarAssetIndex(int segmentCount)
-    {
-        // Upward shifted mapping:
-        // 2 fishes stage -> use 3 fishes asset group
-        // 3 fishes stage -> use 4 fishes asset group
-        // 4 fishes stage -> use 5 fishes asset group
-        // 5+ fishes stage -> use 6 fishes asset group
-        int mapped = segmentCount + 1;
-        return Mathf.Clamp(mapped, 3, 6);
-    }
+    private static Sprite[] _cachedXpBarTracks = new Sprite[10];
+    private static Sprite[] _cachedXpBarFills = new Sprite[10];
 
     private Sprite GetXpBarTrackSprite(int segmentCount)
     {
-        int assetIndex = GetMappedBarAssetIndex(segmentCount);
-        if (_cachedXpBarTracks[assetIndex] != null) return _cachedXpBarTracks[assetIndex];
+        int count = Mathf.Clamp(segmentCount, 2, 5);
+        if (_cachedXpBarTracks[count] != null) return _cachedXpBarTracks[count];
 
-        string name = $"Xp_bar_{assetIndex}_Fishes";
-        string path = $"Assets/Graphics/GUI Components/Xp Bars/{name}.png";
-        Sprite s = LoadBestSprite(path, name, ref _cachedXpBarTracks[assetIndex]);
+        // 1. New direct asset names: 2_fish_xp_bar_track, 3_fish_xp_bar_track, 4_fish_xp_bar_track, 5_fish_xp_bar_track
+        string name = $"{count}_fish_xp_bar_track";
+        string path = $"Assets/Graphics/GUI Components/{name}.png";
+        Sprite s = LoadBestSprite(path, name, ref _cachedXpBarTracks[count]);
+        if (s != null) return s;
+
+        // Legacy fallbacks
+        string legacyName = $"Xp_bar_{count}_Fishes";
+        string legacyPath = $"Assets/Graphics/GUI Components/Xp Bars/{legacyName}.png";
+        s = LoadBestSprite(legacyPath, legacyName, ref _cachedXpBarTracks[count]);
         if (s != null) return s;
 
         return GetSliderTrackSprite(); // Fallback
@@ -1881,15 +1883,22 @@ public class GuiManager : Singleton<GuiManager>
 
     private Sprite GetXpBarFillSprite(int segmentCount)
     {
-        int assetIndex = GetMappedBarAssetIndex(segmentCount);
-        if (_cachedXpBarFills[assetIndex] != null) return _cachedXpBarFills[assetIndex];
+        int count = Mathf.Clamp(segmentCount, 2, 5);
+        if (_cachedXpBarFills[count] != null) return _cachedXpBarFills[count];
 
-        string name = $"Xp_bar_{assetIndex}_Fishes_Fill";
-        string path = $"Assets/Graphics/GUI Components/Xp Bars/{name}.png";
-        Sprite s = LoadBestSprite(path, name, ref _cachedXpBarFills[assetIndex]);
-        if (s == null && assetIndex == 4)
+        // 1. New direct asset names: 2_fish_xp_bar_fill, 3_fish_xp_bar_fill, 4_fish_xp_bar_fill, 5_fish_xp_bar_fill
+        string name = $"{count}_fish_xp_bar_fill";
+        string path = $"Assets/Graphics/GUI Components/{name}.png";
+        Sprite s = LoadBestSprite(path, name, ref _cachedXpBarFills[count]);
+        if (s != null) return s;
+
+        // Legacy fallbacks
+        string legacyName = $"Xp_bar_{count}_Fishes_Fill";
+        string legacyPath = $"Assets/Graphics/GUI Components/Xp Bars/{legacyName}.png";
+        s = LoadBestSprite(legacyPath, legacyName, ref _cachedXpBarFills[count]);
+        if (s == null && count == 4)
         {
-            s = LoadBestSprite("Assets/Graphics/GUI Components/Xp Bars/Xp_bar_fill.png", "Xp_bar_fill", ref _cachedXpBarFills[assetIndex]);
+            s = LoadBestSprite("Assets/Graphics/GUI Components/Xp Bars/Xp_bar_fill.png", "Xp_bar_fill", ref _cachedXpBarFills[count]);
         }
         if (s != null) return s;
 
@@ -1898,7 +1907,7 @@ public class GuiManager : Singleton<GuiManager>
 
     private void EnsureModularSpritesLoaded()
     {
-        for (int i = 2; i <= 6; i++)
+        for (int i = 2; i <= 5; i++)
         {
             GetXpBarTrackSprite(i);
             GetXpBarFillSprite(i);
@@ -2961,7 +2970,7 @@ public class GuiManager : Singleton<GuiManager>
 
         // 2. Exact positions and sizes matching Inspector screenshots
         // ProgressBar1: PosX=67, PosY=-116, Width=484, Height=52
-        // FishIcon_3: PosX=199.6, PosY=-2, Width=47.52, Height=40
+        // FishIcon_3: PosX=199.6, PosY=5.16, Width=47.5234, Height=28.3437
         // FishIcon_4: PosX=296.4, PosY=7, Width=48, Height=28
         // FishIcon_5: PosX=393.9, PosY=-4.57, Width=48.86, Height=46.15
         float segmentWidth = totalWidth / activeCount;
@@ -2990,45 +2999,45 @@ public class GuiManager : Singleton<GuiManager>
                 // Lake / River (Levels 5 - 8)
                 if (i == 0) // River FishIcon_1 (Aspect ~1.01)
                 {
-                    posX = 6.0f;
                     posY = 2.0f;
                     iconW = 36.0f;
                     iconH = 36.0f;
+                    posX = (activeCount == 5) ? 6.0f : (i * segmentWidth + 6.0f);
                 }
-                else if (i == 1) // River FishIcon_2 (Aspect ~1.01) - exact Inspector values: Pos(103, 0), Size(42, 42)
+                else if (i == 1) // River FishIcon_2 (Aspect ~1.01)
                 {
-                    posX = 103.0f;
                     posY = 0.0f;
                     iconW = 42.0f;
                     iconH = 42.0f;
+                    posX = (activeCount == 5) ? 103.0f : (i * segmentWidth + 6.0f);
                 }
-                else if (i == 2) // River FishIcon_3 (Aspect ~1.01) - exact Inspector values: Pos(200, -5.5), Size(51.5208, 53)
+                else if (i == 2) // River FishIcon_3 (Aspect ~1.01)
                 {
-                    posX = 200.0f;
                     posY = -5.5f;
                     iconW = 51.5208f;
                     iconH = 53.0f;
+                    posX = (activeCount == 5) ? 200.0f : (i * segmentWidth + 4.0f);
                 }
-                else if (i == 3) // River FishIcon_4 (Elongated Pike/Gar) - exact Inspector values: Pos(292.5, 8.5), Size(63.0059, 29.5)
+                else if (i == 3) // River FishIcon_4 (Elongated Pike/Gar)
                 {
-                    posX = 292.5f;
                     posY = 8.5f;
                     iconW = 63.0059f;
                     iconH = 29.5f;
+                    posX = (activeCount == 5) ? 292.5f : (i * segmentWidth + 2.0f);
                 }
-                else if (i == 4) // River FishIcon_5 (Level 5 Lake Fish) - exact Inspector values: Pos(388, -2.7842), Size(76.0713, 60.0951)
+                else if (i == 4) // River FishIcon_5 (Level 5 Lake Fish)
                 {
-                    posX = 388.0f;
                     posY = -2.7842f;
                     iconW = 76.0713f;
                     iconH = 60.0951f;
+                    posX = (activeCount == 5) ? 388.0f : (i * segmentWidth + 1.0f);
                 }
                 else // River FishIcon_6
                 {
-                    posX = i * segmentWidth + 6f;
                     posY = 0f;
                     iconW = 46f;
                     iconH = 35f;
+                    posX = i * segmentWidth + 6f;
                 }
             }
             else
@@ -3036,45 +3045,45 @@ public class GuiManager : Singleton<GuiManager>
                 // Ocean / Sea (Levels 1 - 4)
                 if (i == 0) // FishIcon_1
                 {
-                    posX = 6.0f;
                     posY = 5.16f;
                     iconW = 38.93f;
                     iconH = 28.78f;
+                    posX = (activeCount == 5) ? 6.0f : (i * segmentWidth + 6.0f);
                 }
                 else if (i == 1) // FishIcon_2
                 {
-                    posX = 102.8f;
                     posY = 1.0f;
                     iconW = 42.0f;
                     iconH = 34.0f;
+                    posX = (activeCount == 5) ? 102.8f : (i * segmentWidth + 6.0f);
                 }
                 else if (i == 2) // FishIcon_3
                 {
-                    posX = 199.6f;
-                    posY = -2.0f;
+                    posY = 5.16f;
                     iconW = 47.5234f;
-                    iconH = 40.0f;
+                    iconH = 28.3437f;
+                    posX = (activeCount == 5) ? 199.6f : (i * segmentWidth + 6.0f);
                 }
                 else if (i == 3) // FishIcon_4
                 {
-                    posX = 296.4f;
                     posY = 7.0f;
                     iconW = 48.0f;
                     iconH = 28.0f;
+                    posX = (activeCount == 5) ? 296.4f : (i * segmentWidth + 6.0f);
                 }
                 else if (i == 4) // FishIcon_5
                 {
-                    posX = 393.9f;
                     posY = -4.5742f;
                     iconW = 48.8647f;
                     iconH = 46.1484f;
+                    posX = (activeCount == 5) ? 393.9f : (i * segmentWidth + 6.0f);
                 }
                 else // FishIcon_6
                 {
-                    posX = i * segmentWidth + 6f;
                     posY = 0f;
                     iconW = 46f;
                     iconH = 35f;
+                    posX = i * segmentWidth + 6f;
                 }
             }
 
@@ -3124,6 +3133,9 @@ public class GuiManager : Singleton<GuiManager>
 
     public void RestartGame()
     {
+        if (isSceneTransitionInProgress || Rhinotap.LoadingScreenManager.IsLoading) return;
+        isSceneTransitionInProgress = true;
+        Rhinotap.LevelBriefingManager.SkipNextBriefing = true;
         StartCoroutine(RestartGameRoutine());
     }
 
@@ -3132,12 +3144,14 @@ public class GuiManager : Singleton<GuiManager>
         // Delay to allow button click sound to play
         yield return new WaitForSecondsRealtime(0.25f);
         
-        Time.timeScale = 1f;
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        Time.timeScale = 0f;
+        Rhinotap.LoadingScreenManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
     public void GoToMainMenu()
     {
+        if (isSceneTransitionInProgress || Rhinotap.LoadingScreenManager.IsLoading) return;
+        isSceneTransitionInProgress = true;
         StartCoroutine(GoToMainMenuRoutine());
     }
 
@@ -3146,8 +3160,8 @@ public class GuiManager : Singleton<GuiManager>
         // Delay to allow button click sound to play
         yield return new WaitForSecondsRealtime(0.25f);
         
-        Time.timeScale = 1f;
-        SceneManager.LoadScene("MainMenu");
+        Time.timeScale = 0f;
+        Rhinotap.LoadingScreenManager.LoadScene("MainMenu");
     }
 
     private void ShowScore(int score = 0)
@@ -3769,7 +3783,7 @@ public class GuiManager : Singleton<GuiManager>
             LevelConfig cfg = LevelManager.GetCurrentConfig();
             int numFish = Mathf.Clamp(cfg.maxEnemyLevel, 1, 6);
 
-            var resultItems = new System.Collections.Generic.List<(Sprite sprite, int count, string id)>();
+            var resultItems = new System.Collections.Generic.List<(Sprite sprite, int count, string id, Color color)>();
             for (int i = 1; i <= numFish; i++)
             {
                 Sprite fishSprite = null;
@@ -3782,22 +3796,26 @@ public class GuiManager : Singleton<GuiManager>
                     fishSprite = GetGrowthSprite(i - 1, LevelManager.IsCurrentLakeLevel);
                 }
                 int eatenCount = (i < LevelManager.FishEatenCounts.Length) ? LevelManager.FishEatenCounts[i] : 0;
-                resultItems.Add((fishSprite, eatenCount, "FishItem_" + i));
+                resultItems.Add((fishSprite, eatenCount, "FishItem_" + i, Color.white));
             }
 
             if (LevelManager.SickFishEatenCount > 0)
             {
                 Sprite sickSprite = LoadGrowthSpriteSafe("level 2 fish sick", "Assets/Graphics/fish/level 2 fish sick.png");
-                resultItems.Add((sickSprite, LevelManager.SickFishEatenCount, "SickFishItem"));
+                if (sickSprite == null)
+                {
+                    sickSprite = GetGrowthSprite(1, false);
+                }
+                resultItems.Add((sickSprite, LevelManager.SickFishEatenCount, "SickFishItem", new Color(0.72f, 1f, 0.72f, 1f)));
             }
 
             int totalItems = resultItems.Count;
-            float itemSpacing = (totalItems <= 2) ? (150f * scaleFactor)
-                              : (totalItems <= 3) ? (135f * scaleFactor)
-                              : (totalItems <= 4) ? (122f * scaleFactor)
-                              : (115f * scaleFactor);
+            float itemSpacing = (totalItems <= 2) ? (165f * scaleFactor)
+                              : (totalItems <= 3) ? (145f * scaleFactor)
+                              : (totalItems <= 4) ? (130f * scaleFactor)
+                              : (120f * scaleFactor);
             float startX = -(totalItems - 1) * 0.5f * itemSpacing;
-            float fishRowY = 5f * scaleFactor;
+            float fishRowY = -40f * scaleFactor;
 
             for (int k = 0; k < totalItems; k++)
             {
@@ -3811,83 +3829,83 @@ public class GuiManager : Singleton<GuiManager>
                 rtItem.anchorMax = new Vector2(0.5f, 0.5f);
                 rtItem.pivot = new Vector2(0.5f, 0.5f);
                 rtItem.anchoredPosition = new Vector2(itemX, fishRowY);
-                rtItem.sizeDelta = new Vector2(80f * scaleFactor, 80f * scaleFactor);
+                rtItem.sizeDelta = new Vector2(110f * scaleFactor, 110f * scaleFactor);
 
-                // Fish Icon (Top) - keeps original size
+                // Fish Icon (Top) - enlarged for better visibility and presence
                 GameObject iconObj = new GameObject("Icon");
                 iconObj.transform.SetParent(fishItemObj.transform, false);
                 RectTransform rtIcon = iconObj.AddComponent<RectTransform>();
                 rtIcon.anchorMin = new Vector2(0.5f, 0.5f);
                 rtIcon.anchorMax = new Vector2(0.5f, 0.5f);
                 rtIcon.pivot = new Vector2(0.5f, 0.5f);
-                rtIcon.anchoredPosition = new Vector2(0f, 16f * scaleFactor);
-                rtIcon.sizeDelta = new Vector2(65f * scaleFactor, 42f * scaleFactor);
+                rtIcon.anchoredPosition = new Vector2(0f, 26f * scaleFactor);
+                rtIcon.sizeDelta = new Vector2(110f * scaleFactor, 72f * scaleFactor);
 
                 Image iconImg = iconObj.AddComponent<Image>();
                 iconImg.sprite = item.sprite;
+                iconImg.color = item.color;
                 iconImg.preserveAspect = true;
                 iconImg.raycastTarget = false;
 
                 // Eaten Amount (Bottom - using digit sprites 0.png..9.png)
-                GameObject numRow = CreateDigitNumberRow(fishItemObj.transform, item.count, 22f * scaleFactor, "CountRow");
+                GameObject numRow = CreateDigitNumberRow(fishItemObj.transform, item.count, 24f * scaleFactor, "CountRow");
                 RectTransform rtNum = numRow.GetComponent<RectTransform>();
                 if (rtNum != null)
                 {
                     rtNum.anchorMin = new Vector2(0.5f, 0.5f);
                     rtNum.anchorMax = new Vector2(0.5f, 0.5f);
                     rtNum.pivot = new Vector2(0.5f, 0.5f);
-                    rtNum.anchoredPosition = new Vector2(0f, -20f * scaleFactor);
+                    rtNum.anchoredPosition = new Vector2(0f, -24f * scaleFactor);
                 }
             }
 
-            // 4. Bottom Action Buttons: Enlarged to match modal proportions
-            // RestartBtn: PosX = -158, PosY = -196, Size = 128x128
-            // ContinueBtn: PosX = 172, PosY = -193, Size = 128x128
-            // BackToMenuBtn: PosX = 8, PosY = -196, Size = 272x152
-            Vector2 squareBtnSize = new Vector2(128f * scaleFactor, 128f * scaleFactor);
-            Vector2 menuBtnSize = new Vector2(272f * scaleFactor, 152f * scaleFactor);
+            // 4. Bottom Action Buttons: Mapped to match new 2019x1137 pill button assets
+            // Balanced 3-button row: Restart (Left), BackToMenu (Center), Continue (Right)
+            Vector2 actionBtnSize = new Vector2(245f * scaleFactor, 138f * scaleFactor);
+            float btnY = -205f * scaleFactor;
+            float btnSpacingX = 236f * scaleFactor;
 
-            // Short_Restart_Button (Left) - matching exact Inspector value: (-158, -193)
+            // Short_Restart_Button (Left)
             Sprite restartSp = GetShortRestartButtonSprite();
-            CreateSpriteButton("RestartBtn", modalCardObj.transform, restartSp, squareBtnSize, new Vector2(-158f * scaleFactor, -193f * scaleFactor), () =>
+            CreateSpriteButton("RestartBtn", modalCardObj.transform, restartSp, actionBtnSize, new Vector2(-btnSpacingX, btnY), () =>
             {
                 if (isSceneTransitionInProgress) return;
                 isSceneTransitionInProgress = true;
                 DisableModalButtons();
-                Time.timeScale = 1f;
-                SceneManager.LoadScene("SampleScene");
+                Rhinotap.LevelBriefingManager.SkipNextBriefing = true;
+                Time.timeScale = 0f;
+                Rhinotap.LoadingScreenManager.LoadScene(SceneManager.GetActiveScene().name);
             });
 
-            // Back_To_Menu_Button (Middle) - X offset compensates for right transparent padding so visual center is at X = 0
+            // Back_To_Menu_Button (Middle)
             Sprite menuSp = GetBackToMenuButtonSprite();
-            CreateSpriteButton("BackToMenuBtn", modalCardObj.transform, menuSp, menuBtnSize, new Vector2(8f * scaleFactor, -196f * scaleFactor), () =>
+            CreateSpriteButton("BackToMenuBtn", modalCardObj.transform, menuSp, actionBtnSize, new Vector2(0f, btnY), () =>
             {
                 if (isSceneTransitionInProgress) return;
                 isSceneTransitionInProgress = true;
                 DisableModalButtons();
                 MainMenuManager.OpenLevelSelectOnLoad = false;
-                Time.timeScale = 1f;
-                SceneManager.LoadScene("MainMenu");
+                Time.timeScale = 0f;
+                Rhinotap.LoadingScreenManager.LoadScene("MainMenu");
             });
 
             // Short_Continue_Button (Right)
             Sprite continueSp = GetShortContinueButtonSprite();
-            CreateSpriteButton("ContinueBtn", modalCardObj.transform, continueSp, squareBtnSize, new Vector2(172f * scaleFactor, -193f * scaleFactor), () =>
+            CreateSpriteButton("ContinueBtn", modalCardObj.transform, continueSp, actionBtnSize, new Vector2(btnSpacingX, btnY), () =>
             {
                 if (isSceneTransitionInProgress) return;
                 isSceneTransitionInProgress = true;
                 DisableModalButtons();
+                Time.timeScale = 0f;
                 if (hasNext)
                 {
                     LevelManager.CurrentLevel = currentLvl + 1;
-                    Time.timeScale = 1f;
-                    SceneManager.LoadScene("SampleScene");
+                    Rhinotap.LoadingScreenManager.LoadScene("SampleScene");
                 }
                 else
                 {
                     MainMenuManager.OpenLevelSelectOnLoad = false;
-                    Time.timeScale = 1f;
-                    SceneManager.LoadScene("MainMenu");
+                    Rhinotap.LoadingScreenManager.LoadScene("MainMenu");
                 }
             });
         }
@@ -3935,20 +3953,21 @@ public class GuiManager : Singleton<GuiManager>
                 killerImg.raycastTarget = false;
             }
 
-            // 3. Action Buttons (Try Again & Menu) - matching exact Inspector measurements
-            // TryAgainBtn: PosX = 2, PosY = -128, Size = 280x158
+            // 3. Action Buttons (Restart & Menu) - matching exact Inspector measurements
+            // RestartBtn: PosX = 2, PosY = -128, Size = 280x158
             // BackToMenuBtn: PosX = 2, PosY = -248, Size = 280x158
             Vector2 btnSize = new Vector2(280f * scaleFactor, 158f * scaleFactor);
 
-            // Try Again Button (Top button below viewport)
-            Sprite tryAgainSp = GetTryAgainButtonSprite();
-            GameObject retryBtn = CreateSpriteButton("TryAgainBtn", modalCardObj.transform, tryAgainSp, btnSize, new Vector2(2f * scaleFactor, -128f * scaleFactor), () =>
+            // Restart Button (Top button below viewport)
+            Sprite restartSp = GetRestartButtonSprite();
+            GameObject restartBtn = CreateSpriteButton("RestartBtn", modalCardObj.transform, restartSp, btnSize, new Vector2(2f * scaleFactor, -128f * scaleFactor), () =>
             {
                 if (isSceneTransitionInProgress) return;
                 isSceneTransitionInProgress = true;
                 DisableModalButtons();
-                Time.timeScale = 1f;
-                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+                Rhinotap.LevelBriefingManager.SkipNextBriefing = true;
+                Time.timeScale = 0f;
+                Rhinotap.LoadingScreenManager.LoadScene(SceneManager.GetActiveScene().name);
             });
 
             // Back To Menu Button (Bottom button)
@@ -3959,8 +3978,8 @@ public class GuiManager : Singleton<GuiManager>
                 isSceneTransitionInProgress = true;
                 DisableModalButtons();
                 MainMenuManager.OpenLevelSelectOnLoad = false;
-                Time.timeScale = 1f;
-                SceneManager.LoadScene("MainMenu");
+                Time.timeScale = 0f;
+                Rhinotap.LoadingScreenManager.LoadScene("MainMenu");
             });
         }
     }

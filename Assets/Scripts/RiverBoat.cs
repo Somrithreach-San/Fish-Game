@@ -8,13 +8,16 @@ public class RiverBoat : MonoBehaviour
     public enum BoatState { Arriving, StoppedWaiting, Fishing, DepartWaiting, Departing }
 
     [Header("River Boat Appearance")]
-    [SerializeField] private float boatScale = 1.2253f;
-    [Tooltip("How deep the lower hull dips below the water surface (4.75f slightly higher than 5.0f)")]
-    [SerializeField] private float submergenceDepth = 4.75f;
+    [SerializeField] private float boatScale = 1.0f;
+    [Tooltip("How deep the lower hull dips below the water surface")]
+    [SerializeField] private float submergenceDepth = 1.5f;
     [SerializeField] private float bobFrequency = 2.2f;
     [SerializeField] private float bobAmplitude = 0.04f;
     [SerializeField] private float tiltAmplitude = 1.2f;
-    [SerializeField] private Vector2 propellerOffset = new Vector2(5.13f, -1.19f);
+    [SerializeField] private Vector2 propellerOffset = new Vector2(5.96f, -2.10f);
+    [Tooltip("Radius around the spinning outboard motor propeller that shreds any fish on contact")]
+    [SerializeField] private float propellerKillRadius = 0.90f;
+    [SerializeField] private AudioClip propellerChopClip;
 
     [Header("Bubble Particle Materials")]
     [SerializeField] private Material bubbleMaterial;
@@ -85,15 +88,20 @@ public class RiverBoat : MonoBehaviour
     [Tooltip("SmoothDamp lag while beam swims toward the fish (seconds). 0 = instant snap.")]
     [SerializeField] private float targetFollowLag = 0.30f;
 
-    // Laser 1: Player fish
+    // Laser 1 Target info (Player Level >= 2, Shark, or AI Fish Level >= 2)
     private LineRenderer laserLineRenderer;
     private Vector3 currentLaserTarget;
-    // Laser 2: AI fish (Level >= 2) or Active Shark
+    private bool hasValidTarget1 = false;
+    private bool target1IsPlayer = false;
+    private SharkHazard target1Shark;
+    private Fish target1AI;
+
+    // Laser 2 Target info (Shark, or AI Fish Level >= 2 distinct from Target 1)
     private LineRenderer laserLineRendererAI;
     private Vector3 currentAILaserTarget;
-    private Fish currentAITarget;
-    private SharkHazard currentSharkTarget;
-    private bool hasValidAITarget = false;
+    private bool hasValidTarget2 = false;
+    private SharkHazard target2Shark;
+    private Fish target2AI;
 
     private bool isLaserActive = false;
     private float laserTrackElapsed = 0f;
@@ -197,11 +205,11 @@ public class RiverBoat : MonoBehaviour
     /// </summary>
     public static void CalculateSpawnPlacement(bool cruiseFromOffscreen, float bgLeft, float bgRight, float surfaceY, bool startFromLeft, out Vector3 spawnPos)
     {
-        float boatHalfWidth = (12.64f * 1.20f) * 0.5f; // ~7.58 units
+        float boatHalfWidth = (13.52f * 1.0f) * 0.5f; // ~6.76 units
         float spawnMargin = boatHalfWidth + 3.0f;
-        float halfHeight = (8.42f * 1.20f) * 0.5f; // ~5.05 units
+        float halfHeight = (4.26f * 1.0f) * 0.5f; // ~2.13 units
         float sY = (surfaceY > 5f) ? surfaceY : 15.0f;
-        float targetCenterY = (sY - 4.75f) + halfHeight;
+        float targetCenterY = (sY - 1.5f) + halfHeight;
         
         float startX = startFromLeft ? (bgLeft - spawnMargin) : (bgRight + spawnMargin);
         spawnPos = new Vector3(startX, targetCenterY, 0f);
@@ -396,7 +404,7 @@ public class RiverBoat : MonoBehaviour
         {
             return spriteRenderer.bounds.extents.x;
         }
-        return (12.64f * boatScale) * 0.5f;
+        return (13.52f * boatScale) * 0.5f;
     }
 
     private float GetBoatHalfHeight()
@@ -405,7 +413,7 @@ public class RiverBoat : MonoBehaviour
         {
             return (spriteRenderer.sprite.rect.height / spriteRenderer.sprite.pixelsPerUnit) * boatScale * 0.5f;
         }
-        return (8.42f * boatScale) * 0.5f;
+        return (4.26f * boatScale) * 0.5f;
     }
 
     private float GetTargetCenterY()
@@ -679,6 +687,98 @@ public class RiverBoat : MonoBehaviour
         wakeParticleSystem.transform.localRotation = Quaternion.Euler(0f, rotationY, 0f);
     }
 
+    /// <summary>
+    /// Computes the exact current world position of the spinning outboard motor propeller.
+    /// </summary>
+    public Vector3 GetPropellerWorldPosition()
+    {
+        float localPropellerX = (facingRight ? -propellerOffset.x : propellerOffset.x) * boatScale;
+        float localPropellerY = propellerOffset.y * boatScale;
+        return transform.position + new Vector3(localPropellerX, localPropellerY, 0f);
+    }
+
+    /// <summary>
+    /// Shreds any colliding fish (player, AI, or shark) on propeller impact.
+    /// Excludes fish that are currently harpooned/hooked so harpoon hauling is never disrupted.
+    /// </summary>
+    private void UpdatePropellerHazard()
+    {
+        // Propeller is only lethal while active and driving (Arriving or Departing).
+        // When stopped/parked in fishing mode, the motor is stationary and safe.
+        bool isPropellerActive = (currentState == BoatState.Arriving || currentState == BoatState.Departing);
+        if (!isPropellerActive) return;
+        if (currentState == BoatState.DepartWaiting && hasCaughtShark) return;
+
+        Vector3 propellerPos = GetPropellerWorldPosition();
+        float radius = propellerKillRadius * boatScale;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(propellerPos, radius);
+        if (hits == null || hits.Length == 0) return;
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D col = hits[i];
+            if (col == null || !col.gameObject.activeInHierarchy) continue;
+
+            // 1. Check Player Fish
+            PlayerController pc = col.GetComponentInParent<PlayerController>();
+            if (pc != null && pc.IsAlive)
+            {
+                // CRUCIAL: If the fish is already harpooned / hooked, do not kill via propeller!
+                if (pc.IsHooked) continue;
+
+                PlayPropellerChopSound(propellerPos);
+                FishBloodCloud.Spawn(pc.transform.position, 1.6f, Vector2.down * 1.5f);
+                if (GameManager.instance != null) GameManager.instance.CameraShake(0.25f, 8f, 3f);
+                pc.Death(killerSprite: spriteRenderer != null ? spriteRenderer.sprite : null, spawnBlood: true);
+                continue;
+            }
+
+            // 2. Check AI Fish
+            Fish fish = col.GetComponentInParent<Fish>();
+            if (fish != null && !fish.IsDead)
+            {
+                // CRUCIAL: If the fish is already harpooned / hooked, do not kill via propeller!
+                if (fish.IsHooked) continue;
+
+                PlayPropellerChopSound(propellerPos);
+                float bloodScale = Mathf.Clamp(0.5f + fish.Level * 0.25f, 0.6f, 2.0f);
+                FishBloodCloud.Spawn(fish.transform.position, bloodScale, Vector2.down * 1.2f);
+                fish.Die();
+                continue;
+            }
+
+            // 3. Check Shark Hazard
+            SharkHazard shark = col.GetComponentInParent<SharkHazard>();
+            if (shark != null && !shark.IsDead)
+            {
+                // Note: If shark is already harpooned, shark.IsDead is true and collider is disabled.
+                PlayPropellerChopSound(propellerPos);
+                FishBloodCloud.Spawn(shark.transform.position, 2.5f, Vector2.down * 2.0f);
+                if (GameManager.instance != null) GameManager.instance.CameraShake(0.2f, 6f, 2f);
+                shark.OnReeledToBoat(this);
+                continue;
+            }
+        }
+    }
+
+    private void PlayPropellerChopSound(Vector3 pos)
+    {
+        if (!AudioSettingsManager.IsSfxEnabled) return;
+        AudioClip clip = propellerChopClip;
+        if (clip == null)
+        {
+            #if UNITY_EDITOR
+            clip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Harpoon_Stab.mp3");
+            #endif
+            if (clip == null) clip = Resources.Load<AudioClip>("Harpoon_Stab");
+        }
+        if (clip != null)
+        {
+            SFXPool.Play3D(clip, pos, 0.9f, 3.0f, 30.0f);
+        }
+    }
+
     public Vector3 GetHarpoonLauncherPosition()
     {
         float offsetX = (facingRight ? 2.5f : -2.5f) * boatScale;
@@ -810,6 +910,7 @@ public class RiverBoat : MonoBehaviour
     {
         UpdateAudio();
         UpdateLaserSight();
+        UpdatePropellerHazard();
 
         if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
 
@@ -866,7 +967,11 @@ public class RiverBoat : MonoBehaviour
         for (int round = 0; round < totalTries; round++)
         {
             if (hasCaughtShark) break;
-            if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
+            if (LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver))
+            {
+                StopLaserSight();
+                break;
+            }
 
             // USER REQUIREMENT: Target 2 fish at a time (Player fish + AI fish Level >= 2)
             StartLaserSight();
@@ -874,7 +979,11 @@ public class RiverBoat : MonoBehaviour
             float elapsed = 0f;
             while (elapsed < laserTrackDuration)
             {
-                if (hasCaughtShark) break;
+                if (hasCaughtShark || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver))
+                {
+                    StopLaserSight();
+                    break;
+                }
                 if (!isPaused && (GameManager.instance == null || !GameManager.Paused))
                 {
                     elapsed += Time.deltaTime;
@@ -883,46 +992,46 @@ public class RiverBoat : MonoBehaviour
                 yield return null;
             }
 
-            if (hasCaughtShark) break;
-
-            // Intelligent predictive lead aiming calculation:
-            // Predict where the player will be when the harpoon strikes!
-            Vector2 playerVel = GetPlayerVelocity();
-            float harpoonSpeed = 38f;
-            Vector3 predictedPlayerPos = PredictTargetPosition(currentLaserTarget, playerVel, harpoonSpeed, postLockReactionDelay);
-            lastLockedAngle = CalculateTiltToTarget(predictedPlayerPos);
-
-            // Lock AI / Shark predicted location if acquired
-            bool hasAiShot = hasValidAITarget && (currentSharkTarget != null || currentAITarget != null);
-            if (hasAiShot)
+            if (hasCaughtShark || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver))
             {
-                Vector2 aiVel = Vector2.zero;
-                if (currentSharkTarget != null)
-                {
-                    aiVel = new Vector2(currentSharkTarget.Direction * currentSharkTarget.CurrentMoveSpeed, 0f);
-                }
-                else if (currentAITarget != null)
-                {
-                    aiVel = GetFishVelocity(currentAITarget);
-                }
-                Vector3 predictedAiPos = PredictTargetPosition(currentAILaserTarget, aiVel, harpoonSpeed, postLockReactionDelay + 0.16f);
-                lastLockedAngleAI = CalculateTiltToTarget(predictedAiPos);
+                StopLaserSight();
+                break;
             }
 
-            // Remove lasers from both fish before firing
+            // Intelligent predictive lead aiming calculation:
+            if (hasValidTarget1)
+            {
+                Vector2 vel1 = GetTargetVelocity(target1IsPlayer, target1Shark, target1AI);
+                float harpoonSpeed = 38f;
+                Vector3 predictedPos1 = PredictTargetPosition(currentLaserTarget, vel1, harpoonSpeed, postLockReactionDelay);
+                lastLockedAngle = CalculateTiltToTarget(predictedPos1);
+            }
+
+            if (hasValidTarget2)
+            {
+                Vector2 vel2 = GetTargetVelocity(false, target2Shark, target2AI);
+                float harpoonSpeed = 38f;
+                Vector3 predictedPos2 = PredictTargetPosition(currentAILaserTarget, vel2, harpoonSpeed, postLockReactionDelay + 0.16f);
+                lastLockedAngleAI = CalculateTiltToTarget(predictedPos2);
+            }
+
+            // Remove lasers from both targets before firing
             StopLaserSight();
 
-            if (hasCaughtShark) break;
+            if (hasCaughtShark || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
 
             // Brief reaction window: gives player and fish an intuitive window to realize laser is gone and swim away!
             yield return StartCoroutine(PauseRoutine(postLockReactionDelay));
 
-            if (hasCaughtShark) break;
+            if (hasCaughtShark || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
 
             // Shoot harpoon(s) at predicted location(s)
-            yield return StartCoroutine(HarpoonLifecycleSequence(lastLockedAngle, hasAiShot, lastLockedAngleAI));
+            if (hasValidTarget1 || hasValidTarget2)
+            {
+                yield return StartCoroutine(HarpoonLifecycleSequence(hasValidTarget1, lastLockedAngle, hasValidTarget2, lastLockedAngleAI));
+            }
 
-            if (hasCaughtShark) break;
+            if (hasCaughtShark || LevelManager.IsLevelCompleted || (GameManager.instance != null && GameManager.instance.IsGameOver)) break;
 
             // If game is over (player caught/died), stop hunting further rounds
             if (GameManager.instance != null && GameManager.instance.IsGameOver) break;
@@ -955,23 +1064,29 @@ public class RiverBoat : MonoBehaviour
         StartDeparture();
     }
 
-    private IEnumerator HarpoonLifecycleSequence(float playerAngle, bool hasAiShot, float aiAngle)
+    private IEnumerator HarpoonLifecycleSequence(bool fireShot1, float angle1, bool fireShot2, float angle2)
     {
         currentState = BoatState.Fishing;
         activeHarpoons.Clear();
 
-        if (hasAiShot)
+        if (fireShot1 && fireShot2)
         {
-            // 2 lasers shown -> Shoot exact 2 harpoons (1 at player, 1 at Level 2+ AI fish)
-            FireHarpoon(playerAngle);
+            // 2 lasers shown -> Shoot exact 2 harpoons (Shot 1, then Shot 2 with 0.16s stagger)
+            FireHarpoon(angle1);
             yield return StartCoroutine(PauseRoutine(0.16f));
-            FireHarpoon(aiAngle);
+            FireHarpoon(angle2);
             yield return StartCoroutine(WaitForAllHarpoons());
         }
-        else
+        else if (fireShot1)
         {
-            // 1 laser shown -> Shoot exact 1 harpoon at the player
-            FireHarpoon(playerAngle);
+            // 1 laser shown -> Shoot 1 harpoon at Target 1
+            FireHarpoon(angle1);
+            yield return StartCoroutine(WaitForAllHarpoons());
+        }
+        else if (fireShot2)
+        {
+            // 1 laser shown -> Shoot 1 harpoon at Target 2
+            FireHarpoon(angle2);
             yield return StartCoroutine(WaitForAllHarpoons());
         }
     }
@@ -1107,38 +1222,121 @@ public class RiverBoat : MonoBehaviour
         if (oldDot != null) Destroy(oldDot.gameObject);
     }
 
-    private void StartLaserSight()
+    private void AcquireDualTargets()
     {
-        SetupLaserSight();
-        isLaserActive    = true;
-        laserTrackElapsed = 0f;
-        wasLockingPhase  = false;
-        laserTargetVelocity = Vector3.zero;
-        aiTargetVelocity    = Vector3.zero;
+        SharkHazard activeShark = FindBestSharkTarget();
+        bool playerValid = IsPlayerValidTarget();
 
-        Transform pt = GetPlayerTransform();
-        currentLaserTarget = (pt != null) ? pt.position
-            : new Vector3(transform.position.x, worldFloorY, 0f);
-
-        currentSharkTarget = FindBestSharkTarget();
-        if (currentSharkTarget != null)
+        // ── Assign Target 1 ───────────────────────────────────────────
+        if (playerValid)
         {
-            currentAITarget = null;
-            currentAILaserTarget = currentSharkTarget.transform.position;
-            hasValidAITarget = true;
+            target1IsPlayer = true;
+            target1Shark = null;
+            target1AI = null;
+            hasValidTarget1 = true;
+        }
+        else if (activeShark != null)
+        {
+            target1IsPlayer = false;
+            target1Shark = activeShark;
+            target1AI = null;
+            hasValidTarget1 = true;
         }
         else
         {
-            currentAITarget = FindBestAITarget();
-            if (currentAITarget != null)
-            {
-                currentAILaserTarget = currentAITarget.transform.position;
-                hasValidAITarget = true;
-            }
-            else
-            {
-                hasValidAITarget = false;
-            }
+            target1IsPlayer = false;
+            target1Shark = null;
+            target1AI = FindBestAITarget(null);
+            hasValidTarget1 = (target1AI != null);
+        }
+
+        // ── Assign Target 2 (Must be distinct from Target 1) ──────────
+        if (activeShark != null && target1Shark != activeShark)
+        {
+            target2Shark = activeShark;
+            target2AI = null;
+            hasValidTarget2 = true;
+        }
+        else
+        {
+            target2Shark = null;
+            target2AI = FindBestAITarget(target1AI);
+            hasValidTarget2 = (target2AI != null);
+        }
+    }
+
+    private Vector3 GetTarget1WorldPos()
+    {
+        if (target1IsPlayer)
+        {
+            Transform pt = GetPlayerTransform();
+            return (pt != null) ? pt.position : currentLaserTarget;
+        }
+        if (target1Shark != null && target1Shark.gameObject.activeInHierarchy && !target1Shark.IsDead)
+        {
+            return target1Shark.transform.position;
+        }
+        if (target1AI != null && target1AI.gameObject.activeInHierarchy && !target1AI.IsDead && !target1AI.IsHooked)
+        {
+            return target1AI.transform.position;
+        }
+        return currentLaserTarget;
+    }
+
+    private Vector3 GetTarget2WorldPos()
+    {
+        if (target2Shark != null && target2Shark.gameObject.activeInHierarchy && !target2Shark.IsDead)
+        {
+            return target2Shark.transform.position;
+        }
+        if (target2AI != null && target2AI.gameObject.activeInHierarchy && !target2AI.IsDead && !target2AI.IsHooked)
+        {
+            return target2AI.transform.position;
+        }
+        return currentAILaserTarget;
+    }
+
+    private Vector2 GetTargetVelocity(bool isPlayer, SharkHazard shark, Fish aiFish)
+    {
+        if (isPlayer) return GetPlayerVelocity();
+        if (shark != null && shark.gameObject.activeInHierarchy && !shark.IsDead)
+        {
+            return new Vector2(shark.Direction * shark.CurrentMoveSpeed, 0f);
+        }
+        if (aiFish != null && aiFish.gameObject.activeInHierarchy && !aiFish.IsDead && !aiFish.IsHooked)
+        {
+            return GetFishVelocity(aiFish);
+        }
+        return Vector2.zero;
+    }
+
+    private void StartLaserSight()
+    {
+        SetupLaserSight();
+        isLaserActive     = true;
+        laserTrackElapsed = 0f;
+        wasLockingPhase   = false;
+        laserTargetVelocity = Vector3.zero;
+        aiTargetVelocity    = Vector3.zero;
+
+        AcquireDualTargets();
+
+        if (hasValidTarget1)
+        {
+            currentLaserTarget = GetTarget1WorldPos();
+        }
+        else
+        {
+            currentLaserTarget = new Vector3(transform.position.x, worldFloorY, 0f);
+        }
+
+        if (hasValidTarget2)
+        {
+            currentAILaserTarget = GetTarget2WorldPos();
+        }
+        else
+        {
+            currentAILaserTarget = new Vector3(transform.position.x, worldFloorY, 0f);
         }
     }
 
@@ -1192,86 +1390,56 @@ public class RiverBoat : MonoBehaviour
         // Waver shrinks to near-zero as lock-on approaches — beam visibly steadies, great tension cue
         float waver = Mathf.Lerp(waverAmplitude, waverAmplitudeLocked, chargeProgress);
 
-        // ── 1. Player laser ────────────────────────────────────────────────
-        Transform pt = GetPlayerTransform();
-        if (pt != null)
+        // ── Dynamically refresh and track dual targets ─────────────────────
+        AcquireDualTargets();
+
+        // ── 1. Laser 1 ─────────────────────────────────────────────────────
+        if (hasValidTarget1)
         {
-            PlayerController pc = pt.GetComponent<PlayerController>();
-            Vector3 rawTarget = (pc != null && pc.IsAlive && !pc.IsHooked) ? pt.position : currentLaserTarget;
+            Vector3 rawTarget1 = GetTarget1WorldPos();
             // SmoothDamp: beam "swims" toward the fish instead of snapping
-            currentLaserTarget = Vector3.SmoothDamp(currentLaserTarget, rawTarget, ref laserTargetVelocity, targetFollowLag);
-        }
+            currentLaserTarget = Vector3.SmoothDamp(currentLaserTarget, rawTarget1, ref laserTargetVelocity, targetFollowLag);
+            currentLaserTarget.x = Mathf.Clamp(currentLaserTarget.x, worldBgLeft + 0.8f, worldBgRight - 0.8f);
+            currentLaserTarget.y = Mathf.Clamp(currentLaserTarget.y, worldFloorY + 0.5f, worldWaterSurfaceY);
 
-        // Clamp laser target inside map boundaries
-        currentLaserTarget.x = Mathf.Clamp(currentLaserTarget.x, worldBgLeft + 0.8f, worldBgRight - 0.8f);
-        currentLaserTarget.y = Mathf.Clamp(currentLaserTarget.y, worldFloorY + 0.5f, worldWaterSurfaceY);
+            Vector3 effectiveTarget1 = GetLaserEndPointWithObstacles(launcherPos, currentLaserTarget);
 
-        if (laserLineRenderer != null)
-        {
-            if (!laserLineRenderer.enabled) laserLineRenderer.enabled = true;
-            laserLineRenderer.startWidth = beamWidth;
-            laserLineRenderer.endWidth   = beamWidth * 0.9f;
-            laserLineRenderer.startColor = laserColor;
-            laserLineRenderer.endColor   = laserColor;
-            DrawWaveredBeam(laserLineRenderer, launcherPos, currentLaserTarget, waver, laserNoiseSeed);
-        }
+            if (laserLineRenderer != null)
+            {
+                if (!laserLineRenderer.enabled) laserLineRenderer.enabled = true;
+                laserLineRenderer.startWidth = beamWidth;
+                laserLineRenderer.endWidth   = beamWidth * 0.9f;
+                laserLineRenderer.startColor = laserColor;
+                laserLineRenderer.endColor   = laserColor;
+                DrawWaveredBeam(laserLineRenderer, launcherPos, effectiveTarget1, waver, laserNoiseSeed);
+            }
 
-        if (laserTipPlayer != null)
-        {
-            if (!laserTipPlayer.gameObject.activeSelf) laserTipPlayer.gameObject.SetActive(true);
-            laserTipPlayer.transform.position   = currentLaserTarget;
-            laserTipPlayer.transform.localScale = dotScale;
-            laserTipPlayer.color                = laserColor;
-        }
+            if (laserTipPlayer != null)
+            {
+                if (!laserTipPlayer.gameObject.activeSelf) laserTipPlayer.gameObject.SetActive(true);
+                laserTipPlayer.transform.position   = effectiveTarget1;
+                laserTipPlayer.transform.localScale = dotScale;
+                laserTipPlayer.color                = laserColor;
+            }
 
-        // Bubble trail along player beam
-        EmitBubblesAlongBeam(launcherPos, currentLaserTarget, isLockingPhase ? 2 : 1);
-
-        // ── 2. AI / Shark laser (Prioritizes Active Shark, or Level >= 2 Fish) ─────────────────────────
-        if (currentSharkTarget != null && (!currentSharkTarget.gameObject.activeInHierarchy || !currentSharkTarget.enabled || currentSharkTarget.IsDead))
-        {
-            currentSharkTarget = null;
-        }
-
-        if (currentSharkTarget == null)
-        {
-            currentSharkTarget = FindBestSharkTarget();
-        }
-
-        if (currentSharkTarget != null)
-        {
-            currentAITarget = null;
+            // Bubble trail along beam 1 (terminates at solid rock)
+            EmitBubblesAlongBeam(launcherPos, effectiveTarget1, isLockingPhase ? 2 : 1);
         }
         else
         {
-            if (currentAITarget == null || !currentAITarget.gameObject.activeInHierarchy || !currentAITarget.enabled ||
-                currentAITarget.IsDead || currentAITarget.IsHooked || currentAITarget.Level < 2 || currentAITarget.IsGoldenFish)
-            {
-                currentAITarget = FindBestAITarget();
-            }
+            if (laserLineRenderer != null && laserLineRenderer.enabled) laserLineRenderer.enabled = false;
+            if (laserTipPlayer != null && laserTipPlayer.gameObject.activeSelf) laserTipPlayer.gameObject.SetActive(false);
         }
 
-        Vector3 targetPosAI = Vector3.zero;
-        bool targetAcquired = false;
-
-        if (currentSharkTarget != null)
+        // ── 2. Laser 2 ─────────────────────────────────────────────────────
+        if (hasValidTarget2)
         {
-            targetPosAI = currentSharkTarget.transform.position;
-            targetAcquired = true;
-        }
-        else if (currentAITarget != null)
-        {
-            targetPosAI = currentAITarget.transform.position;
-            targetAcquired = true;
-        }
-
-        if (targetAcquired)
-        {
-            // Different seed (offset 37) so the two beams waver independently
-            currentAILaserTarget = Vector3.SmoothDamp(currentAILaserTarget, targetPosAI, ref aiTargetVelocity, targetFollowLag);
+            Vector3 rawTarget2 = GetTarget2WorldPos();
+            currentAILaserTarget = Vector3.SmoothDamp(currentAILaserTarget, rawTarget2, ref aiTargetVelocity, targetFollowLag);
             currentAILaserTarget.x = Mathf.Clamp(currentAILaserTarget.x, worldBgLeft + 0.8f, worldBgRight - 0.8f);
             currentAILaserTarget.y = Mathf.Clamp(currentAILaserTarget.y, worldFloorY + 0.5f, worldWaterSurfaceY);
-            hasValidAITarget     = true;
+
+            Vector3 effectiveTarget2 = GetLaserEndPointWithObstacles(launcherPos, currentAILaserTarget);
 
             if (laserLineRendererAI != null)
             {
@@ -1280,23 +1448,58 @@ public class RiverBoat : MonoBehaviour
                 laserLineRendererAI.endWidth   = beamWidth * 0.9f;
                 laserLineRendererAI.startColor = laserColor;
                 laserLineRendererAI.endColor   = laserColor;
-                DrawWaveredBeam(laserLineRendererAI, launcherPos, currentAILaserTarget, waver, laserNoiseSeed + 37f);
+                DrawWaveredBeam(laserLineRendererAI, launcherPos, effectiveTarget2, waver, laserNoiseSeed + 37f);
             }
 
             if (laserTipAI != null)
             {
                 if (!laserTipAI.gameObject.activeSelf) laserTipAI.gameObject.SetActive(true);
-                laserTipAI.transform.position   = currentAILaserTarget;
+                laserTipAI.transform.position   = effectiveTarget2;
                 laserTipAI.transform.localScale = dotScale;
                 laserTipAI.color                = laserColor;
             }
         }
         else
         {
-            hasValidAITarget = false;
             if (laserLineRendererAI != null && laserLineRendererAI.enabled) laserLineRendererAI.enabled = false;
             if (laserTipAI != null && laserTipAI.gameObject.activeSelf) laserTipAI.gameObject.SetActive(false);
         }
+    }
+
+    public static Vector3 GetLaserEndPointWithObstacles(Vector3 origin, Vector3 intendedTarget)
+    {
+        Vector2 dir = (intendedTarget - origin);
+        float dist = dir.magnitude;
+        if (dist < 0.001f) return intendedTarget;
+
+        RaycastHit2D[] hits = Physics2D.RaycastAll(origin, dir.normalized, dist);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D col = hits[i].collider;
+            if (col != null && !col.isTrigger && SharkHazard.IsSolidEnvironmentObstacle(col))
+            {
+                return hits[i].point;
+            }
+        }
+        return intendedTarget;
+    }
+
+    public static bool HasLineOfSightToTarget(Vector3 origin, Vector3 targetPos)
+    {
+        Vector2 dir = (targetPos - origin);
+        float dist = dir.magnitude;
+        if (dist < 0.001f) return true;
+
+        RaycastHit2D[] hits = Physics2D.RaycastAll(origin, dir.normalized, dist);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D col = hits[i].collider;
+            if (col != null && !col.isTrigger && SharkHazard.IsSolidEnvironmentObstacle(col))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ── Underwater beam helpers ───────────────────────────────────────────
@@ -1426,7 +1629,9 @@ public class RiverBoat : MonoBehaviour
         if (SharkHazard.ActiveSharks == null || SharkHazard.ActiveSharks.Count == 0) return null;
 
         SharkHazard bestShark = null;
+        SharkHazard fallbackShark = null;
         float closestDistSqr = float.MaxValue;
+        float fallbackDistSqr = float.MaxValue;
         Vector3 launcherPos = GetHarpoonLauncherPosition();
 
         for (int i = 0; i < SharkHazard.ActiveSharks.Count; i++)
@@ -1438,28 +1643,39 @@ public class RiverBoat : MonoBehaviour
             if (pos.x < worldBgLeft - 2.0f || pos.x > worldBgRight + 2.0f) continue;
 
             float dSqr = (pos - launcherPos).sqrMagnitude;
-            if (dSqr < closestDistSqr)
+            if (dSqr < fallbackDistSqr)
             {
-                closestDistSqr = dSqr;
-                bestShark = s;
+                fallbackDistSqr = dSqr;
+                fallbackShark = s;
+            }
+
+            if (HasLineOfSightToTarget(launcherPos, pos))
+            {
+                if (dSqr < closestDistSqr)
+                {
+                    closestDistSqr = dSqr;
+                    bestShark = s;
+                }
             }
         }
 
-        return bestShark;
+        return bestShark != null ? bestShark : fallbackShark;
     }
 
-    private Fish FindBestAITarget()
+    private Fish FindBestAITarget(Fish excludeFish = null)
     {
         if (Fish.AllFish == null || Fish.AllFish.Count == 0) return null;
 
         Fish bestFish = null;
+        Fish fallbackFish = null;
         float closestDistSqr = float.MaxValue;
+        float fallbackDistSqr = float.MaxValue;
         Vector3 launcherPos = GetHarpoonLauncherPosition();
 
         for (int i = 0; i < Fish.AllFish.Count; i++)
         {
             Fish f = Fish.AllFish[i];
-            if (f == null || !f.gameObject.activeInHierarchy || !f.enabled) continue;
+            if (f == null || f == excludeFish || !f.gameObject.activeInHierarchy || !f.enabled) continue;
             if (f.IsDead || f.IsHooked) continue;
             // Harpoon only targets large predator/prey fish (Level >= 2). Level 1 fish and Golden Fish are never targeted.
             if (f.Level < 2 || f.IsGoldenFish) continue;
@@ -1470,14 +1686,23 @@ public class RiverBoat : MonoBehaviour
             if (pos.y < worldFloorY + 0.5f || pos.y > worldWaterSurfaceY - 0.2f) continue;
 
             float dSqr = (pos - launcherPos).sqrMagnitude;
-            if (dSqr < closestDistSqr)
+            if (dSqr < fallbackDistSqr)
             {
-                closestDistSqr = dSqr;
-                bestFish = f;
+                fallbackDistSqr = dSqr;
+                fallbackFish = f;
+            }
+
+            if (HasLineOfSightToTarget(launcherPos, pos))
+            {
+                if (dSqr < closestDistSqr)
+                {
+                    closestDistSqr = dSqr;
+                    bestFish = f;
+                }
             }
         }
 
-        return bestFish;
+        return bestFish != null ? bestFish : fallbackFish;
     }
 
     private float CalculateTiltToTarget(Vector3 targetPos)
@@ -1816,6 +2041,14 @@ public class RiverBoat : MonoBehaviour
         transform.rotation = Quaternion.Euler(0, 0, tiltAngle * (facingRight ? 1f : -1f));
     }
 
+    private bool IsPlayerValidTarget()
+    {
+        Transform pt = GetPlayerTransform();
+        if (pt == null) return false;
+        PlayerController pc = pt.GetComponent<PlayerController>();
+        return pc != null && pc.IsAlive && !pc.IsHooked && pc.Level >= 2;
+    }
+
     private Transform GetPlayerTransform()
     {
         try
@@ -1901,7 +2134,7 @@ public class RiverBoat : MonoBehaviour
 
                 if (dist <= minEngineDistance)
                 {
-                    targetAudioVolume = maxEngineVolume;
+                    targetAudioVolume = maxEngineVolume * AudioSettingsManager.SfxVolume;
                 }
                 else if (dist >= maxEngineDistance)
                 {
@@ -1910,7 +2143,7 @@ public class RiverBoat : MonoBehaviour
                 else
                 {
                     float t = (dist - minEngineDistance) / (maxEngineDistance - minEngineDistance);
-                    targetAudioVolume = (1f - t) * maxEngineVolume;
+                    targetAudioVolume = (1f - t) * maxEngineVolume * AudioSettingsManager.SfxVolume;
                 }
 
                 float pan = Mathf.Clamp((transform.position.x - pt.position.x) / 14.0f, -0.85f, 0.85f);
@@ -1918,7 +2151,7 @@ public class RiverBoat : MonoBehaviour
             }
             else
             {
-                targetAudioVolume = maxEngineVolume * 0.5f;
+                targetAudioVolume = maxEngineVolume * 0.5f * AudioSettingsManager.SfxVolume;
             }
         }
 
@@ -1946,5 +2179,13 @@ public class RiverBoat : MonoBehaviour
                 engineAudioSource.Stop();
             }
         }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = new Color(1f, 0.2f, 0.2f, 0.45f);
+        Gizmos.DrawSphere(GetPropellerWorldPosition(), propellerKillRadius * boatScale);
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(GetPropellerWorldPosition(), propellerKillRadius * boatScale);
     }
 }

@@ -41,6 +41,12 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
+      propertyPath: openSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: 1ef9b725bac6c8e47b2fb8d56d5464fc,
+        type: 3}
+    - target: {fileID: 3698765400459329968, guid: 98e9c0ff60adcfb468950b1ca177f729,
+        type: 3}
       propertyPath: eatSfxOverride
       value: 
       objectReference: {fileID: 8300000, guid: be73fcbfce4137045891834d16ee1628, type: 3}
@@ -52,12 +58,12 @@ PrefabInstance:
     - target: {fileID: 3698765400459329971, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
       propertyPath: m_LocalScale.x
-      value: 0.68
+      value: 0.46
       objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329971, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}
       propertyPath: m_LocalScale.y
-      value: 0.68
+      value: 0.46
       objectReference: {fileID: 0}
     - target: {fileID: 3698765400459329973, guid: 98e9c0ff60adcfb468950b1ca177f729,
         type: 3}

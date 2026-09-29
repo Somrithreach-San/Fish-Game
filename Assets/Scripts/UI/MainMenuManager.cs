@@ -70,6 +70,16 @@ public class MainMenuManager : MonoBehaviour
     [SerializeField] public Sprite shinyLightSprite; // For Shiny_Light.png aura
     [SerializeField] public Material uiAdditiveMaterial; // For UI_Additive_Material.mat
 
+    [Header("Level Selection UI Sprites")]
+    [SerializeField] public Sprite coralCoastModalSprite;
+    [SerializeField] public Sprite lostLakeModalSprite;
+    [SerializeField] public Sprite oceanSelectionBgSprite;
+    [SerializeField] public Sprite lakeSelectionBgSprite;
+    [SerializeField] public Sprite arrowLeftSprite;
+    [SerializeField] public Sprite arrowRightSprite;
+    [SerializeField] public Sprite emptyPaginationSprite;
+    [SerializeField] public Sprite filledPaginationSprite;
+
     public static bool OpenLevelSelectOnLoad = false;
 
     private void Awake()
@@ -436,6 +446,26 @@ public class MainMenuManager : MonoBehaviour
                 }
             }
         }
+        if (coralCoastModalSprite == null)
+            coralCoastModalSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Coral_Coast_Level_Selection_Modal.png");
+        if (lostLakeModalSprite == null)
+            lostLakeModalSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Lost_Lake_Level_Selection_Modal.png");
+        if (oceanSelectionBgSprite == null)
+            oceanSelectionBgSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Backgrounds/Ocean_Level_Selection_BG.png");
+        if (lakeSelectionBgSprite == null)
+            lakeSelectionBgSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Backgrounds/Lake_Level_Selection_BG.png");
+        if (arrowLeftSprite == null)
+            arrowLeftSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Arrow Left_Button.png");
+        if (arrowRightSprite == null)
+            arrowRightSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Arrow Right_Button.png");
+        if (emptyPaginationSprite == null)
+            emptyPaginationSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Empty_Pagination.png");
+        if (filledPaginationSprite == null)
+            filledPaginationSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Filled_Pagination.png");
+        if (shinyLightSprite == null)
+            shinyLightSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/GUI Components/Shiny_Light.png");
+        if (uiAdditiveMaterial == null)
+            uiAdditiveMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Graphics/GUI Components/UI_Additive_Material.mat");
         UnityEditor.EditorApplication.delayCall += () =>
         {
             if (this == null) return;
@@ -943,7 +973,9 @@ public class MainMenuManager : MonoBehaviour
 #endif
 
         string filenameWithoutExt = System.IO.Path.GetFileNameWithoutExtension(relativePath);
-        Sprite res = Resources.Load<Sprite>(filenameWithoutExt);
+        Sprite res = Resources.Load<Sprite>(filenameWithoutExt) ??
+                     Resources.Load<Sprite>("LevelSelection/" + filenameWithoutExt) ??
+                     Resources.Load<Sprite>("LevelBriefs/" + filenameWithoutExt);
         if (res != null) return res;
 
         Sprite[] all = Resources.FindObjectsOfTypeAll<Sprite>();
@@ -994,9 +1026,13 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedOceanSelectionBgSprite;
     public Sprite GetOceanSelectionBgSprite()
     {
+        if (oceanSelectionBgSprite != null) return oceanSelectionBgSprite;
         if (_cachedOceanSelectionBgSprite == null)
         {
-            _cachedOceanSelectionBgSprite = LoadSpriteFromPath("Assets/Graphics/Backgrounds/Ocean_Level_Selection_BG.png");
+            _cachedOceanSelectionBgSprite = Resources.Load<Sprite>("LevelSelection/Ocean_Level_Selection_BG") ??
+                                            Resources.Load<Sprite>("LevelBriefs/Ocean_Level_Selection_BG") ??
+                                            Resources.Load<Sprite>("Ocean_Level_Selection_BG") ??
+                                            LoadSpriteFromPath("Assets/Graphics/Backgrounds/Ocean_Level_Selection_BG.png");
         }
         return _cachedOceanSelectionBgSprite;
     }
@@ -1004,9 +1040,13 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedLakeSelectionBgSprite;
     public Sprite GetLakeSelectionBgSprite()
     {
+        if (lakeSelectionBgSprite != null) return lakeSelectionBgSprite;
         if (_cachedLakeSelectionBgSprite == null)
         {
-            _cachedLakeSelectionBgSprite = LoadSpriteFromPath("Assets/Graphics/Backgrounds/Lake_Level_Selection_BG.png");
+            _cachedLakeSelectionBgSprite = Resources.Load<Sprite>("LevelSelection/Lake_Level_Selection_BG") ??
+                                           Resources.Load<Sprite>("LevelBriefs/Lake_Level_Selection_BG") ??
+                                           Resources.Load<Sprite>("Lake_Level_Selection_BG") ??
+                                           LoadSpriteFromPath("Assets/Graphics/Backgrounds/Lake_Level_Selection_BG.png");
         }
         return _cachedLakeSelectionBgSprite;
     }
@@ -1014,9 +1054,12 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedCoralCoastModalSprite;
     public Sprite GetCoralCoastModalSprite()
     {
+        if (coralCoastModalSprite != null) return coralCoastModalSprite;
         if (_cachedCoralCoastModalSprite == null)
         {
-            _cachedCoralCoastModalSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Coral_Coast_Level_Selection_Modal.png");
+            _cachedCoralCoastModalSprite = Resources.Load<Sprite>("LevelSelection/Coral_Coast_Level_Selection_Modal") ??
+                                           Resources.Load<Sprite>("Coral_Coast_Level_Selection_Modal") ??
+                                           LoadSpriteFromPath("Assets/Graphics/GUI Components/Coral_Coast_Level_Selection_Modal.png");
         }
         return _cachedCoralCoastModalSprite;
     }
@@ -1024,13 +1067,13 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedLostLakeModalSprite;
     public Sprite GetLostLakeModalSprite()
     {
+        if (lostLakeModalSprite != null) return lostLakeModalSprite;
         if (_cachedLostLakeModalSprite == null)
         {
-            _cachedLostLakeModalSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Lost_Lake_Level_Selection_Modal.png");
-            if (_cachedLostLakeModalSprite == null)
-            {
-                _cachedLostLakeModalSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Lost_Lake_Level_Selectiom_Modal.png");
-            }
+            _cachedLostLakeModalSprite = Resources.Load<Sprite>("LevelSelection/Lost_Lake_Level_Selection_Modal") ??
+                                         Resources.Load<Sprite>("Lost_Lake_Level_Selection_Modal") ??
+                                         LoadSpriteFromPath("Assets/Graphics/GUI Components/Lost_Lake_Level_Selection_Modal.png") ??
+                                         LoadSpriteFromPath("Assets/Graphics/GUI Components/Lost_Lake_Level_Selectiom_Modal.png");
         }
         return _cachedLostLakeModalSprite;
     }
@@ -1038,9 +1081,12 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedArrowLeftSprite;
     public Sprite GetArrowLeftSprite()
     {
-        if (_cachedArrowLeftSprite == null)
+        if (arrowLeftSprite != null && arrowLeftSprite.rect.width > 32f) return arrowLeftSprite;
+        if (_cachedArrowLeftSprite == null || _cachedArrowLeftSprite.rect.width <= 32f)
         {
-            _cachedArrowLeftSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Arrow Left_Button.png");
+            _cachedArrowLeftSprite = Resources.Load<Sprite>("LevelSelection/Arrow Left_Button") ??
+                                     Resources.Load<Sprite>("Arrow Left_Button") ??
+                                     LoadSpriteFromPath("Assets/Graphics/GUI Components/Arrow Left_Button.png");
         }
         return _cachedArrowLeftSprite;
     }
@@ -1048,9 +1094,12 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedArrowRightSprite;
     public Sprite GetArrowRightSprite()
     {
-        if (_cachedArrowRightSprite == null)
+        if (arrowRightSprite != null && arrowRightSprite.rect.width > 32f) return arrowRightSprite;
+        if (_cachedArrowRightSprite == null || _cachedArrowRightSprite.rect.width <= 32f)
         {
-            _cachedArrowRightSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Arrow Right_Button.png");
+            _cachedArrowRightSprite = Resources.Load<Sprite>("LevelSelection/Arrow Right_Button") ??
+                                      Resources.Load<Sprite>("Arrow Right_Button") ??
+                                      LoadSpriteFromPath("Assets/Graphics/GUI Components/Arrow Right_Button.png");
         }
         return _cachedArrowRightSprite;
     }
@@ -1058,9 +1107,12 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedEmptyPaginationSprite;
     public Sprite GetEmptyPaginationSprite()
     {
+        if (emptyPaginationSprite != null) return emptyPaginationSprite;
         if (_cachedEmptyPaginationSprite == null)
         {
-            _cachedEmptyPaginationSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Empty_Pagination.png");
+            _cachedEmptyPaginationSprite = Resources.Load<Sprite>("LevelSelection/Empty_Pagination") ??
+                                           Resources.Load<Sprite>("Empty_Pagination") ??
+                                           LoadSpriteFromPath("Assets/Graphics/GUI Components/Empty_Pagination.png");
         }
         return _cachedEmptyPaginationSprite;
     }
@@ -1068,9 +1120,12 @@ public class MainMenuManager : MonoBehaviour
     private Sprite _cachedFilledPaginationSprite;
     public Sprite GetFilledPaginationSprite()
     {
+        if (filledPaginationSprite != null) return filledPaginationSprite;
         if (_cachedFilledPaginationSprite == null)
         {
-            _cachedFilledPaginationSprite = LoadSpriteFromPath("Assets/Graphics/GUI Components/Filled_Pagination.png");
+            _cachedFilledPaginationSprite = Resources.Load<Sprite>("LevelSelection/Filled_Pagination") ??
+                                            Resources.Load<Sprite>("Filled_Pagination") ??
+                                            LoadSpriteFromPath("Assets/Graphics/GUI Components/Filled_Pagination.png");
         }
         return _cachedFilledPaginationSprite;
     }
@@ -1751,7 +1806,7 @@ public class MainMenuManager : MonoBehaviour
 
     public void OpenLevelSelect()
     {
-        currentLevelPage = 0; // Default to Coral Coast (Ocean)
+        currentLevelPage = LevelManager.IsCurrentLakeLevel ? 1 : 0;
         if (mainPanel != null) mainPanel.SetActive(false);
         if (settingsPanel != null) settingsPanel.SetActive(false);
         if (levelPanel != null)
@@ -1767,8 +1822,12 @@ public class MainMenuManager : MonoBehaviour
         if (mainPanel != null) mainPanel.SetActive(true);
     }
 
+    private bool isStartingGame = false;
+
     public void PlayGame()
     {
+        if (isStartingGame || Rhinotap.LoadingScreenManager.IsLoading) return;
+        isStartingGame = true;
         StartCoroutine(PlayGameRoutine());
     }
 
@@ -1786,11 +1845,13 @@ public class MainMenuManager : MonoBehaviour
 
         if (Application.CanStreamedLevelBeLoaded(gameSceneName))
         {
-            SceneManager.LoadScene(gameSceneName);
+            Rhinotap.LevelBriefingManager.SkipNextBriefing = false;
+            Rhinotap.LoadingScreenManager.LoadScene(gameSceneName);
         }
         else
         {
             Debug.LogError($"Scene '{gameSceneName}' not found! Please check Build Settings.");
+            isStartingGame = false;
         }
     }
 
@@ -2375,8 +2436,8 @@ public class MainMenuManager : MonoBehaviour
         leftRt.anchorMin = new Vector2(0.5f, 0.5f);
         leftRt.anchorMax = new Vector2(0.5f, 0.5f);
         leftRt.pivot = new Vector2(0.5f, 0.5f);
-        leftRt.anchoredPosition = new Vector2(-540f, -48f);
-        leftRt.sizeDelta = new Vector2(100f, 100f);
+        leftRt.anchoredPosition = new Vector2(-550f, -48f);
+        leftRt.sizeDelta = new Vector2(148f, 148f);
         leftRt.localScale = Vector3.one;
 
         Image leftImg = leftArrowObj.GetComponent<Image>() ?? leftArrowObj.AddComponent<Image>();
@@ -2385,7 +2446,12 @@ public class MainMenuManager : MonoBehaviour
         leftImg.color = Color.white;
 
         Button leftBtn = leftArrowObj.GetComponent<Button>() ?? leftArrowObj.AddComponent<Button>();
-        leftBtn.transition = Selectable.Transition.None;
+        leftBtn.transition = Selectable.Transition.ColorTint;
+        ColorBlock leftColors = leftBtn.colors;
+        leftColors.normalColor = Color.white;
+        leftColors.highlightedColor = new Color(1f, 1f, 0.85f, 1f);
+        leftColors.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
+        leftBtn.colors = leftColors;
         leftBtn.onClick.RemoveAllListeners();
         leftBtn.onClick.AddListener(() => SwitchLevelPage(0));
 
@@ -2398,8 +2464,8 @@ public class MainMenuManager : MonoBehaviour
         rightRt.anchorMin = new Vector2(0.5f, 0.5f);
         rightRt.anchorMax = new Vector2(0.5f, 0.5f);
         rightRt.pivot = new Vector2(0.5f, 0.5f);
-        rightRt.anchoredPosition = new Vector2(540f, -48f);
-        rightRt.sizeDelta = new Vector2(100f, 100f);
+        rightRt.anchoredPosition = new Vector2(550f, -48f);
+        rightRt.sizeDelta = new Vector2(148f, 148f);
         rightRt.localScale = Vector3.one;
 
         Image rightImg = rightArrowObj.GetComponent<Image>() ?? rightArrowObj.AddComponent<Image>();
@@ -2408,14 +2474,19 @@ public class MainMenuManager : MonoBehaviour
         rightImg.color = Color.white;
 
         Button rightBtn = rightArrowObj.GetComponent<Button>() ?? rightArrowObj.AddComponent<Button>();
-        rightBtn.transition = Selectable.Transition.None;
+        rightBtn.transition = Selectable.Transition.ColorTint;
+        ColorBlock rightColors = rightBtn.colors;
+        rightColors.normalColor = Color.white;
+        rightColors.highlightedColor = new Color(1f, 1f, 0.85f, 1f);
+        rightColors.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
+        rightBtn.colors = rightColors;
         rightBtn.onClick.RemoveAllListeners();
         rightBtn.onClick.AddListener(() => SwitchLevelPage(1));
 
         rightArrowObj.SetActive(currentLevelPage < 1);
         rightArrowObj.transform.SetAsLastSibling();
 
-        // 3. Pagination Dots Container (Bottom Center with generous gap below modal)
+        // 3. Pagination Dots Container (Bottom Center with generous gap below modal - purely visual indicator)
         GameObject pagObj = EnsureUIChild(levelPanel.transform, "PaginationContainer");
         RectTransform pagRt = pagObj.GetComponent<RectTransform>();
         pagRt.anchorMin = new Vector2(0.5f, 0.5f);
@@ -2427,7 +2498,7 @@ public class MainMenuManager : MonoBehaviour
         pagObj.SetActive(true);
         pagObj.transform.SetAsLastSibling();
 
-        // Dot 0 (Coral Coast)
+        // Dot 0 (Coral Coast) - Visual indicator only, tapping disabled
         GameObject dot0Obj = EnsureUIChild(pagObj.transform, "Dot_0");
         RectTransform dot0Rt = dot0Obj.GetComponent<RectTransform>();
         dot0Rt.anchorMin = new Vector2(0.5f, 0.5f);
@@ -2437,18 +2508,17 @@ public class MainMenuManager : MonoBehaviour
         dot0Rt.sizeDelta = new Vector2(24f, 24f);
         dot0Rt.localScale = Vector3.one;
 
+        Button oldDot0Btn = dot0Obj.GetComponent<Button>();
+        if (oldDot0Btn != null) Destroy(oldDot0Btn);
+
         Image dot0Img = dot0Obj.GetComponent<Image>() ?? dot0Obj.AddComponent<Image>();
         dot0Img.sprite = (currentLevelPage == 0) ? GetFilledPaginationSprite() : GetEmptyPaginationSprite();
         dot0Img.preserveAspect = true;
         dot0Img.color = Color.white;
-
-        Button dot0Btn = dot0Obj.GetComponent<Button>() ?? dot0Obj.AddComponent<Button>();
-        dot0Btn.transition = Selectable.Transition.None;
-        dot0Btn.onClick.RemoveAllListeners();
-        dot0Btn.onClick.AddListener(() => SwitchLevelPage(0));
+        dot0Img.raycastTarget = false;
         dot0Obj.SetActive(true);
 
-        // Dot 1 (Lost Lake)
+        // Dot 1 (Lost Lake) - Visual indicator only, tapping disabled
         GameObject dot1Obj = EnsureUIChild(pagObj.transform, "Dot_1");
         RectTransform dot1Rt = dot1Obj.GetComponent<RectTransform>();
         dot1Rt.anchorMin = new Vector2(0.5f, 0.5f);
@@ -2458,15 +2528,14 @@ public class MainMenuManager : MonoBehaviour
         dot1Rt.sizeDelta = new Vector2(24f, 24f);
         dot1Rt.localScale = Vector3.one;
 
+        Button oldDot1Btn = dot1Obj.GetComponent<Button>();
+        if (oldDot1Btn != null) Destroy(oldDot1Btn);
+
         Image dot1Img = dot1Obj.GetComponent<Image>() ?? dot1Obj.AddComponent<Image>();
         dot1Img.sprite = (currentLevelPage == 1) ? GetFilledPaginationSprite() : GetEmptyPaginationSprite();
         dot1Img.preserveAspect = true;
         dot1Img.color = Color.white;
-
-        Button dot1Btn = dot1Obj.GetComponent<Button>() ?? dot1Obj.AddComponent<Button>();
-        dot1Btn.transition = Selectable.Transition.None;
-        dot1Btn.onClick.RemoveAllListeners();
-        dot1Btn.onClick.AddListener(() => SwitchLevelPage(1));
+        dot1Img.raycastTarget = false;
         dot1Obj.SetActive(true);
     }
 
@@ -2600,7 +2669,7 @@ public class MainMenuManager : MonoBehaviour
         GameObject closeBtnObj = null;
         if (closeBtnTr == null)
         {
-            closeBtnObj = new GameObject("CloseButton");
+            closeBtnObj = new GameObject("CloseButton", typeof(RectTransform));
             closeBtnObj.transform.SetParent(levelPanel.transform, false);
         }
         else
@@ -2619,7 +2688,7 @@ public class MainMenuManager : MonoBehaviour
         GameObject gridObj = null;
         if (gridTr == null)
         {
-            gridObj = new GameObject("LevelGrid");
+            gridObj = new GameObject("LevelGrid", typeof(RectTransform));
             gridObj.transform.SetParent(levelPanel.transform, false);
         }
         else
@@ -2656,7 +2725,20 @@ public class MainMenuManager : MonoBehaviour
         int pageLevelCount = (currentLevelPage == 0) ? LevelManager.OCEAN_LEVELS : LevelManager.LAKE_LEVELS; // 8 for Ocean, 5 for Lake
         int pageLevelOffset = (currentLevelPage == 0) ? 0 : LevelManager.OCEAN_LEVELS; // 0 for Ocean, 8 for Lake
 
-        int activePlayLevel = Mathf.Clamp(LevelManager.HighestUnlockedLevel, 1, LevelManager.TOTAL_LEVELS);
+        // Scenario-specific active level for the shiny light aura
+        int activePlayLevel;
+        if (currentLevelPage == 0)
+        {
+            // Scenario 1: Coral Coast (Ocean, Levels 1-8)
+            activePlayLevel = Mathf.Clamp(LevelManager.HighestUnlockedLevel, 1, LevelManager.OCEAN_LEVELS);
+        }
+        else
+        {
+            // Scenario 2: Lost Lake (River/Lake, Levels 9-13)
+            activePlayLevel = LevelManager.IsLakeUnlocked
+                ? Mathf.Clamp(LevelManager.HighestUnlockedLevel, LevelManager.OCEAN_LEVELS + 1, LevelManager.TOTAL_LEVELS)
+                : -1;
+        }
 
         // Hide any old buttons beyond 8 slots
         for (int i = 9; i <= 16; i++)
@@ -2673,7 +2755,7 @@ public class MainMenuManager : MonoBehaviour
             GameObject btnObj = null;
             if (btnTr == null)
             {
-                btnObj = new GameObject(btnName);
+                btnObj = new GameObject(btnName, typeof(RectTransform));
                 btnObj.transform.SetParent(gridObj.transform, false);
             }
             else
@@ -2730,14 +2812,21 @@ public class MainMenuManager : MonoBehaviour
             ButtonHoverEffect hover = btnObj.GetComponent<ButtonHoverEffect>();
             if (hover != null) Destroy(hover);
 
-            // Layer 1: Shiny Light Sunburst Aura (Rendered BEHIND icon)
+            // Layer 1: Shiny Light Sunburst Aura (Rendered BEHIND icon, separated per scenario)
             Transform shinyTr = btnObj.transform.Find("ShinyLight");
-            if (globalLevelNum == activePlayLevel && shinyLightSp != null)
+            if (isUnlocked && globalLevelNum == activePlayLevel && shinyLightSp != null)
             {
+                if (shinyTr != null && shinyTr.GetComponent<RectTransform>() == null)
+                {
+                    if (Application.isPlaying) Destroy(shinyTr.gameObject);
+                    else DestroyImmediate(shinyTr.gameObject);
+                    shinyTr = null;
+                }
+
                 GameObject shinyObj = null;
                 if (shinyTr == null)
                 {
-                    shinyObj = new GameObject("ShinyLight");
+                    shinyObj = new GameObject("ShinyLight", typeof(RectTransform));
                     shinyObj.transform.SetParent(btnObj.transform, false);
                 }
                 else
@@ -2750,16 +2839,17 @@ public class MainMenuManager : MonoBehaviour
                 shinyObj.transform.SetSiblingIndex(0);
 
                 RectTransform sRt = shinyObj.GetComponent<RectTransform>();
-                if (sRt == null) sRt = shinyObj.AddComponent<RectTransform>();
-                sRt.anchorMin = new Vector2(0.5f, 0.5f);
-                sRt.anchorMax = new Vector2(0.5f, 0.5f);
-                sRt.pivot = new Vector2(0.5f, 0.5f);
-                sRt.anchoredPosition = Vector2.zero;
-                sRt.sizeDelta = new Vector2(240f, 240f);
-                sRt.localScale = Vector3.one;
+                if (sRt != null)
+                {
+                    sRt.anchorMin = new Vector2(0.5f, 0.5f);
+                    sRt.anchorMax = new Vector2(0.5f, 0.5f);
+                    sRt.pivot = new Vector2(0.5f, 0.5f);
+                    sRt.anchoredPosition = Vector2.zero;
+                    sRt.sizeDelta = new Vector2(240f, 240f);
+                    sRt.localScale = Vector3.one;
+                }
 
-                Image sImg = shinyObj.GetComponent<Image>();
-                if (sImg == null) sImg = shinyObj.AddComponent<Image>();
+                Image sImg = shinyObj.GetComponent<Image>() ?? shinyObj.AddComponent<Image>();
                 sImg.sprite = shinyLightSp;
                 sImg.type = Image.Type.Simple;
                 sImg.preserveAspect = true;
@@ -2779,10 +2869,17 @@ public class MainMenuManager : MonoBehaviour
 
             // Layer 2: Level Button Icon (Rendered in FRONT of ShinyLight)
             Transform iconTr = btnObj.transform.Find("Icon");
+            if (iconTr != null && iconTr.GetComponent<RectTransform>() == null)
+            {
+                if (Application.isPlaying) Destroy(iconTr.gameObject);
+                else DestroyImmediate(iconTr.gameObject);
+                iconTr = null;
+            }
+
             GameObject iconObj = null;
             if (iconTr == null)
             {
-                iconObj = new GameObject("Icon");
+                iconObj = new GameObject("Icon", typeof(RectTransform));
                 iconObj.transform.SetParent(btnObj.transform, false);
             }
             else
@@ -2795,13 +2892,15 @@ public class MainMenuManager : MonoBehaviour
             iconObj.transform.SetSiblingIndex(1);
 
             RectTransform iconRt = iconObj.GetComponent<RectTransform>();
-            if (iconRt == null) iconRt = iconObj.AddComponent<RectTransform>();
-            iconRt.anchorMin = new Vector2(0.5f, 0.5f);
-            iconRt.anchorMax = new Vector2(0.5f, 0.5f);
-            iconRt.pivot = new Vector2(0.5f, 0.5f);
-            iconRt.anchoredPosition = Vector2.zero;
-            iconRt.sizeDelta = new Vector2(165f, 165f);
-            iconRt.localScale = Vector3.one;
+            if (iconRt != null)
+            {
+                iconRt.anchorMin = new Vector2(0.5f, 0.5f);
+                iconRt.anchorMax = new Vector2(0.5f, 0.5f);
+                iconRt.pivot = new Vector2(0.5f, 0.5f);
+                iconRt.anchoredPosition = Vector2.zero;
+                iconRt.sizeDelta = new Vector2(165f, 165f);
+                iconRt.localScale = Vector3.one;
+            }
 
             Image iconImg = iconObj.GetComponent<Image>();
             if (iconImg == null) iconImg = iconObj.AddComponent<Image>();
@@ -2847,6 +2946,22 @@ public class MainMenuManager : MonoBehaviour
                 textRt.anchorMax = Vector2.one;
                 textRt.sizeDelta = Vector2.zero;
             }
+
+            // Ensure any existing LockBadge from prior sessions is removed
+            Transform lockTr = btnObj.transform.Find("LockBadge");
+            if (lockTr != null)
+            {
+                if (Application.isPlaying) Destroy(lockTr.gameObject);
+                else DestroyImmediate(lockTr.gameObject);
+            }
+        }
+
+        // Clean up any existing LakeLockBanner from prior sessions
+        Transform lockBannerTr = levelPanel.transform.Find("LakeLockBanner");
+        if (lockBannerTr != null)
+        {
+            if (Application.isPlaying) Destroy(lockBannerTr.gameObject);
+            else DestroyImmediate(lockBannerTr.gameObject);
         }
 
         // 6. Navigation arrows and pagination dots (Topmost UI layer)
@@ -3265,8 +3380,9 @@ public class MainMenuManager : MonoBehaviour
 
         if (sfxSource != null && buttonSoundClip != null)
         {
-            sfxSource.volume = AudioSettingsManager.SfxVolume;
-            sfxSource.PlayOneShot(buttonSoundClip, AudioSettingsManager.SfxVolume);
+            sfxSource.mute = !AudioSettingsManager.IsSfxEnabled;
+            sfxSource.volume = AudioSettingsManager.GetScaledSfxVolume(1.0f);
+            sfxSource.PlayOneShot(buttonSoundClip, 1.0f);
         }
     }
 

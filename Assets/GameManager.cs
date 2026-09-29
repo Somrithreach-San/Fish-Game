@@ -15,6 +15,14 @@ public class GameManager : MonoBehaviour
         // Reset TimeScale on Scene Load (Fixes stuck pause state after restart)
         Time.timeScale = 1f;
 
+        // Clean stale fish lists, blood particle clouds, and blinding overlays on level restart
+        Fish.AllFish.Clear();
+        if (FishBloodCloudPool.GetOrCreate() != null)
+        {
+            FishBloodCloudPool.GetOrCreate().ClearAllActive();
+        }
+        InkScreenOverlay.ClearBlindingImmediate();
+
         if (instance == null)
         {
             instance = this;
@@ -157,6 +165,47 @@ public class GameManager : MonoBehaviour
         return stageClearClip;
     }
 
+    public AudioClip GetWaterLoopClip()
+    {
+        if (waterLoopClip != null) return waterLoopClip;
+        #if UNITY_EDITOR
+        waterLoopClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/waterloop1.ogg");
+        if (waterLoopClip != null) return waterLoopClip;
+        #endif
+        waterLoopClip = Resources.Load<AudioClip>("waterloop1");
+        return waterLoopClip;
+    }
+
+    public void StartBackgroundMusic()
+    {
+        if (audioSource == null) audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+
+        AudioClip targetClip = LevelManager.IsCurrentLakeLevel ? GetRiverMusicClip() : GetOceanMusicClip();
+        if (targetClip != null && audioSource.clip != targetClip)
+        {
+            audioSource.Stop();
+            audioSource.clip = targetClip;
+        }
+
+        defaultBgmVolume = 1f;
+        audioSource.loop = true;
+        audioSource.playOnAwake = false;
+        audioSource.spatialBlend = 0f;
+        bool shouldPlay = AudioSettingsManager.IsMusicEnabled && AudioSettingsManager.MusicVolume > 0.001f;
+        audioSource.mute = !shouldPlay;
+        audioSource.volume = shouldPlay ? defaultBgmVolume * AudioSettingsManager.MusicVolume : 0f;
+        AudioSettingsManager.RouteToMusic(audioSource);
+        if (shouldPlay)
+        {
+            if (!audioSource.isPlaying) audioSource.Play();
+        }
+        else
+        {
+            audioSource.Pause();
+        }
+    }
+
     public void StopBackgroundMusic()
     {
         if (audioSource != null && audioSource.isPlaying)
@@ -169,7 +218,20 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    /// <summary>Pauses the BGM for the briefing screen. Ambient/water loop keeps playing.</summary>
+    public void SilenceMusicForBriefing()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+        {
+            audioSource.Stop();
+        }
+    }
 
+    /// <summary>Resumes BGM after the briefing Continue button is pressed.</summary>
+    public void ResumeMusicAfterBriefing()
+    {
+        StartBackgroundMusic();
+    }
 
 
     // Called from WebGL JS interface
@@ -184,8 +246,8 @@ public class GameManager : MonoBehaviour
 
     public  void PlayPause()
     {
-        // Prevent pausing if Game Over sequence is active
-        if (IsGameOver) return;
+        // Prevent pausing if Game Over sequence or Level Briefing is active
+        if (IsGameOver || Rhinotap.LevelBriefingManager.IsBriefingActive) return;
 
         isPaused = !isPaused;
 
@@ -242,38 +304,28 @@ public class GameManager : MonoBehaviour
                 sfxSource.PlayOneShot(levelUpClip);
         });
 
-        EventManager.Trigger("GameStart");
-        Parallax.RefreshBackground();
-        
         // FIX: Ensure Audio settings are correct for background music
+        // FIX: Ensure Audio settings are correct for background music (Do NOT play yet!)
         if (audioSource == null) audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
 
         if (audioSource != null)
         {
             AudioClip targetClip = LevelManager.IsCurrentLakeLevel ? GetRiverMusicClip() : GetOceanMusicClip();
-            if (targetClip != null && audioSource.clip != targetClip)
+            if (targetClip != null)
             {
-                audioSource.Stop();
                 audioSource.clip = targetClip;
             }
 
             defaultBgmVolume = 1f;
             audioSource.loop = true;
-            audioSource.playOnAwake = true;
+            audioSource.playOnAwake = false;
             audioSource.spatialBlend = 0f;
             bool shouldPlay = AudioSettingsManager.IsMusicEnabled && AudioSettingsManager.MusicVolume > 0.001f;
             audioSource.mute = !shouldPlay;
             audioSource.volume = shouldPlay ? defaultBgmVolume * AudioSettingsManager.MusicVolume : 0f;
             AudioSettingsManager.RouteToMusic(audioSource);
-            if (shouldPlay)
-            {
-                if (!audioSource.isPlaying) audioSource.Play();
-            }
-            else
-            {
-                audioSource.Pause();
-            }
+            // In-game music stays silent during briefing screen!
         }
 
         // Setup SFX Source
@@ -284,15 +336,16 @@ public class GameManager : MonoBehaviour
         sfxSource.mute = !AudioSettingsManager.IsSfxEnabled;
         AudioSettingsManager.RouteToSfx(sfxSource);
 
-        // Setup Ambient Source (Water Loop - part of SFX group, not music)
-        if (waterLoopClip != null)
+        // Setup Ambient Source (Water Loop - part of SFX group, plays during briefing too!)
+        AudioClip loopClip = GetWaterLoopClip();
+        if (loopClip != null)
         {
-            ambientSource = gameObject.AddComponent<AudioSource>();
-            ambientSource.clip = waterLoopClip;
+            if (ambientSource == null) ambientSource = gameObject.AddComponent<AudioSource>();
+            ambientSource.clip = loopClip;
             ambientSource.loop = true;
             ambientSource.playOnAwake = true;
             ambientSource.spatialBlend = 0f;
-            defaultAmbientVolume = ambientSource.volume > 0f ? ambientSource.volume : 1f;
+            defaultAmbientVolume = 1f;
             ambientSource.mute = !AudioSettingsManager.IsSfxEnabled;
             ambientSource.volume = AudioSettingsManager.IsSfxEnabled ? defaultAmbientVolume : 0f;
             AudioSettingsManager.RouteToSfx(ambientSource);
@@ -305,6 +358,18 @@ public class GameManager : MonoBehaviour
                 ambientSource.Pause();
             }
         }
+
+        // Show level briefing before starting gameplay.
+        // The briefing screen plays ONLY the water loop sound effect.
+        // In-game background music only starts when the player presses Continue on the briefing modal!
+        int displayLevel = LevelManager.GetDisplayLevelNumber(LevelManager.CurrentLevel);
+        bool isLake = LevelManager.IsCurrentLakeLevel;
+        Rhinotap.LevelBriefingManager.Show(displayLevel, isLake, () =>
+        {
+            EventManager.Trigger("GameStart");
+            Parallax.RefreshBackground();
+            StartBackgroundMusic();
+        });
 
         // Setup Ocean Surface Wave Ambient Audio (Proximity-based near surface)
         if (GetComponent<OceanSurfaceWaveAudio>() == null)
@@ -319,6 +384,7 @@ public class GameManager : MonoBehaviour
         AudioSettingsManager.InitializeAudio();
         AudioListener.pause = false;
 
+
         AudioSettingsManager.OnMusicSettingChanged += HandleMusicSettingChanged;
         AudioSettingsManager.OnMusicVolumeChanged += HandleMusicVolumeChanged;
         AudioSettingsManager.OnSfxSettingChanged += HandleSfxSettingChanged;
@@ -330,7 +396,7 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
-        if (!isPaused && !IsGameOver)
+        if (!isPaused && !IsGameOver && !Rhinotap.LevelBriefingManager.IsBriefingActive)
         {
             LevelManager.LevelTimer += Time.deltaTime;
         }
@@ -354,7 +420,12 @@ public class GameManager : MonoBehaviour
 
             if (inputDetected)
             {
-                if (AudioSettingsManager.IsMusicEnabled && audioSource != null && !audioSource.isPlaying) audioSource.Play();
+                // CRUCIAL: Do NOT resume or autoplay BGM if briefing screen is currently active!
+                if (!Rhinotap.LevelBriefingManager.IsBriefingActive)
+                {
+                    if (AudioSettingsManager.IsMusicEnabled && audioSource != null && !audioSource.isPlaying) audioSource.Play();
+                }
+                // Ambient water loop is allowed and intended during briefing!
                 if (AudioSettingsManager.IsSfxEnabled && ambientSource != null && !ambientSource.isPlaying) ambientSource.Play();
             }
         }
@@ -362,15 +433,18 @@ public class GameManager : MonoBehaviour
 
 
         // Pause controls:
-        // - Esc toggles pause/resume
+        // - Esc toggles pause/resume (blocked during briefing screen and game over)
         var kb = Keyboard.current;
         if (kb != null)
         {
             if (kb.escapeKey.wasPressedThisFrame)
             {
-                if (sfxSource != null && buttonSoundEffect != null) 
-                    sfxSource.PlayOneShot(buttonSoundEffect);
-                PlayPause();
+                if (!Rhinotap.LevelBriefingManager.IsBriefingActive && !IsGameOver)
+                {
+                    if (sfxSource != null && buttonSoundEffect != null) 
+                        sfxSource.PlayOneShot(buttonSoundEffect);
+                    PlayPause();
+                }
             }
         }
     }
@@ -540,9 +614,18 @@ public class GameManager : MonoBehaviour
             bool shouldPlay = enabled && AudioSettingsManager.MusicVolume > 0.001f;
             audioSource.mute = !shouldPlay;
             audioSource.volume = shouldPlay ? defaultBgmVolume * AudioSettingsManager.MusicVolume : 0f;
-            if (!shouldPlay) audioSource.Pause();
-            else if (!audioSource.isPlaying && !IsGameOver) audioSource.Play();
-            else audioSource.UnPause();
+            if (!shouldPlay || Rhinotap.LevelBriefingManager.IsBriefingActive)
+            {
+                audioSource.Pause();
+            }
+            else if (!audioSource.isPlaying && !IsGameOver)
+            {
+                audioSource.Play();
+            }
+            else
+            {
+                audioSource.UnPause();
+            }
         }
     }
 

@@ -14,8 +14,14 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
 
     private Vector3 originalScale = Vector3.one;
     private Image buttonImage;
+    private Image iconImage;
+    private bool isPressed = false;
+
     private readonly Color defaultColor = new Color(1f, 1f, 1f, 0.25f);
     private readonly Color pressedColor = new Color(1f, 1f, 1f, 0.50f);
+
+    private readonly Color iconIdleColor = new Color(1f, 1f, 1f, 0.55f);
+    private readonly Color iconActiveColor = new Color(1f, 1f, 1f, 1.0f);
 
     private Sprite GetPlainCircleSprite()
     {
@@ -53,20 +59,19 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
             buttonImage.color = defaultColor;
         }
 
-        // AUTO-FIX: Sync size with MobileJoystick if available, otherwise default to 250
-        float targetSize = 250f;
-        
-        if (MobileJoystick.Instance != null && MobileJoystick.Instance.background != null)
-        {
-             targetSize = MobileJoystick.Instance.background.sizeDelta.x;
-        }
+        // Sizing & Positioning: Lowered and aligned vertically with MobileJoystick
+        float targetSize = 220f;
 
         RectTransform rt = GetComponent<RectTransform>();
-        if (rt != null && (Mathf.Abs(rt.sizeDelta.x - targetSize) > 1))
+        if (rt != null)
         {
+            rt.anchorMin = new Vector2(1f, 0.5f);
+            rt.anchorMax = new Vector2(1f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = new Vector2(targetSize, targetSize);
-            rt.anchoredPosition = new Vector2(-200, 380); // Improved position (Aligned with Joystick)
-            Debug.Log($"MobileBoostButton: Auto-synced size to {targetSize}px.");
+            // Positioned to the left of the Ability button, aligned horizontally/vertically with Joystick
+            rt.anchoredPosition = new Vector2(-280f, -70f);
+            Debug.Log($"MobileBoostButton: Set size to {targetSize}px at {rt.anchoredPosition}.");
         }
 
         if (MobileAbilityButton.Instance != null)
@@ -89,41 +94,59 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
                 float iconSize = targetSize * 0.40f;
                 iconRt.sizeDelta = new Vector2(iconSize, iconSize);
 
-                Image iconImg = iconRt.GetComponent<Image>();
-                if (iconImg != null)
+                iconImage = iconRt.GetComponent<Image>();
+                if (iconImage != null)
                 {
-                    iconImg.color = new Color(1f, 1f, 1f, 0.85f);
+                    iconImage.color = iconIdleColor;
                 }
             }
         }
     }
 
+    private void Update()
+    {
+        bool isBoosting = isPressed;
+        if (!isBoosting && GameManager.instance?.playerGameObject != null)
+        {
+            PlayerController pc = GameManager.instance.playerGameObject.GetComponent<PlayerController>();
+            if (pc != null && pc.IsBoosting)
+            {
+                isBoosting = true;
+            }
+        }
+
+        if (iconImage != null)
+        {
+            iconImage.color = isBoosting ? iconActiveColor : iconIdleColor;
+        }
+    }
+
     public void OnPointerDown(PointerEventData eventData)
     {
+        isPressed = true;
         lastPressedFrame = Time.frameCount;
-        transform.localScale = originalScale * 0.92f;
-        if (buttonImage != null)
+        if (iconImage != null)
         {
-            buttonImage.color = pressedColor;
+            iconImage.color = iconActiveColor;
         }
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
-        transform.localScale = originalScale;
-        if (buttonImage != null)
-        {
-            buttonImage.color = defaultColor;
-        }
+        isPressed = false;
     }
     
     private void OnDisable()
     {
+        isPressed = false;
         lastPressedFrame = -1;
-        transform.localScale = originalScale;
         if (buttonImage != null)
         {
             buttonImage.color = defaultColor;
+        }
+        if (iconImage != null)
+        {
+            iconImage.color = iconIdleColor;
         }
     }
     

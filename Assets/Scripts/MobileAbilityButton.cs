@@ -31,10 +31,10 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
     private float pulseTimer = 0f;
     private bool isPressed = false;
 
-    // Disabled / Greyed out styling
-    private static readonly Color DisabledBgColor = new Color(0.12f, 0.12f, 0.12f, 0.28f);
-    private static readonly Color DisabledIconColor = new Color(0.55f, 0.55f, 0.55f, 0.25f);
-    private static readonly Color DisabledFillColor = new Color(0.2f, 0.7f, 0.9f, 0.35f);
+    // Disabled / Inactive styling (Matching Joystick and Speed Boost unactive colors)
+    private static readonly Color DisabledBgColor = new Color(1f, 1f, 1f, 0.25f);
+    private static readonly Color DisabledIconColor = new Color(1f, 1f, 1f, 0.55f);
+    private static readonly Color DisabledFillColor = new Color(1f, 1f, 1f, 0.40f);
 
     // Ready styling
     private static readonly Color ReadyBgColor = new Color(0.08f, 0.40f, 0.55f, 0.45f);
@@ -45,6 +45,9 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
     private static readonly Color ActiveBgColor = new Color(0.6f, 0.45f, 0.05f, 0.50f);
     private static readonly Color ActiveIconColor = new Color(1f, 1f, 1f, 1.0f);
     private static readonly Color ActiveFillColor = new Color(1f, 0.9f, 0.2f, 0.95f);
+
+    private float currentFillAmount = 0f;
+    [SerializeField] private float fillSmoothSpeed = 8.0f;
 
     private Sprite plainCircleSprite;
 
@@ -80,27 +83,21 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
     public void LoadSprites()
     {
         // Load Ocean Vortex Icon
+        #if UNITY_EDITOR
+        vortexSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Vortex_Ability.png");
+        #endif
         if (vortexSprite == null)
         {
             vortexSprite = Resources.Load<Sprite>("Vortex_Ability");
-            #if UNITY_EDITOR
-            if (vortexSprite == null)
-            {
-                vortexSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Vortex_Ability.png");
-            }
-            #endif
         }
 
         // Load River Blitz Icon
+        #if UNITY_EDITOR
+        blitzSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Blitz_Ability.png");
+        #endif
         if (blitzSprite == null)
         {
             blitzSprite = Resources.Load<Sprite>("Blitz_Ability");
-            #if UNITY_EDITOR
-            if (blitzSprite == null)
-            {
-                blitzSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Blitz_Ability.png");
-            }
-            #endif
         }
     }
 
@@ -172,8 +169,8 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
 
     /// <summary>
     /// Position and size the ability button relative to MobileBoostButton:
-    /// - Size: ~80% of Speed Boost button (a bit smaller).
-    /// - Position: Next to Speed Boost (to its left), and 40% lower in height.
+    /// - Size: Sized smaller than the Speed Boost button (~68% of boost size: ~150px).
+    /// - Position: To the RIGHT side of the Speed Boost button and BELOW the Speed Boost button (staggered down-right).
     /// </summary>
     public void SyncLayoutWithBoostButton()
     {
@@ -181,42 +178,37 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
         if (rectTransform == null) return;
 
         // Base boost dimensions
-        float boostSize = 250f;
-        Vector2 boostPos = new Vector2(-200f, 380f);
+        float boostSize = 220f;
+        Vector2 boostPos = new Vector2(-280f, -70f);
 
         if (MobileBoostButton.Instance != null)
         {
             RectTransform boostRt = MobileBoostButton.Instance.GetComponent<RectTransform>();
             if (boostRt != null)
             {
-                boostSize = boostRt.sizeDelta.x > 0 ? boostRt.sizeDelta.x : 250f;
+                boostSize = boostRt.sizeDelta.x > 0 ? boostRt.sizeDelta.x : 220f;
                 boostPos = boostRt.anchoredPosition;
             }
         }
-        else if (MobileJoystick.Instance != null && MobileJoystick.Instance.background != null)
-        {
-            boostSize = MobileJoystick.Instance.background.sizeDelta.x;
-        }
 
-        // 1. Button Size: A bit smaller than Speed Boost (~80%)
-        float abilityButtonSize = boostSize * 0.80f; // e.g. 200px if boost is 250px
-        rectTransform.anchorMin = new Vector2(1, 0);
-        rectTransform.anchorMax = new Vector2(1, 0);
-        rectTransform.pivot = new Vector2(1, 0);
+        // 1. Button Size: A bit smaller than Speed Boost (~68%: e.g. 150px for 220px boost)
+        float abilityButtonSize = boostSize * 0.68f;
+        rectTransform.anchorMin = new Vector2(1f, 0.5f);
+        rectTransform.anchorMax = new Vector2(1f, 0.5f);
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
         rectTransform.sizeDelta = new Vector2(abilityButtonSize, abilityButtonSize);
 
-        // 2. Position: Next to the speed boost (to the left with spacing), and 40% lower in Y
-        // boostPos.x is negative (measured from right edge). To place it to the left, subtract (boostSize + 25px).
-        float abilityX = boostPos.x - boostSize - 25f; // e.g. -200 - 250 - 25 = -475px from right edge
-        float abilityY = boostPos.y * 0.60f;           // 40% lower than speed boost Y (e.g. 380 * 0.60 = 228px)
+        // 2. Position: On the RIGHT side of Speed Boost and BELOW Speed Boost (pushed down with it)
+        float abilityX = boostPos.x + 170f; // e.g. -280 + 170 = -110px (to the right of Speed Boost)
+        float abilityY = boostPos.y - 130f; // e.g. -70 - 130 = -200px (below Speed Boost)
 
         rectTransform.anchoredPosition = new Vector2(abilityX, abilityY);
 
-        // 3. Center and scale the Ability Icon inside the button (~50% of button size)
+        // 3. Center and scale the Ability Icon inside the button (~52% of button size)
         if (iconImage != null)
         {
             RectTransform iconRt = iconImage.rectTransform;
-            float iconSize = abilityButtonSize * 0.52f; // e.g. ~104px
+            float iconSize = abilityButtonSize * 0.52f; // e.g. ~78px
             iconRt.sizeDelta = new Vector2(iconSize, iconSize);
             iconRt.anchoredPosition = Vector2.zero;
         }
@@ -257,18 +249,17 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
         bool isReady = hasPlayer && pas.IsAbilityReady;
         bool isActive = hasPlayer && pas.IsAbilityActive;
 
+        float targetFill = 0f;
+        Color targetFillColor = DisabledFillColor;
+
         if (isActive)
         {
             // --- ACTIVE STATE (5s duration) ---
             if (buttonImage != null) buttonImage.color = ActiveBgColor;
             if (iconImage != null) iconImage.color = ActiveIconColor;
 
-            if (fillImage != null)
-            {
-                fillImage.enabled = true;
-                fillImage.fillAmount = pas.ActiveTimerRatio;
-                fillImage.color = ActiveFillColor;
-            }
+            targetFill = pas.ActiveTimerRatio;
+            targetFillColor = ActiveFillColor;
 
             // Pulsing scale during active ability
             if (!isPressed)
@@ -283,12 +274,8 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
             if (buttonImage != null) buttonImage.color = ReadyBgColor;
             if (iconImage != null) iconImage.color = ReadyIconColor;
 
-            if (fillImage != null)
-            {
-                fillImage.enabled = true;
-                fillImage.fillAmount = 1.0f;
-                fillImage.color = ReadyFillColor;
-            }
+            targetFill = 1.0f;
+            targetFillColor = ReadyFillColor;
 
             // Pulsing scale when ready
             pulseTimer += Time.deltaTime * 5f;
@@ -310,20 +297,24 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
             if (buttonImage != null) buttonImage.color = DisabledBgColor;
             if (iconImage != null) iconImage.color = DisabledIconColor;
 
-            if (fillImage != null)
-            {
-                float energy = hasPlayer ? pas.Energy : 0f;
-                fillImage.enabled = (energy > 0.01f);
-                fillImage.fillAmount = energy;
-                fillImage.color = DisabledFillColor;
-            }
+            targetFill = hasPlayer ? pas.Energy : 0f;
+            targetFillColor = DisabledFillColor;
+        }
+
+        // Smooth liquid interpolation for fill gauge (handles both smooth increase & smooth decay)
+        if (fillImage != null)
+        {
+            currentFillAmount = Mathf.MoveTowards(currentFillAmount, targetFill, Time.deltaTime * fillSmoothSpeed);
+
+            fillImage.enabled = (currentFillAmount > 0.005f);
+            fillImage.fillAmount = currentFillAmount;
+            fillImage.color = targetFillColor;
         }
     }
 
     public void OnPointerDown(PointerEventData eventData)
     {
         isPressed = true;
-        transform.localScale = baseScale * 0.92f;
 
         if (PlayerAbilitySystem.Instance != null && PlayerAbilitySystem.Instance.IsAbilityReady)
         {
@@ -334,7 +325,6 @@ public class MobileAbilityButton : MonoBehaviour, IPointerDownHandler, IPointerU
     public void OnPointerUp(PointerEventData eventData)
     {
         isPressed = false;
-        transform.localScale = baseScale;
     }
 
     private void OnDisable()

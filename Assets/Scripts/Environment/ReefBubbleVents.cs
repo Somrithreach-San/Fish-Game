@@ -17,22 +17,24 @@ namespace Rhinotap
         {
             public string name = "Straw Vent";
             public Vector3 localOffset;
+            [Tooltip("Continuous bubble emission rate per second (0 for pure pulse mode)")]
+            public float emissionRate = 0f;
             [Tooltip("Minimum wait time between pulses (seconds)")]
             public float minInterval = 2.5f;
             [Tooltip("Maximum wait time between pulses (seconds)")]
-            public float maxInterval = 5.2f;
+            public float maxInterval = 5.0f;
             [Tooltip("Minimum bubbles emitted in a pulse")]
             public int minBurstCount = 1;
             [Tooltip("Maximum bubbles emitted in a pulse")]
-            public int maxBurstCount = 3;
+            public int maxBurstCount = 2;
             [Tooltip("Chance (0 to 1) for a secondary 'heartbeat' pulse 0.25s later")]
-            [Range(0f, 1f)] public float doublePulseChance = 0.40f;
+            [Range(0f, 1f)] public float doublePulseChance = 0.30f;
             [Tooltip("Minimum bubble size")]
-            public float minSize = 0.20f;
+            public float minSize = 0.045f;
             [Tooltip("Maximum bubble size")]
-            public float maxSize = 0.46f;
+            public float maxSize = 0.080f;
             [Tooltip("Upward rise speed range (min, max)")]
-            public Vector2 riseSpeed = new Vector2(3.5f, 4.5f);
+            public Vector2 riseSpeed = new Vector2(0.55f, 0.95f);
         }
 
         [Header("Material & Visuals")]
@@ -44,61 +46,51 @@ namespace Rhinotap
         [Tooltip("Top of the map / water surface where bubbles pop and destroy")]
         [SerializeField] private float waterSurfaceY = 15.0f;
 
-        [Header("Straw Vent Mapping (The 4 Purple Sponge Tube Openings)")]
+        [Header("Straw Vent Mapping")]
         [SerializeField]
         private List<VentPoint> vents = new List<VentPoint>()
         {
             new VentPoint
             {
                 name = "Tube_Left",
-                localOffset = new Vector3(0.16f, 1.51f, 0f),
-                minInterval = 2.8f,
-                maxInterval = 5.5f,
-                minBurstCount = 2,
-                maxBurstCount = 4,
-                doublePulseChance = 0.35f,
-                minSize = 0.18f,
-                maxSize = 0.32f,
-                riseSpeed = new Vector2(3.5f, 4.4f)
+                localOffset = new Vector3(-0.34f, 0.405f, 0f),
+                emissionRate = 0f,
+                minInterval = 2.5f,
+                maxInterval = 5.0f,
+                minBurstCount = 1,
+                maxBurstCount = 2,
+                doublePulseChance = 0.30f,
+                minSize = 0.045f,
+                maxSize = 0.080f,
+                riseSpeed = new Vector2(0.55f, 0.95f)
             },
             new VentPoint
             {
                 name = "Tube_CenterTall",
-                localOffset = new Vector3(0.66f, 1.84f, 0f),
-                minInterval = 2.4f,
-                maxInterval = 4.8f,
-                minBurstCount = 3,
-                maxBurstCount = 5,
-                doublePulseChance = 0.50f,
-                minSize = 0.20f,
-                maxSize = 0.36f,
-                riseSpeed = new Vector2(3.7f, 4.7f)
-            },
-            new VentPoint
-            {
-                name = "Tube_ShortFront",
-                localOffset = new Vector3(1.04f, 0.70f, 0f),
-                minInterval = 3.2f,
-                maxInterval = 6.2f,
+                localOffset = new Vector3(0.00f, 0.805f, 0f),
+                emissionRate = 0f,
+                minInterval = 2.0f,
+                maxInterval = 4.2f,
                 minBurstCount = 1,
                 maxBurstCount = 3,
-                doublePulseChance = 0.30f,
-                minSize = 0.16f,
-                maxSize = 0.28f,
-                riseSpeed = new Vector2(3.3f, 4.2f)
+                doublePulseChance = 0.35f,
+                minSize = 0.050f,
+                maxSize = 0.090f,
+                riseSpeed = new Vector2(0.65f, 1.05f)
             },
             new VentPoint
             {
-                name = "Tube_RightSlanted",
-                localOffset = new Vector3(1.38f, 1.30f, 0f),
-                minInterval = 3.0f,
-                maxInterval = 5.8f,
-                minBurstCount = 2,
-                maxBurstCount = 4,
-                doublePulseChance = 0.40f,
-                minSize = 0.18f,
-                maxSize = 0.30f,
-                riseSpeed = new Vector2(3.4f, 4.3f)
+                name = "Tube_Right",
+                localOffset = new Vector3(0.36f, 0.405f, 0f),
+                emissionRate = 0f,
+                minInterval = 2.8f,
+                maxInterval = 5.5f,
+                minBurstCount = 1,
+                maxBurstCount = 2,
+                doublePulseChance = 0.30f,
+                minSize = 0.045f,
+                maxSize = 0.080f,
+                riseSpeed = new Vector2(0.55f, 0.90f)
             }
         };
 
@@ -120,6 +112,15 @@ namespace Rhinotap
             CreateVentParticleSystems();
         }
 
+        private void Start()
+        {
+            if (activeVents.Count == 0)
+            {
+                CreateVentParticleSystems();
+            }
+            StartAllHeartbeats();
+        }
+
         private void OnEnable()
         {
             StartAllHeartbeats();
@@ -137,35 +138,40 @@ namespace Rhinotap
 #if UNITY_EDITOR
                 bubbleMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Graphics/bubbleParticleMat.mat");
 #endif
+                if (bubbleMaterial == null)
+                {
+                    bubbleMaterial = Resources.Load<Material>("bubbleParticleMat");
+                }
             }
         }
 
         public void CreateVentParticleSystems()
         {
             StopAllHeartbeats();
-
-            // Clear any pre-existing children
-            for (int i = transform.childCount - 1; i >= 0; i--)
-            {
-                var child = transform.GetChild(i);
-                if (child.name.StartsWith("Vent_"))
-                {
-                    if (Application.isPlaying) Destroy(child.gameObject);
-                    else DestroyImmediate(child.gameObject);
-                }
-            }
             activeVents.Clear();
-
             EnsureMaterial();
 
             for (int i = 0; i < vents.Count; i++)
             {
                 var vent = vents[i];
-                GameObject ventObj = new GameObject($"Vent_{vent.name}");
-                ventObj.transform.SetParent(transform, false);
-                ventObj.transform.localPosition = vent.localOffset;
+                string childName = $"Vent_{vent.name}";
+                Transform existingChild = transform.Find(childName);
+                GameObject ventObj;
+                if (existingChild != null)
+                {
+                    ventObj = existingChild.gameObject;
+                }
+                else
+                {
+                    ventObj = new GameObject(childName);
+                    ventObj.transform.SetParent(transform, false);
+                }
 
-                var ps = ventObj.AddComponent<ParticleSystem>();
+                ventObj.transform.localPosition = vent.localOffset;
+                ventObj.transform.localRotation = Quaternion.Inverse(transform.localRotation); // Cancel parent tilt -> Straight UP in world space
+
+                var ps = ventObj.GetComponent<ParticleSystem>();
+                if (ps == null) ps = ventObj.AddComponent<ParticleSystem>();
                 ConfigureParticleSystem(ps, vent);
 
                 var av = new ActiveVent
@@ -186,44 +192,50 @@ namespace Rhinotap
         {
             float emitterWorldY = transform.TransformPoint(vent.localOffset).y;
             float travelDistance = Mathf.Max(5.0f, waterSurfaceY - emitterWorldY);
-            float maxLifetime = travelDistance / Mathf.Max(0.5f, vent.riseSpeed.x) + 0.5f;
+            float maxLifetime = travelDistance / Mathf.Max(0.3f, vent.riseSpeed.x) + 1.0f;
 
-            // 1. Main Module (manual burst pulses, no continuous emission)
+            // 1. Main Module (manual burst pulses, upright particles, gentle natural speed)
             var main = ps.main;
             main.loop = false;
             main.playOnAwake = false;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
             main.startSpeed = new ParticleSystem.MinMaxCurve(vent.riseSpeed.x, vent.riseSpeed.y);
-            main.startLifetime = new ParticleSystem.MinMaxCurve(maxLifetime * 0.90f, maxLifetime * 1.10f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(maxLifetime * 0.95f, maxLifetime * 1.15f);
             main.startSize = new ParticleSystem.MinMaxCurve(vent.minSize, vent.maxSize);
-            main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-            main.maxParticles = 60; // Low cap to keep bubbles clean and lightweight
-            main.gravityModifier = -0.04f; // Gentle upward buoyancy
+            main.startRotation = 0f; // Straight billboard, no sprite rotation tilt
+            main.maxParticles = 80;
+            main.gravityModifier = -0.01f; // Gentle upward buoyancy
 
-            // 2. Emission Module (Disabled continuous emission — driven by Heartbeat script)
+            // 2. Emission Module (Pulsing burst mode driven by VentHeartbeatRoutine)
             var emission = ps.emission;
-            emission.enabled = false; // ZERO continuous emission!
+            emission.enabled = false;
             emission.rateOverTime = 0f;
 
-            // 3. Shape Module: narrow cone straight UP (+Y)
+            // 3. Shape Module: narrow cone pointing straight UP (+Y in world space)
             var shape = ps.shape;
             shape.enabled = true;
             shape.shapeType = ParticleSystemShapeType.Cone;
-            shape.angle = 5.0f; // tight mouth
-            shape.radius = 0.06f;
+            shape.angle = 4.0f; // tight straight mouth
+            shape.radius = 0.04f;
             shape.rotation = new Vector3(-90f, 0f, 0f); // UP (+Y)
 
-            // 4. Velocity over Lifetime (Organic gentle drift)
+            // 4. Velocity over Lifetime (Subtle gentle drift)
             var vel = ps.velocityOverLifetime;
             vel.enabled = true;
             vel.space = ParticleSystemSimulationSpace.World;
-            vel.x = new ParticleSystem.MinMaxCurve(-0.30f, 0.30f);
-            vel.y = new ParticleSystem.MinMaxCurve(0f, 0.40f);
+            vel.x = new ParticleSystem.MinMaxCurve(-0.06f, 0.06f);
+            vel.y = new ParticleSystem.MinMaxCurve(0f, 0.10f);
             vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
-            vel.orbitalX = new ParticleSystem.MinMaxCurve(0f, 0f);
-            vel.orbitalY = new ParticleSystem.MinMaxCurve(0f, 0f);
-            vel.orbitalZ = new ParticleSystem.MinMaxCurve(0f, 0f);
-            vel.radial = new ParticleSystem.MinMaxCurve(0f, 0f);
+
+            // 4b. Noise Module (Natural underwater gentle sway)
+            var noise = ps.noise;
+            noise.enabled = true;
+            noise.frequency = 0.20f;
+            noise.quality = ParticleSystemNoiseQuality.Medium;
+            noise.strength = new ParticleSystem.MinMaxCurve(0.12f, 0.22f);
+            noise.scrollSpeed = 0.3f;
+            noise.damping = true;
 
             // 5. Size over Lifetime: Disabled so bubbles remain at constant size throughout ascent
             var sol = ps.sizeOverLifetime;
@@ -255,7 +267,12 @@ namespace Rhinotap
             renderer.sortingOrder = sortingOrder;
             if (bubbleMaterial != null)
             {
-                renderer.material = bubbleMaterial;
+                renderer.sharedMaterial = bubbleMaterial;
+            }
+
+            if (Application.isPlaying && !ps.isPlaying)
+            {
+                ps.Play();
             }
         }
 
@@ -263,15 +280,24 @@ namespace Rhinotap
         {
             if (!Application.isPlaying) return;
 
+            // Ensure activeVents is populated
+            if (activeVents.Count == 0)
+            {
+                CreateVentParticleSystems();
+            }
+
             // Assign a randomized initial offset to each vent so they NEVER start simultaneously
-            float initialStagger = 0.3f;
+            float initialStagger = 0.2f;
             for (int i = 0; i < activeVents.Count; i++)
             {
                 var av = activeVents[i];
+                if (av.ps != null && !av.ps.isPlaying)
+                {
+                    av.ps.Play();
+                }
                 if (av.coroutine != null) StopCoroutine(av.coroutine);
-                // Stagger each vent with a random delay (e.g. vent 0: 0.5s, vent 1: 2.1s, vent 2: 3.7s)
-                float startDelay = initialStagger + Random.Range(0.2f, 1.8f);
-                initialStagger += 1.6f;
+                float startDelay = initialStagger + Random.Range(0.2f, 1.2f);
+                initialStagger += 1.2f;
                 av.coroutine = StartCoroutine(VentHeartbeatRoutine(av, startDelay));
             }
         }
@@ -293,22 +319,30 @@ namespace Rhinotap
         /// </summary>
         private IEnumerator VentHeartbeatRoutine(ActiveVent av, float initialDelay)
         {
+            if (av.ps != null && !av.ps.isPlaying)
+            {
+                av.ps.Play();
+            }
+
             yield return new WaitForSeconds(initialDelay);
 
             while (true)
             {
                 if (av.ps != null)
                 {
-                    // Primary heartbeat pulse: emit a small cluster of 1-3 bubbles
+                    if (!av.ps.isPlaying) av.ps.Play();
+
+                    // Primary heartbeat pulse: emit a small cluster of 2-4 bubbles
                     int burstCount = Random.Range(av.config.minBurstCount, av.config.maxBurstCount + 1);
                     av.ps.Emit(burstCount);
 
                     // Secondary trailing pulse (lub-dub heartbeat effect)
                     if (Random.value < av.config.doublePulseChance)
                     {
-                        yield return new WaitForSeconds(Random.Range(0.22f, 0.38f));
+                        yield return new WaitForSeconds(Random.Range(0.20f, 0.35f));
                         if (av.ps != null)
                         {
+                            if (!av.ps.isPlaying) av.ps.Play();
                             av.ps.Emit(Random.Range(1, 3));
                         }
                     }
@@ -322,7 +356,11 @@ namespace Rhinotap
 
         private void LateUpdate()
         {
-            // Exact surface ceiling check: Any bubble reaching the water surface pops immediately
+            if (particleBuffer == null || particleBuffer.Length < MAX_BUFFER_SIZE)
+            {
+                particleBuffer = new ParticleSystem.Particle[MAX_BUFFER_SIZE];
+            }
+
             for (int s = 0; s < activeVents.Count; s++)
             {
                 var ps = activeVents[s].ps;

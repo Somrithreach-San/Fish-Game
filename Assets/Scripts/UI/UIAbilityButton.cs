@@ -20,6 +20,8 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
     private RectTransform rectTransform;
     private CanvasGroup canvasGroup;
     private float pulseTimer = 0f;
+    private float currentFillAmount = 0f;
+    [SerializeField] private float fillSmoothSpeed = 8.0f;
     private static Sprite s_CachedCircleSprite;
 
     private static Sprite GetCircleSprite()
@@ -60,8 +62,22 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
         BuildUIIfNeeded();
     }
 
+    private Sprite vortexSprite;
+    private Sprite blitzSprite;
+
+    private void LoadAbilitySprites()
+    {
+        #if UNITY_EDITOR
+        vortexSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Vortex_Ability.png");
+        blitzSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Graphics/Blitz_Ability.png");
+        #endif
+        if (vortexSprite == null) vortexSprite = Resources.Load<Sprite>("Vortex_Ability");
+        if (blitzSprite == null) blitzSprite = Resources.Load<Sprite>("Blitz_Ability");
+    }
+
     public void BuildUIIfNeeded()
     {
+        LoadAbilitySprites();
         Sprite circle = GetCircleSprite();
 
         if (bgImage == null)
@@ -99,6 +115,9 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
         }
 
         // 2. Center Icon (Lightning / Vortex Whirl Icon)
+        bool isRiver = LevelManager.IsCurrentLakeLevel;
+        Sprite activeIconSp = (isRiver ? blitzSprite : vortexSprite) ?? circle;
+
         if (iconImage == null)
         {
             Transform iT = transform.Find("IconImage");
@@ -109,15 +128,21 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
                 RectTransform iRt = iObj.AddComponent<RectTransform>();
                 iRt.anchorMin = new Vector2(0.5f, 0.5f);
                 iRt.anchorMax = new Vector2(0.5f, 0.5f);
-                iRt.sizeDelta = new Vector2(36, 36);
+                iRt.sizeDelta = new Vector2(42, 42);
                 iconImage = iObj.AddComponent<Image>();
-                iconImage.sprite = circle;
+                iconImage.sprite = activeIconSp;
+                iconImage.preserveAspect = true;
                 iconImage.color = Color.white;
             }
             else
             {
                 iconImage = iT.GetComponent<Image>();
+                if (iconImage != null) iconImage.sprite = activeIconSp;
             }
+        }
+        else
+        {
+            iconImage.sprite = activeIconSp;
         }
 
         // 3. Key Hint Text (Desktop "E")
@@ -163,17 +188,16 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
         if (PlayerAbilitySystem.Instance == null) return;
 
         PlayerAbilitySystem pas = PlayerAbilitySystem.Instance;
-
         bool isMobile = Application.isMobilePlatform || UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld;
+
+        float targetFill = 0f;
+        Color targetFillColor = new Color(0.2f, 0.8f, 1f, 0.8f);
 
         if (pas.IsAbilityActive)
         {
             // Active Ability state: Radial ring drains over 5s with glowing yellow/cyan border
-            if (fillImage != null)
-            {
-                fillImage.fillAmount = pas.ActiveTimerRatio;
-                fillImage.color = new Color(1f, 0.9f, 0.2f, 0.95f);
-            }
+            targetFill = pas.ActiveTimerRatio;
+            targetFillColor = new Color(1f, 0.9f, 0.2f, 0.95f);
 
             if (keyHintText != null)
             {
@@ -191,11 +215,8 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
         {
             // Charging state: radial progress 0.0 to 1.0
             float energy = pas.Energy;
-            if (fillImage != null)
-            {
-                fillImage.fillAmount = energy;
-                fillImage.color = (energy >= 1.0f) ? new Color(0.2f, 1f, 0.45f, 1f) : new Color(0.2f, 0.8f, 1f, 0.8f);
-            }
+            targetFill = energy;
+            targetFillColor = (energy >= 1.0f) ? new Color(0.2f, 1f, 0.45f, 1f) : new Color(0.2f, 0.8f, 1f, 0.8f);
 
             if (pas.IsAbilityReady)
             {
@@ -235,6 +256,14 @@ public class UIAbilityButton : MonoBehaviour, IPointerDownHandler
                     bgImage.color = new Color(0.05f, 0.15f, 0.25f, 0.75f);
                 }
             }
+        }
+
+        // Smooth liquid fill gauge interpolation
+        if (fillImage != null)
+        {
+            currentFillAmount = Mathf.MoveTowards(currentFillAmount, targetFill, Time.deltaTime * fillSmoothSpeed);
+            fillImage.fillAmount = currentFillAmount;
+            fillImage.color = targetFillColor;
         }
     }
 

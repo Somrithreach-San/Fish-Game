@@ -8,7 +8,9 @@ public class HarpoonHazard : MonoBehaviour
 
     [Header("Movement Settings")]
     [SerializeField] private float descendSpeed = 38f; // High-velocity punchy plunge (boosted from 27f)
-    [SerializeField] private float retractSpeed = 22f; // Fast, responsive winch reel speed
+    [SerializeField] private float retractSpeed = 22f; // Fast, responsive winch reel speed for empty spear
+    [SerializeField] private float victimRetractSpeed = 12f; // Smooth, dramatic haul speed for caught fish/player
+    [SerializeField] private float sharkRetractSpeed = 6.5f; // Weighted, heavy strain haul speed for massive shark
     [SerializeField] private float bottomPauseDuration = 0.15f; // Snappy turn-around
     [SerializeField] private float impactAbsorbDuration = 0.08f; // Brief micro-nudge as fish absorbs momentum
 
@@ -391,24 +393,66 @@ public class HarpoonHazard : MonoBehaviour
 
     private bool isEventSubscribed = false;
 
+    private bool IsGameOverOrPlayerDead()
+    {
+        if (GameManager.instance != null && GameManager.instance.IsGameOver) return true;
+        if (LevelManager.IsLevelCompleted) return true;
+        if (GridController.Instance != null && GridController.Instance.Player != null)
+        {
+            PlayerController pc = GridController.Instance.Player.GetComponent<PlayerController>();
+            if (pc != null && !pc.IsAlive) return true;
+        }
+        else if (GameManager.instance != null && GameManager.instance.playerGameObject != null)
+        {
+            PlayerController pc = GameManager.instance.playerGameObject.GetComponent<PlayerController>();
+            if (pc != null && !pc.IsAlive) return true;
+        }
+        else
+        {
+            PlayerController pc = FindFirstObjectByType<PlayerController>();
+            if (pc != null && !pc.IsAlive) return true;
+        }
+        return false;
+    }
+
+    private void SubscribeToEvents()
+    {
+        if (isEventSubscribed) return;
+        try
+        {
+            EventManager.StartListening<bool>("gamePaused", OnGamePaused);
+            EventManager.StartListening("playerDeath", StopAudioForGameEnd);
+            EventManager.StartListening("GameLoss", StopAudioForGameEnd);
+            EventManager.StartListening("GameWin", StopAudioForGameEnd);
+            EventManager.StartListening("stageClear", StopAudioForGameEnd);
+            isEventSubscribed = true;
+        }
+        catch { }
+    }
+
+    private void UnsubscribeFromEvents()
+    {
+        if (!isEventSubscribed) return;
+        try
+        {
+            EventManager.StopListening<bool>("gamePaused", OnGamePaused);
+            EventManager.StopListening("playerDeath", StopAudioForGameEnd);
+            EventManager.StopListening("GameLoss", StopAudioForGameEnd);
+            EventManager.StopListening("GameWin", StopAudioForGameEnd);
+            EventManager.StopListening("stageClear", StopAudioForGameEnd);
+            isEventSubscribed = false;
+        }
+        catch { }
+    }
+
     private void Start()
     {
-        if (!isEventSubscribed)
-        {
-            try
-            {
-                EventManager.StartListening<bool>("gamePaused", OnGamePaused);
-                EventManager.StartListening("playerDeath", StopAudioForGameEnd);
-                EventManager.StartListening("GameLoss", StopAudioForGameEnd);
-                EventManager.StartListening("GameWin", StopAudioForGameEnd);
-                isEventSubscribed = true;
-            }
-            catch { }
-        }
+        SubscribeToEvents();
     }
 
     private void OnEnable()
     {
+        SubscribeToEvents();
         caughtFish = null;
         caughtPlayer = null;
         caughtShark = null;
@@ -416,6 +460,7 @@ public class HarpoonHazard : MonoBehaviour
         caughtSharkWorldRot = Quaternion.identity;
         isPaused = false;
         descendElapsed = 0f;
+        if (audioSource != null) audioSource.pitch = 1.0f;
 
         RestoreElevatedSortingOrders();
 
@@ -464,18 +509,7 @@ public class HarpoonHazard : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (isEventSubscribed)
-        {
-            try
-            {
-                EventManager.StopListening<bool>("gamePaused", OnGamePaused);
-                EventManager.StopListening("playerDeath", StopAudioForGameEnd);
-                EventManager.StopListening("GameLoss", StopAudioForGameEnd);
-                EventManager.StopListening("GameWin", StopAudioForGameEnd);
-            }
-            catch { }
-            isEventSubscribed = false;
-        }
+        UnsubscribeFromEvents();
 
         if (launcherAudioAnchor != null && launcherAudioAnchor.gameObject != null)
         {
@@ -486,6 +520,11 @@ public class HarpoonHazard : MonoBehaviour
     private void OnGamePaused(bool paused)
     {
         isPaused = paused;
+        if (IsGameOverOrPlayerDead())
+        {
+            StopAudioForGameEnd();
+            return;
+        }
         if (audioSource != null)
         {
             if (paused) audioSource.Pause();
@@ -500,9 +539,9 @@ public class HarpoonHazard : MonoBehaviour
 
     private void StopAudioForGameEnd()
     {
-        if (audioSource != null) audioSource.Stop();
-        if (stabAudioSource != null) stabAudioSource.Stop();
-        if (bubbleTrail != null) bubbleTrail.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        if (audioSource != null && audioSource.isPlaying) audioSource.Stop();
+        if (stabAudioSource != null && stabAudioSource.isPlaying) stabAudioSource.Stop();
+        if (bubbleTrail != null && bubbleTrail.isPlaying) bubbleTrail.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 
     private Vector3 GetCurrentLauncherPos()
@@ -523,7 +562,12 @@ public class HarpoonHazard : MonoBehaviour
 
     private void Update()
     {
-        if (isPaused || (GameManager.instance != null && GameManager.Paused)) return;
+        if (IsGameOverOrPlayerDead())
+        {
+            StopAudioForGameEnd();
+        }
+
+        if (isPaused || (GameManager.instance != null && GameManager.Paused) || IsGameOverOrPlayerDead()) return;
 
         Vector3 currentLauncherPos = GetCurrentLauncherPos();
 
@@ -539,7 +583,7 @@ public class HarpoonHazard : MonoBehaviour
                 float maxDist = 45f;
                 float normDist = Mathf.Clamp01(dist / maxDist);
                 float baseVol = (currentState == HarpoonState.Retracting) ? 0.28f : 0.38f;
-                audioSource.volume = Mathf.Lerp(baseVol, baseVol * 0.20f, normDist);
+                audioSource.volume = Mathf.Lerp(baseVol, baseVol * 0.20f, normDist) * AudioSettingsManager.SfxVolume;
                 float pan = Mathf.Clamp((currentLauncherPos.x - playerPos.x) / 12.0f, -0.75f, 0.75f);
                 audioSource.panStereo = pan;
             }
@@ -667,12 +711,13 @@ public class HarpoonHazard : MonoBehaviour
         {
             currentState = HarpoonState.Retracting;
 
-            if (audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
+            if (!IsGameOverOrPlayerDead() && audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
             {
                 audioSource.spatialBlend = 1.0f;
-                audioSource.volume = HarpoonReelVolume;
+                audioSource.volume = HarpoonReelVolume * AudioSettingsManager.SfxVolume;
                 audioSource.clip = reelSound;
                 audioSource.loop = true;
+                audioSource.pitch = (caughtShark != null) ? 0.82f : 1.0f;
                 audioSource.Play();
             }
         }
@@ -685,11 +730,9 @@ public class HarpoonHazard : MonoBehaviour
         Vector3 toLauncher = targetLauncher - tetherPos;
         float dist = toLauncher.magnitude;
         Vector3 spearedWorldPos = transform.TransformPoint(new Vector3(0f, caughtVictimOffset, 0f));
-        bool reachedBoat = (dist < 0.85f) || 
-                           (tetherPos.y >= targetLauncher.y - 0.35f) || 
-                           (caughtShark != null && (dist < 1.4f || spearedWorldPos.y >= targetLauncher.y - 1.2f)) ||
-                           (caughtPlayer != null && (dist < 1.2f || spearedWorldPos.y >= targetLauncher.y - 1.0f)) ||
-                           (caughtFish != null && (dist < 1.2f || spearedWorldPos.y >= targetLauncher.y - 1.0f));
+        
+        // The harpoon has reached the boat once its tether reaches the launcher anchor
+        bool reachedBoat = (dist < 0.85f) || (tetherPos.y >= targetLauncher.y - 0.25f);
 
         if (reachedBoat)
         {
@@ -743,7 +786,20 @@ public class HarpoonHazard : MonoBehaviour
         }
 
         // Dynamically reel towards launcher at physical speed (duration = distance / speed)
-        float currentRetractSpeed = (caughtShark != null) ? (retractSpeed * 0.95f) : retractSpeed;
+        float currentRetractSpeed;
+        if (caughtShark != null)
+        {
+            currentRetractSpeed = sharkRetractSpeed;
+        }
+        else if (caughtFish != null || caughtPlayer != null)
+        {
+            currentRetractSpeed = victimRetractSpeed;
+        }
+        else
+        {
+            currentRetractSpeed = retractSpeed;
+        }
+
         float stepDist = Mathf.Min(currentRetractSpeed * Time.deltaTime, dist);
         Vector3 moveStep = (dist > 0.001f) ? (toLauncher / dist) * stepDist : Vector3.zero;
         transform.position += moveStep;
@@ -975,6 +1031,33 @@ public class HarpoonHazard : MonoBehaviour
             }
         }
 
+        // Check Solid Environmental Obstacles (e.g. Rock Shelf) along trajectory
+        float bestRockT = float.MaxValue;
+        Vector3 bestRockHitPos = Vector3.zero;
+        if (stepDist > 0.001f)
+        {
+            RaycastHit2D[] rockHits = Physics2D.CircleCastAll(fromPos, 0.35f, launchDir, stepDist);
+            for (int i = 0; i < rockHits.Length; i++)
+            {
+                Collider2D c = rockHits[i].collider;
+                if (c != null && !c.isTrigger && SharkHazard.IsSolidEnvironmentObstacle(c))
+                {
+                    if (rockHits[i].fraction < bestRockT)
+                    {
+                        bestRockT = rockHits[i].fraction;
+                        bestRockHitPos = rockHits[i].point;
+                    }
+                }
+            }
+        }
+
+        // If the solid rock is hit before any target or there are no targets ahead of the rock:
+        if (bestRockT <= bestT && bestRockT < float.MaxValue)
+        {
+            OnHitSolidRock(bestRockHitPos);
+            return true;
+        }
+
         // Apply hit to the first target encountered along the line
         if (bestHitShark != null)
         {
@@ -996,6 +1079,28 @@ public class HarpoonHazard : MonoBehaviour
         }
 
         return false;
+    }
+
+    private void OnHitSolidRock(Vector3 hitPos)
+    {
+        transform.position = hitPos;
+        currentState = HarpoonState.AtBottom;
+        bottomTimer = bottomPauseDuration;
+
+        if (bubbleTrail != null && bubbleTrail.isPlaying)
+        {
+            bubbleTrail.Stop();
+        }
+
+        if (audioSource != null && hitFloorSound != null && AudioSettingsManager.IsSfxEnabled)
+        {
+            audioSource.PlayOneShot(hitFloorSound, 0.95f);
+        }
+
+        if (GameManager.instance != null)
+        {
+            GameManager.instance.CameraShake(0.16f, 3.2f, 1.6f);
+        }
     }
 
     private float SqrDistanceToSegment(Vector2 p, Vector2 a, Vector2 b, out float t)
@@ -1034,6 +1139,10 @@ public class HarpoonHazard : MonoBehaviour
             linkedBoat.OnSharkImpaled(shark);
         }
 
+        // Blood particle cloud on harpoon penetration impact
+        float sharkScale = Mathf.Clamp(Mathf.Abs(shark.transform.localScale.x) * 1.5f, 1.2f, 2.2f);
+        FishBloodCloud.Spawn(shark.transform.position, sharkScale, launchDir * 3.5f, transform);
+
         StartImpactAbsorb();
         PlayStabAudio(shark.transform.position, isPlayer: false);
     }
@@ -1059,6 +1168,10 @@ public class HarpoonHazard : MonoBehaviour
         // making the harpoon look buried inside the player's flesh rather than pasted on top of it.
         ElevateFishSortingOrder(player.gameObject);
 
+        // Blood particle cloud on harpoon penetration impact
+        float playerScale = Mathf.Clamp(Mathf.Abs(player.transform.localScale.x) * 1.3f, 0.8f, 2.0f);
+        FishBloodCloud.Spawn(player.transform.position, playerScale, launchDir * 3.5f, transform);
+
         StartImpactAbsorb();
         PlayStabAudio(player.transform.position, isPlayer: true);
     }
@@ -1071,6 +1184,10 @@ public class HarpoonHazard : MonoBehaviour
     {
         if (fish == null || fish.IsDead || fish.IsHooked) return;
 
+        // Blood particle cloud on harpoon penetration impact
+        float fishScale = Mathf.Clamp(Mathf.Abs(fish.transform.localScale.x) * 1.2f, 0.6f, 1.8f);
+        FishBloodCloud.Spawn(fish.transform.position, fishScale, launchDir * 3.5f, transform);
+
         StartImpactAbsorb();
         PlayStabAudio(fish.transform.position, isPlayer: false);
         CatchFish(fish);
@@ -1079,6 +1196,15 @@ public class HarpoonHazard : MonoBehaviour
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (currentState != HarpoonState.Descending && currentState != HarpoonState.AtBottom) return;
+
+        if (other != null && !other.isTrigger && SharkHazard.IsSolidEnvironmentObstacle(other))
+        {
+            if (currentState == HarpoonState.Descending)
+            {
+                OnHitSolidRock(transform.position);
+            }
+            return;
+        }
 
         if (other.GetComponentInParent<Hazard>() != null || 
             other.GetComponentInParent<HarpoonHazard>() != null ||
@@ -1155,12 +1281,13 @@ public class HarpoonHazard : MonoBehaviour
             // Momentum absorbed — immediately begin reeling in towards the boat!
             currentState = HarpoonState.Retracting;
 
-            if (audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
+            if (!IsGameOverOrPlayerDead() && audioSource != null && reelSound != null && AudioSettingsManager.IsSfxEnabled)
             {
                 audioSource.spatialBlend = 1.0f;
-                audioSource.volume = HarpoonReelVolume;
+                audioSource.volume = HarpoonReelVolume * AudioSettingsManager.SfxVolume;
                 audioSource.clip = reelSound;
                 audioSource.loop = true;
+                audioSource.pitch = (caughtShark != null) ? 0.82f : 1.0f;
                 audioSource.Play();
             }
         }
