@@ -1798,7 +1798,7 @@ public class MainMenuManager : MonoBehaviour
             btn.onClick.AddListener(PlayButtonSound);
             
             ButtonHoverEffect bhe = btn.gameObject.GetComponent<ButtonHoverEffect>();
-            if (bhe != null) Destroy(bhe);
+            if (bhe != null) SafeDestroy(bhe);
         }
     }
 
@@ -2517,7 +2517,7 @@ public class MainMenuManager : MonoBehaviour
         dot0Rt.localScale = Vector3.one;
 
         Button oldDot0Btn = dot0Obj.GetComponent<Button>();
-        if (oldDot0Btn != null) Destroy(oldDot0Btn);
+        if (oldDot0Btn != null) SafeDestroy(oldDot0Btn);
 
         Image dot0Img = dot0Obj.GetComponent<Image>() ?? dot0Obj.AddComponent<Image>();
         dot0Img.sprite = (currentLevelPage == 0) ? GetFilledPaginationSprite() : GetEmptyPaginationSprite();
@@ -2537,7 +2537,7 @@ public class MainMenuManager : MonoBehaviour
         dot1Rt.localScale = Vector3.one;
 
         Button oldDot1Btn = dot1Obj.GetComponent<Button>();
-        if (oldDot1Btn != null) Destroy(oldDot1Btn);
+        if (oldDot1Btn != null) SafeDestroy(oldDot1Btn);
 
         Image dot1Img = dot1Obj.GetComponent<Image>() ?? dot1Obj.AddComponent<Image>();
         dot1Img.sprite = (currentLevelPage == 1) ? GetFilledPaginationSprite() : GetEmptyPaginationSprite();
@@ -2821,7 +2821,7 @@ public class MainMenuManager : MonoBehaviour
             }
 
             ButtonHoverEffect hover = btnObj.GetComponent<ButtonHoverEffect>();
-            if (hover != null) Destroy(hover);
+            if (hover != null) SafeDestroy(hover);
 
             // Layer 1: Shiny Light Sunburst Aura (Rendered BEHIND icon, separated per scenario)
             Transform shinyTr = btnObj.transform.Find("ShinyLight");
@@ -3043,7 +3043,7 @@ public class MainMenuManager : MonoBehaviour
         }
 
         ButtonHoverEffect bhe = btn.gameObject.GetComponent<ButtonHoverEffect>();
-        if (bhe != null) Destroy(bhe);
+        if (bhe != null) SafeDestroy(bhe);
     }
 
     private void UpdateCloseButtonText(Button btn)
@@ -3083,7 +3083,7 @@ public class MainMenuManager : MonoBehaviour
 
         // Cleanup old row
         Transform oldRow = settingsPanel.transform.Find(rowName);
-        if (oldRow != null) Destroy(oldRow.gameObject);
+        if (oldRow != null) SafeDestroy(oldRow.gameObject);
 
         // Row Container
         GameObject row = new GameObject(rowName);
@@ -3143,7 +3143,7 @@ public class MainMenuManager : MonoBehaviour
         toggleBtn.transition = Selectable.Transition.None;
 
         ButtonHoverEffect bhe = btnObj.GetComponent<ButtonHoverEffect>();
-        if (bhe != null) Destroy(bhe);
+        if (bhe != null) SafeDestroy(bhe);
 
         // Text Child
         GameObject txtObj = new GameObject("Text");
@@ -3402,6 +3402,19 @@ public class MainMenuManager : MonoBehaviour
         if (volumeLabel != null)
         {
             volumeLabel.text = $"Volume: {Mathf.RoundToInt(value * 100)}%";
+        }
+    }
+
+    private static void SafeDestroy(UnityEngine.Object obj)
+    {
+        if (obj == null) return;
+        if (Application.isPlaying)
+        {
+            Destroy(obj);
+        }
+        else
+        {
+            DestroyImmediate(obj);
         }
     }
 }
