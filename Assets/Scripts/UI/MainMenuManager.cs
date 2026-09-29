@@ -1281,8 +1281,13 @@ public class MainMenuManager : MonoBehaviour
         rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.anchoredPosition = new Vector2(0, 0);
-        // Level_Selection_Modal.png is 15320x10166 (aspect ratio ~1.507)
-        rt.sizeDelta = new Vector2(860, 570);
+        float modalH = 570f;
+        float modalW = 860f;
+        if (modalSprite != null && modalSprite.rect.height > 0)
+        {
+            modalW = modalH * (modalSprite.rect.width / modalSprite.rect.height);
+        }
+        rt.sizeDelta = new Vector2(modalW, modalH);
 
         Image img = modalObj.GetComponent<Image>();
         if (img == null) img = modalObj.AddComponent<Image>();
@@ -2326,7 +2331,10 @@ public class MainMenuManager : MonoBehaviour
         AspectRatioFitter arf = bgObj.GetComponent<AspectRatioFitter>();
         if (arf == null) arf = bgObj.AddComponent<AspectRatioFitter>();
         arf.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
-        arf.aspectRatio = 16f / 9f;
+        if (bgSprite != null && bgSprite.rect.height > 0)
+            arf.aspectRatio = bgSprite.rect.width / bgSprite.rect.height;
+        else
+            arf.aspectRatio = 16f / 9f;
 
         bgObj.SetActive(true);
     }
@@ -2651,7 +2659,10 @@ public class MainMenuManager : MonoBehaviour
         AspectRatioFitter arf = bgObj.GetComponent<AspectRatioFitter>();
         if (arf == null) arf = bgObj.AddComponent<AspectRatioFitter>();
         arf.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
-        arf.aspectRatio = 16f / 9f; // 2400 / 1350 = 16:9
+        if (img != null && img.sprite != null && img.sprite.rect.height > 0)
+            arf.aspectRatio = img.sprite.rect.width / img.sprite.rect.height;
+        else
+            arf.aspectRatio = 16f / 9f;
     }
 
     public void EnsureLevelPageUI()

@@ -336,6 +336,13 @@ namespace Rhinotap
             bgRt.sizeDelta        = Vector2.zero;
             bgRt.anchoredPosition = Vector2.zero;
 
+            var bgArf = bgGo.AddComponent<AspectRatioFitter>();
+            bgArf.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+            if (bgSprite != null && bgSprite.rect.height > 0)
+                bgArf.aspectRatio = bgSprite.rect.width / bgSprite.rect.height;
+            else
+                bgArf.aspectRatio = 16f / 9f;
+
             // ── Layer 2: Semi-transparent dark overlay ────────────────────
             var overlayGo = new GameObject("DarkOverlay");
             overlayGo.transform.SetParent(canvasGo.transform, false);
@@ -347,7 +354,7 @@ namespace Rhinotap
             overlayRt.sizeDelta        = Vector2.zero;
             overlayRt.anchoredPosition = Vector2.zero;
 
-            // ── Layer 3: Brief modal card — enlarged to 880h for prominent presence ─
+            // ── Layer 3: Brief modal card ─────────────────────────────────
             modalRoot = new GameObject("BriefingModal");
             modalRoot.transform.SetParent(canvasGo.transform, false);
 
@@ -356,8 +363,8 @@ namespace Rhinotap
             modalRt.anchorMax        = new Vector2(0.5f, 0.5f);
             modalRt.pivot            = new Vector2(0.5f, 0.5f);
             
-            float modalH = 700f * scaleFactor;
-            float modalW = 1050f * scaleFactor;
+            float modalH = 700f;
+            float modalW = 1050f;
             if (modalSprite != null && modalSprite.rect.height > 0)
             {
                 modalW = modalH * (modalSprite.rect.width / modalSprite.rect.height);
@@ -378,20 +385,19 @@ namespace Rhinotap
             btnRt.anchorMax = new Vector2(0.5f, 0.5f);
             btnRt.pivot     = new Vector2(0.5f, 0.5f);
 
-            // Size: match the Continue_Button sprite aspect at 245×138 reference height
-            float btnH = 138f * scaleFactor;
-            float btnW = 245f * scaleFactor;
-            if (continueSprite != null)
+            float btnH = 138f;
+            float btnW = 245f;
+            if (continueSprite != null && continueSprite.rect.height > 0)
                 btnW = btnH * (continueSprite.rect.width / continueSprite.rect.height);
 
             btnRt.sizeDelta        = new Vector2(btnW, btnH);
-            btnRt.anchoredPosition = new Vector2(0f, -250f * scaleFactor);
+            btnRt.anchoredPosition = new Vector2(0f, -250f);
 
             var btnImg = btnGo.AddComponent<Image>();
             if (continueSprite != null)
             {
                 btnImg.sprite        = continueSprite;
-                btnImg.preserveAspect = false;
+                btnImg.preserveAspect = true;
             }
             else
             {

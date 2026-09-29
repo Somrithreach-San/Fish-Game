@@ -116,10 +116,10 @@ TextureImporter:
       name: Bubble_Button_0
       rect:
         serializedVersion: 2
-        x: 116
-        y: 129
-        width: 426
-        height: 427
+        x: 87
+        y: 97
+        width: 320
+        height: 321
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}

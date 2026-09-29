@@ -5593,9 +5593,9 @@ MonoBehaviour:
     distance: 100
     RepeatY: 1
     RepeatX: 1
-  oceanBackgroundSprite: {fileID: -8817985404318702229, guid: d6e83c4e8960f4b46ab21978a613f63f,
+  oceanBackgroundSprite: {fileID: 21300000, guid: d6e83c4e8960f4b46ab21978a613f63f,
     type: 3}
-  lakeBackgroundSprite: {fileID: 6595616757375163472, guid: 9b13bdabf75107c4ea6d3d0ce1e23297,
+  lakeBackgroundSprite: {fileID: 21300000, guid: 92c33e6a8a3b6f141b50be1e589cddd3,
     type: 3}
 --- !u!4 &60131825
 Transform:
@@ -372157,7 +372157,7 @@ SpriteRenderer:
   m_SortingLayer: -1
   m_SortingOrder: 0
   m_MaskInteraction: 0
-  m_Sprite: {fileID: -8817985404318702229, guid: d6e83c4e8960f4b46ab21978a613f63f,
+  m_Sprite: {fileID: 21300000, guid: d6e83c4e8960f4b46ab21978a613f63f,
     type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

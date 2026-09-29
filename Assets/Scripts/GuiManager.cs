@@ -1027,6 +1027,24 @@ public class GuiManager : Singleton<GuiManager>
             xImg.color = Color.white;
             totalW += xW + hlg.spacing;
         }
+        else
+        {
+            GameObject xObj = new GameObject("Sign_X");
+            xObj.transform.SetParent(rowObj.transform, false);
+            RectTransform xRt = xObj.AddComponent<RectTransform>();
+            float xW = xHeight * 0.85f;
+            xRt.sizeDelta = new Vector2(xW, xHeight);
+
+            Text xTxt = xObj.AddComponent<Text>();
+            xTxt.text = "x";
+            xTxt.font = Resources.GetBuiltinResource<Font>("Arial.ttf") ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            xTxt.fontSize = Mathf.RoundToInt(xHeight * 1.05f);
+            xTxt.fontStyle = FontStyle.Bold;
+            xTxt.alignment = TextAnchor.MiddleCenter;
+            xTxt.color = Color.white;
+            xTxt.raycastTarget = false;
+            totalW += xW + hlg.spacing;
+        }
 
         // 2. Multiplier Number Digits (from Texts/0.png..9.png)
         string numStr = multiplier.ToString();
@@ -2341,6 +2359,24 @@ public class GuiManager : Singleton<GuiManager>
             mImg.sprite = multSp;
             mImg.preserveAspect = true;
             mImg.raycastTarget = false;
+            totalWidth += mWidth + hlg.spacing;
+        }
+        else
+        {
+            GameObject mObj = new GameObject("MultSign");
+            mObj.transform.SetParent(popupObj.transform, false);
+            RectTransform mRt = mObj.AddComponent<RectTransform>();
+            float mWidth = multiplierHeight * 0.85f;
+            mRt.sizeDelta = new Vector2(mWidth, multiplierHeight);
+
+            Text mTxt = mObj.AddComponent<Text>();
+            mTxt.text = "x";
+            mTxt.font = Resources.GetBuiltinResource<Font>("Arial.ttf") ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            mTxt.fontSize = Mathf.RoundToInt(multiplierHeight * 1.05f);
+            mTxt.fontStyle = FontStyle.Bold;
+            mTxt.alignment = TextAnchor.MiddleCenter;
+            mTxt.color = Color.white;
+            mTxt.raycastTarget = false;
             totalWidth += mWidth + hlg.spacing;
         }
 
