@@ -5398,12 +5398,12 @@ MonoBehaviour:
   volumeSlider: {fileID: 616145480}
   volumeLabel: {fileID: 1201587293}
   playButton: {fileID: 485033489}
-  playButtonSprite: {fileID: 21300000, guid: f842a1bc36e7498db9c1234567890abc, type: 3}
+  playButtonSprite: {fileID: 21300000, guid: 6ea612efe3b43474c89fc3ff758702be, type: 3}
   settingsButton: {fileID: 227676128}
-  settingsButtonSprite: {fileID: 21300000, guid: b3cad6dd08328ff48a52a5d9294aaa9e,
+  settingsButtonSprite: {fileID: 21300000, guid: 5ad012402be0e054e9d9a0386113a342,
     type: 3}
   quitButton: {fileID: 320741581}
-  quitButtonSprite: {fileID: 21300000, guid: e1a74930b5c84d7289ef0123456789ab, type: 3}
+  quitButtonSprite: {fileID: 21300000, guid: 698214b16ecb2cd4ab3cde1bda823918, type: 3}
   backButton: {fileID: 531432583}
   musicToggleButton: {fileID: 0}
   musicLabel: {fileID: 0}
@@ -5418,24 +5418,22 @@ MonoBehaviour:
   customFont: {fileID: 0}
   buttonShape: {fileID: 933991700347911975, guid: 620f75073d56b574f9bba9217d1e19fe,
     type: 3}
-  menuModalSprite: {fileID: 21300000, guid: d5e89a12c4b7415286e11893c5d677a2, type: 3}
-  settingModalSprite: {fileID: 21300000, guid: a63d9da18c41b2e4e8fb92450d0af33b, type: 3}
-  closeButtonSprite: {fileID: 21300000, guid: a7c139b45e82491a92e629384bcda801, type: 3}
+  menuModalSprite: {fileID: 21300000, guid: d87a420ffe50e1d43a76d26370a2b1c1, type: 3}
+  settingModalSprite: {fileID: 21300000, guid: f71bca42e09c488796da5e4860b71ca4, type: 3}
+  closeButtonSprite: {fileID: 21300000, guid: b8d24ae57f93402ba3f730495cdeb912, type: 3}
   sliderTrackSprite: {fileID: 21300000, guid: a1b2c3d4e5f678901234567890123401, type: 3}
-  sliderFillSprite: {fileID: 21300000, guid: b1b2c3d4e5f678901234567890123401, type: 3}
+  sliderFillSprite: {fileID: 21300000, guid: a1b2c3d4e5f678901234567890123402, type: 3}
   sliderThumbSprite: {fileID: 21300000, guid: a1b2c3d4e5f678901234567890123403, type: 3}
   musicIconSprite: {fileID: 21300000, guid: 81a9c3d4e5f678901234567890abcdef, type: 3}
   sfxIconSprite: {fileID: 21300000, guid: 92a9c3d4e5f678901234567890abcdef, type: 3}
-  menuBackgroundSprite: {fileID: 21300000, guid: a14e4f867b085264b94dabcc7c81d83b,
-    type: 3}
+  menuBackgroundSprite: {fileID: 0}
   noTextBackgroundSprite: {fileID: 21300000, guid: 9d399b5be1e245eb94edb6c10122f1e6,
     type: 3}
   levelBackgroundSprite: {fileID: 21300000, guid: 3a2141f338bd4d27aa65d2a87bbc1061,
     type: 3}
   settingBackgroundSprite: {fileID: 21300000, guid: 4f8b80ca3de44fef8ad21d4840f3776f,
     type: 3}
-  levelSelectionModalSprite: {fileID: 21300000, guid: 52b62065b19ad9743b7cbdcd3bd0f3f5,
-    type: 3}
+  levelSelectionModalSprite: {fileID: 0}
   levelButtonSprites:
   - {fileID: 21300000, guid: b00a44eaf84079341be19021c06f09ae, type: 3}
   - {fileID: 21300000, guid: cb577c7c35e53754b873b8dc4225a64e, type: 3}
@@ -5447,16 +5445,16 @@ MonoBehaviour:
   - {fileID: 21300000, guid: bb2bbebd57190424297950d08f6513d2, type: 3}
   shinyLightSprite: {fileID: 21300000, guid: 8727fc50882ba7a4bb5d0afaf8eb6bdc, type: 3}
   uiAdditiveMaterial: {fileID: 2100000, guid: ac59bfbf72e054349b36cba24f979dd3, type: 2}
-  coralCoastModalSprite: {fileID: 7720392492148610170, guid: 3609b210ea2878b4ab09acbfa41c8711,
+  coralCoastModalSprite: {fileID: 21300000, guid: 4e9d729e981398d42a0f4d54a01a7f41,
     type: 3}
-  lostLakeModalSprite: {fileID: -3992228832228538920, guid: 1ce5de373ffcf9c48afadd290943abde,
+  lostLakeModalSprite: {fileID: 21300000, guid: e6e28e2f18e8a5e45ab2da719f76c325,
     type: 3}
-  oceanSelectionBgSprite: {fileID: -9049294949884316618, guid: 54f3a5aabe09e074aa51a48077baa32f,
+  oceanSelectionBgSprite: {fileID: 21300000, guid: f0e1263f67c98a34b8a6b29d10537c52,
     type: 3}
-  lakeSelectionBgSprite: {fileID: 6586266118852842537, guid: 258f2f3e7c14fd34da34ac5fe594219b,
+  lakeSelectionBgSprite: {fileID: 21300000, guid: 2386e5b81a545624e98eba6002baaf50,
     type: 3}
-  arrowLeftSprite: {fileID: 21300000, guid: 15451b287345c1f4cb09d3414658c92c, type: 3}
-  arrowRightSprite: {fileID: 21300000, guid: 8694a450d62d6e74f838e6c743cac4f4, type: 3}
+  arrowLeftSprite: {fileID: 21300000, guid: 1dc70c7e250fc1b43a1d5c4478269e06, type: 3}
+  arrowRightSprite: {fileID: 21300000, guid: 9b2a52249b1b83d4aba55a62fd0d33e3, type: 3}
   emptyPaginationSprite: {fileID: -1964341091275794787, guid: edbc4de2ba93e67459a0612f435dc543,
     type: 3}
   filledPaginationSprite: {fileID: -7123862974133818225, guid: eb24b7edd26bdcf409a13883edd5b2ca,

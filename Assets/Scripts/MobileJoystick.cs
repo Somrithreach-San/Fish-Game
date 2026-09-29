@@ -94,10 +94,17 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
         bool shouldShow = false;
 
         // Fix: Removed Input.touchSupported to prevent joystick from appearing on Desktop devices with touch screens
+#if UNITY_WEBGL && !UNITY_EDITOR
+        if (Application.isMobilePlatform)
+        {
+            shouldShow = true;
+        }
+#else
         if (Application.isMobilePlatform || SystemInfo.deviceType == DeviceType.Handheld)
         {
             shouldShow = true;
         }
+#endif
         else
         {
             // Desktop / Editor Logic

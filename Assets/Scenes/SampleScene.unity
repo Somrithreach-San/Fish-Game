@@ -89972,7 +89972,7 @@ SpriteRenderer:
   m_Size: {x: 55.47571, y: 28.935516}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
-  m_WasSpriteAssigned: 1
+  m_WasSpriteAssigned: 0
   m_SpriteSortPoint: 0
 --- !u!1 &544033284
 GameObject:
@@ -99843,7 +99843,7 @@ MonoBehaviour:
   warningIconSprite: {fileID: 21300000, guid: 9af516e639169494f8197c3f340fbbeb, type: 3}
   volumeSliderTrackSprite: {fileID: 21300000, guid: a1b2c3d4e5f678901234567890123401,
     type: 3}
-  volumeSliderFillSprite: {fileID: 21300000, guid: b1b2c3d4e5f678901234567890123401,
+  volumeSliderFillSprite: {fileID: 21300000, guid: a1b2c3d4e5f678901234567890123402,
     type: 3}
   sectionWidth: 60
   barHeight: 18
@@ -99857,12 +99857,16 @@ MonoBehaviour:
   gameOverModalSprite: {fileID: 0}
   tryAgainButtonSprite: {fileID: 0}
   backToMenuButtonSprite: {fileID: 0}
-  pausedModalSprite: {fileID: 0}
-  resumeButtonSprite: {fileID: 0}
-  restartButtonSprite: {fileID: 0}
-  levelCompletionModalSprite: {fileID: 0}
-  shortContinueButtonSprite: {fileID: 0}
-  shortRestartButtonSprite: {fileID: 0}
+  pausedModalSprite: {fileID: 21300000, guid: afadd59ab77520f469d7daeda629841c, type: 3}
+  resumeButtonSprite: {fileID: 21300000, guid: b7a09bbe4608e95449f0679f83a7feca, type: 3}
+  restartButtonSprite: {fileID: 21300000, guid: f683a67a91f8e6249a7e898d31810c91,
+    type: 3}
+  levelCompletionModalSprite: {fileID: 21300000, guid: 8f2080efa83bd2a4892a95a7acacbaeb,
+    type: 3}
+  shortContinueButtonSprite: {fileID: 21300000, guid: 21bdac3a72185884ba6b611cfbaeff60,
+    type: 3}
+  shortRestartButtonSprite: {fileID: 21300000, guid: e56eea32fdc50394c9ce10b6a14e44d7,
+    type: 3}
   messageFont: {fileID: 12800000, guid: 5ce6b23634ffd4b488437333b3deb3ca, type: 3}
   messageFontTmp: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   ScoreText: {fileID: 10042791}
@@ -139559,16 +139563,14 @@ MonoBehaviour:
   hazardScale: 0.5
   hazardSound: {fileID: 8300000, guid: e91d0d74377f1544693e17bb4c26e462, type: 3}
   hazardBubblePrefab: {fileID: 0}
-  boatSprite: {fileID: 1560245023475158953, guid: d0ecb318f6954fe8908e8af00abd2b63,
-    type: 3}
+  boatSprite: {fileID: 0}
   boatEngineSound: {fileID: 8300000, guid: 7260fb6d210330f4abd45fe830cd0f1c, type: 3}
   riverBoatEngineSound: {fileID: 8300000, guid: 24866fa09bdaf59489f9edab64e7036d,
     type: 3}
   oceanBoatEngineSound: {fileID: 8300000, guid: 8417211f76f1e86489147aeb675ed94d,
     type: 3}
   riverBoatPrefab: {fileID: 0}
-  riverBoatSprite: {fileID: 4293981290373354360, guid: 8e09bf181fee4ce4abb653e80e1c0cbe,
-    type: 3}
+  riverBoatSprite: {fileID: 0}
   harpoonPrefab: {fileID: 0}
   harpoonSprite: {fileID: 21300000, guid: a47b67814a09459ca223405781a93b4e, type: 3}
   harpoonShootSound: {fileID: 8300000, guid: a567522778a456b4881fbe48ae0692c5, type: 3}
@@ -372164,7 +372166,7 @@ SpriteRenderer:
   m_Size: {x: 49.120117, y: 25.645939}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
-  m_WasSpriteAssigned: 1
+  m_WasSpriteAssigned: 0
   m_SpriteSortPoint: 0
 --- !u!4 &1945109241
 Transform:
@@ -387157,7 +387159,10 @@ MonoBehaviour:
   swimSpeedRange: {x: 2.2, y: 2.8}
   undulationFrequency: 0.25
   undulationAmplitude: 0.008
-  pitchTiltAmplitude: 0.35
+  swimAnimFrequency: 0.35
+  swimAnimYawAmplitude: 5
+  swimAnimPitchAmplitude: 1
+  swimAnimYBobAmplitude: 0.04
   minSpawnInterval: 45
   maxSpawnInterval: 85
 --- !u!4 &2049290732

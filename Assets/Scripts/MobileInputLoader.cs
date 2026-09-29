@@ -15,25 +15,17 @@ public class MobileInputLoader : MonoBehaviour
         // Listen for Pause Event
         EventManager.StartListening<bool>("gamePaused", OnGamePaused);
 
-        bool isMobile = Application.isMobilePlatform;
-        
-        // Check SystemInfo for handheld devices (Robust check for WebGL/Desktop)
-        if (UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld)
-        {
-            isMobile = true;
-        }
+        bool isMobile = false;
 
-        // Check for Touch Support (Handles Simulator & Touch Devices)
-        if (!Application.isEditor && (Application.isMobilePlatform || UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld || UnityEngine.InputSystem.Touchscreen.current != null))
-        {
-            isMobile = true;
-        }
-        
-        // Extended check for Editor/Simulator
-        #if UNITY_EDITOR
-        // Only override if explicitly requested (allows desktop testing without joystick)
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // In WebGL, Application.isMobilePlatform evaluates browser userAgent for mobile devices.
+        // Never check Touchscreen.current on desktop browsers as touch-enabled laptops report it non-null.
+        isMobile = Application.isMobilePlatform;
+#elif UNITY_EDITOR
         if (simulateMobileInEditor) isMobile = true;
-        #endif
+#else
+        isMobile = Application.isMobilePlatform || UnityEngine.Device.SystemInfo.deviceType == DeviceType.Handheld;
+#endif
         
         if (isMobile)
         {

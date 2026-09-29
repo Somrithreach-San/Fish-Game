@@ -119,8 +119,16 @@ namespace Rhinotap
                     }
                     if (best != null) return best;
                 }
+
+                // Fallback: load as Texture2D and create sprite dynamically
+                Texture2D tex = Resources.Load<Texture2D>(path);
+                if (tex != null)
+                {
+                    return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+                }
             }
 
+#if UNITY_EDITOR
             // Disk fallback: read raw PNG directly if asset database hasn't imported it yet
             if (!string.IsNullOrEmpty(assetDbPath))
             {
@@ -141,6 +149,7 @@ namespace Rhinotap
                 }
                 catch { }
             }
+#endif
 
             return null;
         }
@@ -154,36 +163,38 @@ namespace Rhinotap
             string[] possiblePaths = new string[]
             {
                 $"LevelBriefs/{prefix}_Level_{levelNumber}_Brief_Modal",
+                $"LevelBriefs/{prefix}_Level {levelNumber}_Brief_Modal",
                 $"LevelBriefs/{prefix}_Level_{levelNumber}",
                 $"LevelBriefs/{altPrefix}_Level_{levelNumber}_Brief_Modal",
-                $"LevelBriefs/Level_{levelNumber}_Brief_Modal",
-                $"LevelSelection/{prefix}_Level_Selection_Modal"
+                $"LevelBriefs/Level_{levelNumber}_Brief_Modal"
             };
 
             string[] possibleEditorPaths = new string[]
             {
-                $"Assets/Graphics/GUI Components/{prefix}_Level_{levelNumber}_Brief_Modal.png",
                 $"Assets/Resources/LevelBriefs/{prefix}_Level_{levelNumber}_Brief_Modal.png",
-                $"Assets/Graphics/GUI Components/{prefix}_Level {levelNumber}_Brief_Modal.png",
+                $"Assets/Graphics/GUI Components/{prefix}_Level_{levelNumber}_Brief_Modal.png",
                 $"Assets/Resources/LevelBriefs/{prefix}_Level {levelNumber}_Brief_Modal.png",
-                $"Assets/Graphics/GUI Components/{altPrefix}_Level_{levelNumber}_Brief_Modal.png",
+                $"Assets/Graphics/GUI Components/{prefix}_Level {levelNumber}_Brief_Modal.png",
                 $"Assets/Resources/LevelBriefs/{altPrefix}_Level_{levelNumber}_Brief_Modal.png",
-                $"Assets/Graphics/GUI Components/Level_{levelNumber}_Brief_Modal.png",
-                $"Assets/Resources/LevelBriefs/Level_{levelNumber}_Brief_Modal.png"
+                $"Assets/Graphics/GUI Components/{altPrefix}_Level_{levelNumber}_Brief_Modal.png",
+                $"Assets/Resources/LevelBriefs/Level_{levelNumber}_Brief_Modal.png",
+                $"Assets/Graphics/GUI Components/Level_{levelNumber}_Brief_Modal.png"
             };
 
             Sprite modalSprite = null;
-            foreach (var ep in possibleEditorPaths)
+            for (int i = 0; i < possiblePaths.Length; i++)
             {
-                modalSprite = LoadSpriteSafe(null, ep);
+                string rPath = possiblePaths[i];
+                string ePath = (i < possibleEditorPaths.Length) ? possibleEditorPaths[i] : null;
+                modalSprite = LoadSpriteSafe(rPath, ePath);
                 if (modalSprite != null) break;
             }
 
             if (modalSprite == null)
             {
-                foreach (var mp in possiblePaths)
+                for (int i = 0; i < possibleEditorPaths.Length; i++)
                 {
-                    modalSprite = LoadSpriteSafe(mp);
+                    modalSprite = LoadSpriteSafe(null, possibleEditorPaths[i]);
                     if (modalSprite != null) break;
                 }
             }
