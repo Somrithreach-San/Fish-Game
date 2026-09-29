@@ -216,9 +216,11 @@ namespace Rhinotap.Toolkit
             if (lakeBackgroundSprite != null) return lakeBackgroundSprite;
             if (cachedLakeSprite != null) return cachedLakeSprite;
 
-            cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Lost_Lake_BG.png");
+            cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Lost_Lake.png");
+            if (cachedLakeSprite == null) cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Lost_Lake_BG.png");
             if (cachedLakeSprite == null) cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/river_background.png");
             if (cachedLakeSprite == null) cachedLakeSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Game_bg_lake.png");
+            if (cachedLakeSprite == null) cachedLakeSprite = Resources.Load<Sprite>("river_background");
 
             return cachedLakeSprite;
         }
@@ -231,6 +233,7 @@ namespace Rhinotap.Toolkit
             cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Coral_Coast_BG.png");
             if (cachedOceanSprite == null) cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/ocean_background.png");
             if (cachedOceanSprite == null) cachedOceanSprite = LoadSpriteAsset("Assets/Graphics/Backgrounds/Game_bg_ocean.png");
+            if (cachedOceanSprite == null) cachedOceanSprite = Resources.Load<Sprite>("ocean_background");
             if (cachedOceanSprite == null) cachedOceanSprite = Resources.Load<Sprite>("game_bg");
 
             return cachedOceanSprite;
@@ -271,26 +274,13 @@ namespace Rhinotap.Toolkit
                             Debug.LogWarning($"[Parallax] Could not load {(isLake ? "Lake" : "Ocean")} background sprite for Level {LevelManager.CurrentLevel}");
                         }
                     }
+
+                    // Toggle ocean-specific background elements (e.g. Whale_Background_Elements) on all instances & grid tiles
+                    items[i].SetWhaleElementsActive(!isLake);
                 }
             }
 
-            // Toggle ocean-specific background occluders (e.g. Whale_Background_Elements)
-            if (items != null)
-            {
-                for (int i = 0; i < items.Length; i++)
-                {
-                    if (items[i] != null && items[i].Item != null)
-                    {
-                        Transform whaleElem = items[i].Item.transform.Find("Whale_Background_Elements");
-                        if (whaleElem != null)
-                        {
-                            whaleElem.gameObject.SetActive(!isLake);
-                        }
-                    }
-                }
-            }
-
-            // Remove/hide ocean reef elements from river levels and enable river elements
+            // Remove/hide ocean reef elements and Whale_Background_Elements from river/lake levels and enable river elements
             SetOceanReefElementsActive(!isLake);
             SetRiverElementsActive(isLake);
 
@@ -373,6 +363,16 @@ namespace Rhinotap.Toolkit
                     else if (root.name.Contains("OceanReef") || root.name.StartsWith("Reef_") || root.name.Contains("Clam") || root.name.StartsWith("Ocean_") || root.name.Contains("Coral_Coast_element") || root.name.Contains("Whale_Background_Elements"))
                     {
                         root.SetActive(active);
+                    }
+
+                    // Recursively ensure all child Whale_Background_Elements across all scene hierarchies are toggled correctly
+                    Transform[] allChilds = root.GetComponentsInChildren<Transform>(true);
+                    foreach (var t in allChilds)
+                    {
+                        if (t.name.Contains("Whale_Background_Elements") || t.name.Contains("Whale_Background"))
+                        {
+                            t.gameObject.SetActive(active);
+                        }
                     }
                 }
             }
@@ -547,6 +547,39 @@ namespace Rhinotap.Toolkit
 
         public GameObject Item => item;
 
+        public void SetWhaleElementsActive(bool active)
+        {
+            if (item != null)
+            {
+                Transform[] childs = item.GetComponentsInChildren<Transform>(true);
+                foreach (var t in childs)
+                {
+                    if (t.gameObject != item && (t.name.Contains("Whale_Background_Elements") || t.name.Contains("Whale_Background")))
+                    {
+                        t.gameObject.SetActive(active);
+                    }
+                }
+            }
+
+            if (items != null)
+            {
+                for (int i = 0; i < items.Length; i++)
+                {
+                    if (items[i] != null)
+                    {
+                        Transform[] childs = items[i].GetComponentsInChildren<Transform>(true);
+                        foreach (var t in childs)
+                        {
+                            if (t.gameObject != items[i] && (t.name.Contains("Whale_Background_Elements") || t.name.Contains("Whale_Background")))
+                            {
+                                t.gameObject.SetActive(active);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         public void UpdateSprite(Sprite newSprite)
         {
             if (newSprite == null) return;
@@ -579,6 +612,60 @@ namespace Rhinotap.Toolkit
                             sr.sprite = newSprite;
                         }
                     }
+                }
+                UpdateGridPositions();
+            }
+        }
+
+        private void UpdateGridPositions()
+        {
+            if (items == null || items.Length != 9) return;
+            string[] posNames = new string[] { "TL", "TM", "TR", "ML", "MM", "MR", "BL", "BM", "BR" };
+            for (int i = 0; i < 9; i++)
+            {
+                if (items[i] != null)
+                {
+                    Vector3 pos = Vector3.zero;
+                    switch (posNames[i])
+                    {
+                        case "TL":
+                            pos.x = imgOriginalPos.x - width;
+                            pos.y = imgOriginalPos.y + height;
+                            break;
+                        case "TM":
+                            pos.x = imgOriginalPos.x;
+                            pos.y = imgOriginalPos.y + height;
+                            break;
+                        case "TR":
+                            pos.x = imgOriginalPos.x + width;
+                            pos.y = imgOriginalPos.y + height;
+                            break;
+                        case "ML":
+                            pos.x = imgOriginalPos.x - width;
+                            pos.y = imgOriginalPos.y;
+                            break;
+                        case "MM":
+                            pos.x = imgOriginalPos.x;
+                            pos.y = imgOriginalPos.y;
+                            break;
+                        case "MR":
+                            pos.x = imgOriginalPos.x + width;
+                            pos.y = imgOriginalPos.y;
+                            break;
+                        case "BL":
+                            pos.x = imgOriginalPos.x - width;
+                            pos.y = imgOriginalPos.y - height;
+                            break;
+                        case "BM":
+                            pos.x = imgOriginalPos.x;
+                            pos.y = imgOriginalPos.y - height;
+                            break;
+                        case "BR":
+                            pos.x = imgOriginalPos.x + width;
+                            pos.y = imgOriginalPos.y - height;
+                            break;
+                    }
+                    items[i].transform.localPosition = pos;
                 }
             }
         }

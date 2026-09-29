@@ -427,18 +427,15 @@ public class FishAI : MonoBehaviour
             }
         }
 
-        // 4. Vertical Bounds Constraint (Identical to PlayerController)
-        // Fishes can reach the very top and very bottom edges just like the player.
-        Camera cam = Camera.main;
-        float camHalfH = cam != null ? cam.orthographicSize : 14f;
-        Vector3 camP = cam != null ? cam.transform.position : Vector3.zero;
-        float vMargin = 0.25f; // Identical 0.25f margin to PlayerController
+        // 4. Vertical Bounds Constraint — use fixed world-space bounds, NOT camera position.
+        // Using camera.y caused fish to be pushed up/down whenever the camera moved vertically.
+        float vMargin = 0.25f;
 
-        currentMaxY = camP.y + camHalfH - vMargin;
-        currentMinY = camP.y - camHalfH + vMargin;
+        float floorY   = RiverBoat.BoundsCached ? RiverBoat.GlobalFloorY   + vMargin : -13.75f;
+        float surfaceY = RiverBoat.BoundsCached ? RiverBoat.GlobalSurfaceY - vMargin :  13.75f;
 
-        float floorY = currentMinY;
-        float surfaceY = currentMaxY;
+        currentMinY = floorY;
+        currentMaxY = surfaceY;
 
         Vector2 pos2D = transform.position;
         if (pos2D.y >= currentMaxY)

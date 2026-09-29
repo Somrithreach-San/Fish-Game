@@ -586,13 +586,14 @@ public class HungrySharkFishAI : MonoBehaviour
 
     private Vector2 ApplyWaterBoundsConstraint(Vector2 currentVector)
     {
-        Camera cam = Camera.main;
-        float camHalfH = cam != null ? cam.orthographicSize : 11f;
-        Vector3 camP = cam != null ? cam.transform.position : Vector3.zero;
-        float vMargin = 0.25f; // Identical 0.25f margin to PlayerController
+        // Use fixed world-space water bounds, NOT camera position.
+        // Using camera.y caused fish to be pushed up/down whenever the camera moved vertically.
+        float vMargin = 0.25f;
+        float floorY   = RiverBoat.BoundsCached ? RiverBoat.GlobalFloorY   + vMargin : -13.75f;
+        float surfaceY = RiverBoat.BoundsCached ? RiverBoat.GlobalSurfaceY - vMargin :  13.75f;
 
-        float maxY = camP.y + camHalfH - vMargin;
-        float minY = camP.y - camHalfH + vMargin;
+        float maxY = surfaceY;
+        float minY = floorY;
 
         Vector2 steer = currentVector;
         if (transform.position.y >= maxY)
@@ -712,13 +713,14 @@ public class HungrySharkFishAI : MonoBehaviour
 
         Vector2 executionStep = currentMoveDirection * currentSpeed;
 
-        Camera cam = Camera.main;
-        float camHalfH = cam != null ? cam.orthographicSize : 11f;
-        Vector3 camP = cam != null ? cam.transform.position : Vector3.zero;
+        // Use fixed world-space water bounds, NOT camera position.
+        // Using camera.y caused fish to be pushed up/down whenever the camera moved vertically.
         float vMargin = 0.25f; // Identical 0.25f margin to PlayerController
+        float floorY   = RiverBoat.BoundsCached ? RiverBoat.GlobalFloorY   + vMargin : -13.75f;
+        float surfaceY = RiverBoat.BoundsCached ? RiverBoat.GlobalSurfaceY - vMargin :  13.75f;
 
-        float maxY = camP.y + camHalfH - vMargin;
-        float minY = camP.y - camHalfH + vMargin;
+        float maxY = surfaceY;
+        float minY = floorY;
 
         Vector2 pos = (rb != null) ? rb.position : (Vector2)transform.position;
         Vector2 vel = executionStep;
@@ -784,14 +786,13 @@ public class HungrySharkFishAI : MonoBehaviour
         float horizontalDir = (Random.value < 0.75f) ? currentSign : -currentSign;
 
         float verticalVariance = Random.Range(-0.25f, 0.25f);
-        Camera cam = Camera.main;
-        if (cam != null)
-        {
-            float halfH = cam.orthographicSize;
-            Vector3 camP = cam.transform.position;
-            if (transform.position.y >= camP.y + halfH - 0.5f && verticalVariance > 0f) verticalVariance = -0.1f;
-            else if (transform.position.y <= camP.y - halfH + 0.5f && verticalVariance < 0f) verticalVariance = 0.1f;
-        }
+        // Use fixed world-space water bounds, NOT camera position.
+        // Using camera.y caused fish to be pushed up/down whenever the camera moved vertically.
+        float vMargin = 0.5f;
+        float floorY   = RiverBoat.BoundsCached ? RiverBoat.GlobalFloorY   + vMargin : -13.5f;
+        float surfaceY = RiverBoat.BoundsCached ? RiverBoat.GlobalSurfaceY - vMargin :  13.5f;
+        if (transform.position.y >= surfaceY && verticalVariance > 0f) verticalVariance = -0.1f;
+        else if (transform.position.y <= floorY && verticalVariance < 0f) verticalVariance = 0.1f;
 
         wanderDirection = new Vector2(horizontalDir, verticalVariance).normalized;
         changeWanderTimer = Random.Range(3.5f, 7.0f);

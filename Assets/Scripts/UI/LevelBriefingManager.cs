@@ -391,7 +391,7 @@ namespace Rhinotap
                 btnW = btnH * (continueSprite.rect.width / continueSprite.rect.height);
 
             btnRt.sizeDelta        = new Vector2(btnW, btnH);
-            btnRt.anchoredPosition = new Vector2(0f, -250f);
+            btnRt.anchoredPosition = new Vector2(0f, -220f);
 
             var btnImg = btnGo.AddComponent<Image>();
             if (continueSprite != null)
