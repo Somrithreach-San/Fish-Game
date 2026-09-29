@@ -119,10 +119,22 @@ public class InkScreenOverlay : MonoBehaviour
         inkOverlayImage = imageObj.AddComponent<RawImage>();
 
         // Material with custom liquid ink shader
-        Shader inkShader = Shader.Find("Custom/ScreenInkOverlay");
-        if (inkShader != null)
+        Material loadedMat = Resources.Load<Material>("ScreenInkMaterial");
+        if (loadedMat != null)
         {
-            inkMaterial = new Material(inkShader);
+            inkMaterial = new Material(loadedMat);
+        }
+        else
+        {
+            Shader inkShader = Shader.Find("Custom/ScreenInkOverlay");
+            if (inkShader != null)
+            {
+                inkMaterial = new Material(inkShader);
+            }
+        }
+
+        if (inkMaterial != null)
+        {
             inkOverlayImage.material = inkMaterial;
         }
 
@@ -257,16 +269,31 @@ public class InkScreenOverlay : MonoBehaviour
                 }
 
                 // Channel Encoding:
-                // R: Base ink thickness
-                // G: Specular wet rim
-                // B: Droplets
-                // A: Overall silhouette
-                pixels[y * width + x] = new Color(
-                    totalDensity,
-                    Mathf.Clamp01(rimGlow * totalDensity),
-                    Mathf.Clamp01(dropletSum),
-                    Mathf.Clamp01(totalDensity * 1.1f)
-                );
+                // If custom shader is present:
+                //   R: Base ink thickness
+                //   G: Specular wet rim
+                //   B: Droplets
+                //   A: Overall silhouette
+                // If fallback (no shader):
+                //   Bake actual rich dark squid ink RGBA directly so it never renders as raw red debug channels!
+                if (inkMaterial != null && inkMaterial.shader != null && inkMaterial.shader.name == "Custom/ScreenInkOverlay")
+                {
+                    pixels[y * width + x] = new Color(
+                        totalDensity,
+                        Mathf.Clamp01(rimGlow * totalDensity),
+                        Mathf.Clamp01(dropletSum),
+                        Mathf.Clamp01(totalDensity * 1.1f)
+                    );
+                }
+                else
+                {
+                    // Fallback: Rich, dark oceanic squid ink (deep black-purple with translucent edges)
+                    Color inkCore = new Color(0.05f, 0.03f, 0.09f, 1f);
+                    Color rimColor = new Color(0.25f, 0.18f, 0.38f, 1f);
+                    Color bakedColor = Color.Lerp(inkCore, rimColor, rimGlow * 0.5f);
+                    bakedColor.a = Mathf.Clamp01(totalDensity * 0.94f);
+                    pixels[y * width + x] = bakedColor;
+                }
             }
         }
 

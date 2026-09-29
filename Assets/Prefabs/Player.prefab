@@ -190,7 +190,7 @@ MonoBehaviour:
   eatSprite: {fileID: 3506977402362681640, guid: 797cf22f5d8c0a84c9b2602ce0b3998c,
     type: 3}
   levelScales:
-  - 0.26
+  - 0.3
   - 0.43
   - 0.58
   - 0.74

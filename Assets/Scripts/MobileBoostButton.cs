@@ -90,13 +90,14 @@ public class MobileBoostButton : MonoBehaviour, IPointerDownHandler, IPointerUpH
                 iconRt.pivot = new Vector2(0.5f, 0.5f);
                 iconRt.anchoredPosition = Vector2.zero; // Perfectly center in button
                 
-                // Sized proportionally like the joystick handle (40% of button size: 100px for a 250px button)
-                float iconSize = targetSize * 0.40f;
+                // Sized prominently for clear visibility on mobile (62% of button size: ~136px for a 220px button)
+                float iconSize = targetSize * 0.62f;
                 iconRt.sizeDelta = new Vector2(iconSize, iconSize);
 
                 iconImage = iconRt.GetComponent<Image>();
                 if (iconImage != null)
                 {
+                    iconImage.preserveAspect = true;
                     iconImage.color = iconIdleColor;
                 }
             }

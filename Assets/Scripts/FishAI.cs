@@ -275,7 +275,7 @@ public class FishAI : MonoBehaviour
             Vector2 organicDrift = new Vector2(driftX, driftY);
 
             Vector2 slotOffset = fishData.formationOffset;
-            if (!school.MovingRight) slotOffset.x = -Mathf.Abs(slotOffset.x);
+            if (school.MovingRight) slotOffset.x = -Mathf.Abs(slotOffset.x);
             else slotOffset.x = Mathf.Abs(slotOffset.x);
 
             Vector2 idealSlotPos = schoolCenter + slotOffset + organicDrift;

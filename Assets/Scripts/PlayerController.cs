@@ -86,7 +86,7 @@ public class PlayerController : MonoBehaviour
     [Header("Manual Level Scaling")]
     [Tooltip("Define exact scale for each level in Ocean levels (Index 0 = Level 1, Index 1 = Level 2, etc.)")]
     [SerializeField]
-    private float[] levelScales = new float[] { 0.26f, 0.43f, 0.58f, 0.74f, 1.00f, 1.35f };
+    private float[] levelScales = new float[] { 0.30f, 0.43f, 0.58f, 0.74f, 1.00f, 1.35f };
 
     [Tooltip("Define exact scale for each level in River levels")]
     [SerializeField]

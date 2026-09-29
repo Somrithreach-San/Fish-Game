@@ -829,11 +829,9 @@ public class Fish : MonoBehaviour
 
         if (cachedPlayerTransform != null)
         {
-            // OPTIMIZATION: Use sqrMagnitude to avoid expensive square root calculation
+            // Clean up fish only if they wander far outside active arena (> 60 units) after ample lifetime (>= 15s)
             float distSqr = (transform.position - cachedPlayerTransform.position).sqrMagnitude;
-            
-            // Clean up fish that wander far from player (> 20f, 20*20 = 400) once alive for at least 2.0s
-            if (distSqr > 400f && Time.time - SpawnTime >= 2.0f) 
+            if (distSqr > 3600f && Time.time - SpawnTime >= 15.0f) 
             {
                 DespawnSelf();
                 return;

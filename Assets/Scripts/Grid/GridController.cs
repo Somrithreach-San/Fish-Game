@@ -1208,16 +1208,16 @@ public class GridController : MonoBehaviour
         if (_cam == null) return false;
         
         Bounds viewBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 4f, _camHeight + 4f, 100f));
-        Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 10f, _camHeight + 10f, 100f));
+        Bounds distantBounds = new Bounds(new Vector3(_camPos.x, _camPos.y, 0), new Vector3(_camWidth + 24f, _camHeight + 20f, 100f));
 
-        // 1. Universal Cleanup: any fish that wandered outside distant bounds (5 units off-screen)
-        // Despawn ALL of them immediately to ensure old fish clean up promptly
+        // 1. Universal Cleanup: any fish that wandered far outside distant bounds (12 units off-screen)
+        // Only despawn after fish has had ample time (>= 10s) to traverse
         bool culledAny = false;
         for (int i = Fish.AllFish.Count - 1; i >= 0; i--)
         {
             Fish fish = Fish.AllFish[i];
             if (fish == null || fish.IsDead) continue;
-            if (!distantBounds.Contains(fish.transform.position) && Time.time - fish.SpawnTime >= 1.5f)
+            if (!distantBounds.Contains(fish.transform.position) && Time.time - fish.SpawnTime >= 10.0f)
             {
                 fish.DespawnSelf();
                 culledAny = true;
@@ -1226,7 +1226,7 @@ public class GridController : MonoBehaviour
         if (culledAny && !forceRecycle) return true;
 
         // 2. Proactive Danger Fish Culling:
-        // If active danger fish exceed 3 or >= 18% of the active fish, cull off-screen danger fish to guarantee space for eatable prey
+        // If active danger fish exceed 3 or >= 18% of the active fish, cull off-screen danger fish that have had ample time (>= 10s)
         int activeEatable = 0;
         int activeDanger = 0;
         for (int i = 0; i < Fish.AllFish.Count; i++)
@@ -1244,7 +1244,7 @@ public class GridController : MonoBehaviour
             {
                 Fish fish = Fish.AllFish[i];
                 if (fish == null || fish.IsDead) continue;
-                if (fish.Level > playerLevel && Time.time - fish.SpawnTime >= 2.0f && !viewBounds.Contains(fish.transform.position))
+                if (fish.Level > playerLevel && Time.time - fish.SpawnTime >= 10.0f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
@@ -1255,24 +1255,24 @@ public class GridController : MonoBehaviour
         // 3. Population Full Recycle:
         if (forceRecycle)
         {
-            // First priority: recycle off-screen fish smaller than player level
+            // First priority: recycle off-screen fish smaller than player level that have completed their pass (>= 8s)
             for (int i = 0; i < Fish.AllFish.Count; i++)
             {
                 Fish fish = Fish.AllFish[i];
                 if (fish == null) continue;
-                if (fish.Level < playerLevel && Time.time - fish.SpawnTime >= 2.5f && !viewBounds.Contains(fish.transform.position))
+                if (fish.Level < playerLevel && Time.time - fish.SpawnTime >= 8.0f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
                 }
             }
 
-            // Second priority: recycle any eligible off-screen fish
+            // Second priority: recycle any eligible off-screen fish that have had ample time (>= 10s)
             for (int i = 0; i < Fish.AllFish.Count; i++)
             {
                 Fish fish = Fish.AllFish[i];
                 if (fish == null) continue;
-                if (Time.time - fish.SpawnTime >= 3.0f && !viewBounds.Contains(fish.transform.position))
+                if (Time.time - fish.SpawnTime >= 10.0f && !viewBounds.Contains(fish.transform.position))
                 {
                     fish.DespawnSelf();
                     return true;
