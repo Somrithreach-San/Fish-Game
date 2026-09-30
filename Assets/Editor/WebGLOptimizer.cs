@@ -180,20 +180,32 @@ public class WebGLOptimizer : EditorWindow
                     changed = true;
                 }
 
-                // Load in Background (helps startup time)
-                if (!importer.loadInBackground)
+                // In WebGL, background loading of FSB causes "Failed getting load state of FSB for audio clip"
+                if (importer.loadInBackground)
                 {
-                    importer.loadInBackground = true;
+                    importer.loadInBackground = false;
                     changed = true;
                 }
 
-                // WebGL Override
-                AudioImporterSampleSettings settings = importer.GetOverrideSampleSettings("WebGL");
-                if (settings.loadType != AudioClipLoadType.CompressedInMemory || settings.compressionFormat != AudioCompressionFormat.Vorbis)
+                // Default settings: Preload audio data
+                AudioImporterSampleSettings def = importer.defaultSampleSettings;
+                if (!def.preloadAudioData)
                 {
-                    settings.loadType = AudioClipLoadType.CompressedInMemory; // Best for WebGL RAM usage
+                    def.preloadAudioData = true;
+                    importer.defaultSampleSettings = def;
+                    changed = true;
+                }
+
+                // WebGL Override: Must use DecompressOnLoad to avoid FMOD_OPENMEMORY_POINT errors on WebGL
+                AudioImporterSampleSettings settings = importer.GetOverrideSampleSettings("WebGL");
+                if (settings.loadType != AudioClipLoadType.DecompressOnLoad || 
+                    settings.compressionFormat != AudioCompressionFormat.Vorbis || 
+                    !settings.preloadAudioData)
+                {
+                    settings.loadType = AudioClipLoadType.DecompressOnLoad; // Required for WebGL FMOD compatibility
                     settings.compressionFormat = AudioCompressionFormat.Vorbis;
                     settings.quality = 0.7f; // Good balance
+                    settings.preloadAudioData = true;
                     importer.SetOverrideSampleSettings("WebGL", settings);
                     changed = true;
                 }
